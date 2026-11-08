@@ -27,7 +27,9 @@ import 'package:video_player/video_player.dart';
 
 import '../core/api.dart';
 import '../core/danmaku.dart';
+import '../core/desktop_window.dart';
 import '../core/download.dart';
+import '../core/layout.dart';
 import '../core/platform.dart';
 import '../core/history.dart';
 import '../core/models.dart';
@@ -144,11 +146,53 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   void initState() {
     super.initState();
+    // 原生侧按 Esc 退出全屏时只改了窗口，Dart 的 _fullscreen 还是 true，
+    // 界面会停在全屏布局里出不去。订阅通知把两边状态对齐。
+    desktopFullscreen.addListener(_onNativeFullscreenChanged);
+    // 桌面快捷键必须走全局监听，不能用 Focus(autofocus)。
+    //
+    // 实测：焦点一旦被页面里的按钮抢走（点过一次进度条、选集、下载都算），
+    // Focus 子树就收不到按键了，表现为「F 键/空格/方向键全都没反应」，
+    // 而点界面上的全屏按钮却正常——问题在焦点，不在原生通道。
+    // HardwareKeyboard 的 handler 挂在引擎层，与焦点无关。
+    if (isDesktop) {
+      HardwareKeyboard.instance.addHandler(_onGlobalKey);
+    }
     _resolve();
+  }
+
+  /// 全局按键处理：返回 true 表示已消费，不再向下传递。
+  bool _onGlobalKey(KeyEvent e) {
+    // 页面上没有文本输入框，但仍要防一手：焦点在可编辑控件时
+    // 不要把空格/方向键吃掉，否则以后加搜索框会无法输入。
+    final focused = FocusManager.instance.primaryFocus?.context;
+    if (focused != null) {
+      final w = focused.widget;
+      if (w is EditableText) return false;
+    }
+    return _onKey(null, e) == KeyEventResult.handled;
+  }
+
+  /// 原生（窗口）侧的全屏状态回调
+  void _onNativeFullscreenChanged() {
+    if (!mounted) return;
+    final native = desktopFullscreen.value;
+    if (!native && _fullscreen) {
+      setState(() {
+        _fullscreen = false;
+        _showEpisodes = false;
+        _showSources = false;
+        _showCtrl = true;
+      });
+    }
   }
 
   @override
   void dispose() {
+    desktopFullscreen.removeListener(_onNativeFullscreenChanged);
+    if (isDesktop) {
+      HardwareKeyboard.instance.removeHandler(_onGlobalKey);
+    }
     _histTimer?.cancel();
     _countdownTimer?.cancel();
     _noticeTimer?.cancel();
@@ -159,6 +203,82 @@ class _PlayerPageState extends State<PlayerPage> {
       _restoreOrientation();
     }
     super.dispose();
+  }
+
+  // ---------------- 桌面键盘快捷键 ----------------
+  //
+  // 桌面用户看视频的习惯是手放在键盘上：空格暂停、左右快退快进、
+  // 上下调音量、F 全屏、Esc 退出。做不到这些，桌面版就只是个
+  // 「能播放的窗口」，鼠标来回点进度条很别扭。
+
+  KeyEventResult _onKey(FocusNode? node, KeyEvent e) {
+    if (e is! KeyDownEvent && e is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final c = _ctrl;
+    final k = e.logicalKey;
+
+    // 全屏时 Esc 由原生 WM_KEYDOWN 接管（会退出窗口全屏并回调），
+    // 这里不再重复处理，避免一次按键退两次。
+    if (k == LogicalKeyboardKey.escape) {
+      if (_fullscreen) return KeyEventResult.handled;
+      if (_showEpisodes || _showSources) {
+        setState(() {
+          _showEpisodes = false;
+          _showSources = false;
+        });
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    if (k == LogicalKeyboardKey.space) {
+      if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
+      c.value.isPlaying ? c.pause() : c.play();
+      setState(() => _showCtrl = true);
+      return KeyEventResult.handled;
+    }
+
+    if (k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.arrowRight) {
+      if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
+      // Shift + 方向键步子更大，和主流播放器一致
+      final big = HardwareKeyboard.instance.isShiftPressed;
+      final step = Duration(seconds: big ? 30 : 10);
+      final fwd = k == LogicalKeyboardKey.arrowRight;
+      final total = c.value.duration;
+      var target = c.value.position + (fwd ? step : -step);
+      if (target < Duration.zero) target = Duration.zero;
+      if (target > total) target = total;
+      c.seekTo(target);
+      _showNotice(fwd ? '快进 ${big ? 30 : 10} 秒' : '快退 ${big ? 30 : 10} 秒');
+      setState(() => _showCtrl = true);
+      return KeyEventResult.handled;
+    }
+
+    if (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.arrowDown) {
+      if (c == null) return KeyEventResult.ignored;
+      final up = k == LogicalKeyboardKey.arrowUp;
+      final v = (c.value.volume + (up ? 0.1 : -0.1)).clamp(0.0, 1.0);
+      c.setVolume(v);
+      _showNotice('音量 ${(v * 100).round()}%');
+      setState(() => _showCtrl = true);
+      return KeyEventResult.handled;
+    }
+
+    if (k == LogicalKeyboardKey.keyF) {
+      _toggleFullscreen();
+      return KeyEventResult.handled;
+    }
+
+    if (k == LogicalKeyboardKey.keyM) {
+      if (c == null) return KeyEventResult.ignored;
+      final mute = c.value.volume > 0;
+      c.setVolume(mute ? 0 : 1.0);
+      _showNotice(mute ? '静音' : '取消静音');
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
   }
 
   /// 释放旧播放器（换源/重新解析前必须调用，否则会泄漏解码器）
@@ -653,6 +773,13 @@ class _PlayerPageState extends State<PlayerPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 键盘监听不走 Focus 子树，改由 initState 里注册的
+    // HardwareKeyboard handler 接管（原因见那边的注释）。
+    // 这里保持纯布局，避免焦点被按钮抢走后快捷键整体失效。
+    return _buildScaffold(context);
+  }
+
+  Widget _buildScaffold(BuildContext context) {
     if (_fullscreen) {
       return PopScope(
         canPop: false,
@@ -960,12 +1087,12 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
-  Widget _episodeGrid() {
+  Widget _episodeGrid({int crossAxisCount = 4, EdgeInsets? padding}) {
     final eps = _curEpisodes;
     return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 4,
+      padding: padding ?? const EdgeInsets.fromLTRB(12, 4, 12, 16),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
         crossAxisSpacing: 8,
         mainAxisSpacing: 8,
         childAspectRatio: 1.75,
@@ -1201,6 +1328,11 @@ class _PlayerPageState extends State<PlayerPage> {
       return ErrorView(message: _err!, onRetry: () => _resolve());
     }
 
+    // 宽屏：左视频右选集，选集常驻可见。桌面窗口普遍是 16:9 横屏，
+    // 把视频铺在顶部再往下滚信息，会造成大面积留白且选集要点弹窗，
+    // 和「播放器」这个使用场景完全不搭。
+    if (isWide(context)) return _wideBody();
+
     return Column(
       children: [
         _videoArea(),
@@ -1252,6 +1384,157 @@ class _PlayerPageState extends State<PlayerPage> {
                 ],
               ),
             ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 宽屏布局：左视频 + 右面板
+  ///
+  /// 左栏自适应，视频按可用宽度撑满并保持原始宽高比；右栏固定 340，
+  /// 上方是当前集信息与操作，下方是常驻的选集网格（没有集可换时
+  /// 退化成换源列表）。
+  Widget _wideBody() {
+    final c = _ctrl;
+    final inited = c != null && c.value.isInitialized;
+    final aspect = inited && c.value.aspectRatio > 0
+        ? c.value.aspectRatio
+        : (16 / 9);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: Container(
+            color: Colors.black,
+            child: Column(
+              children: [
+                Expanded(
+                  child: Center(
+                    child: AspectRatio(
+                      aspectRatio: aspect,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: inited
+                                ? VideoPlayer(c)
+                                : PlayerPlaceholder(
+                                    loading: _playLoading,
+                                    message: _playLoading
+                                        ? '正在加载…'
+                                        : (_playErr ?? '播放器未就绪'),
+                                    hint: _playErr == null
+                                        ? null
+                                        : '可能是这一路源不稳定，换个线路试试',
+                                    onRetry: _playLoading
+                                        ? null
+                                        : (_canSwitch
+                                            ? _switchSource
+                                            : () => _resolve()),
+                                    retryLabel: _canSwitch ? '换个源试试' : '重新解析',
+                                  ),
+                          ),
+                          if (_danmaku.isNotEmpty && inited)
+                            ValueListenableBuilder<bool>(
+                              valueListenable: DanmakuSettings.instance.enabled,
+                              builder: (ctx, on, _) => on
+                                  ? Positioned.fill(
+                                      child: DanmakuOverlay(
+                                        ctrl: c,
+                                        items: _danmaku,
+                                        fontSize: 15,
+                                      ),
+                                    )
+                                  : const SizedBox.shrink(),
+                            ),
+                          if (_danmaku.isEmpty && _dmLoaded && inited)
+                            const DanmakuEmptyHint(),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                // 控制条常驻：桌面上鼠标一移就能点，不需要「点画面唤出」
+                if (inited)
+                  Container(
+                    color: Colors.black,
+                    padding: const EdgeInsets.fromLTRB(8, 2, 8, 6),
+                    child: PlayerControlBar(
+                      ctrl: c,
+                      fullscreen: false,
+                      onToggleFullscreen: _toggleFullscreen,
+                      extraActions: const [DanmakuToggleButton()],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        // 右栏
+        Container(
+          width: 340,
+          color: kBg,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.dramaName.isEmpty
+                          ? _cur.epLabel
+                          : widget.dramaName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${_cur.epLabel} · ${_srcKey(_cur)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          const TextStyle(fontSize: 11.5, color: kTextDim),
+                    ),
+                    const SizedBox(height: 10),
+                    _statusRow(),
+                    const SizedBox(height: 10),
+                    _actionButtons(),
+                  ],
+                ),
+              ),
+              const Divider(height: 1, color: Color(0xFF23262F)),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+                child: Row(
+                  children: [
+                    Text(
+                      _isSeries ? '选集' : '播放源',
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _isSeries
+                          ? '共 ${_curEpisodes.length} 集'
+                          : '${_sourceNames.length} 个源',
+                      style: const TextStyle(fontSize: 11, color: kTextDim),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: _isSeries
+                    ? _episodeGrid(crossAxisCount: 5)
+                    : _sourceList(),
+              ),
+            ],
           ),
         ),
       ],

@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "4K\u8FFD\u5267" "\0"
-            VALUE "FileDescription", "4K\u8FFD\u5267 - \u9AD8\u6E05\u5F71\u89C6\u805A\u5408\u5BA2\u6237\u7AEF" "\0"
+            VALUE "CompanyName", "4K追剧" "\0"
+            VALUE "FileDescription", "4K追剧 - 高清影视聚合客户端" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "zhuiju" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 4K\u8FFD\u5267. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 4K追剧. All rights reserved." "\0"
             VALUE "OriginalFilename", "zhuiju.exe" "\0"
-            VALUE "ProductName", "4K\u8FFD\u5267" "\0"
+            VALUE "ProductName", "4K追剧" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

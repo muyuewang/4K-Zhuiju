@@ -4,6 +4,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../core/api.dart';
+import '../core/layout.dart';
 import '../core/models.dart';
 import '../widgets/common.dart';
 import '../theme.dart';
@@ -63,9 +64,14 @@ class _HomePageState extends State<HomePage>
 
   @override
   Widget build(BuildContext context) {
+    // 宽屏下左侧导航栏已有品牌区，AppBar 不再重复写「4K追剧」，
+    // 把横向空间让给分类 Tab。
+    final wide = useSideNav(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('4K追剧'),
+        automaticallyImplyLeading: false,
+        title: wide ? null : const Text('4K追剧'),
+        toolbarHeight: wide ? 54 : null,
         bottom: TabBar(
           controller: _tab,
           isScrollable: true,
@@ -76,10 +82,12 @@ class _HomePageState extends State<HomePage>
         actions: [
           IconButton(
             icon: const Icon(Icons.search_rounded),
+            tooltip: '搜索',
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const SearchPage()),
             ),
           ),
+          const SizedBox(width: 4),
         ],
       ),
       body: TabBarView(
@@ -204,24 +212,21 @@ class _SearchPageState extends State<SearchPage> {
     if (_result.isEmpty) {
       return const EmptyView(text: '没有找到相关影片');
     }
-    return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 9,
-        mainAxisSpacing: 14,
-        childAspectRatio: 0.56,
+    return ContentClamp(
+      child: GridView.builder(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
+        gridDelegate: posterGridDelegate(),
+        itemCount: _result.length,
+        itemBuilder: (c, i) {
+          final d = _result[i];
+          return DramaCard(
+            drama: d,
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => DetailPage(dramaId: d.id, title: d.name),
+            )),
+          );
+        },
       ),
-      itemCount: _result.length,
-      itemBuilder: (c, i) {
-        final d = _result[i];
-        return DramaCard(
-          drama: d,
-          onTap: () => Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => DetailPage(dramaId: d.id, title: d.name),
-          )),
-        );
-      },
     );
   }
 

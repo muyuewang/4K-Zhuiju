@@ -11,6 +11,7 @@ add_executable(${BINARY_NAME} WIN32
   "main.cpp"
   "utils.cpp"
   "win32_window.cpp"
+  "window_channel.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
   "Runner.rc"
   "runner.exe.manifest"
@@ -19,6 +20,15 @@ add_executable(${BINARY_NAME} WIN32
 # Apply the standard set of build settings. This can be removed for applications
 # that need different build settings.
 apply_standard_settings(${BINARY_NAME})
+
+# Source files are UTF-8 (they contain Chinese comments). Without /utf-8 MSVC
+# decodes them as the system code page (936/GBK), emitting C4819, and because
+# apply_standard_settings passes /WX that warning becomes a hard error (C2220).
+# The mis-decoded bytes then swallow following tokens such as `public:`, which
+# surfaces as a cascade of bogus syntax errors. Pin the encoding explicitly.
+if(MSVC)
+  target_compile_options(${BINARY_NAME} PRIVATE /utf-8)
+endif()
 
 # Add preprocessor definitions for the build version.
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION=\"${FLUTTER_VERSION}\"")

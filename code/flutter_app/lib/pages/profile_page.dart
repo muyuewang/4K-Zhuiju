@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 
 import '../core/download.dart';
 import '../core/history.dart';
+import '../core/layout.dart';
 import '../core/version.dart';
 import '../theme.dart';
 import 'detail_page.dart';
@@ -24,20 +25,84 @@ class ProfilePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final wide = isWide(context);
     return Scaffold(
       backgroundColor: kBg,
       appBar: AppBar(title: const Text('我的')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(14, 4, 14, 24),
-        children: [
-          _header(),
-          const SizedBox(height: 16),
-          _quickEntries(context),
-          const SizedBox(height: 18),
-          _recentSection(context),
-          const SizedBox(height: 18),
-          _settings(context),
-        ],
+      body: wide ? _wideBody(context) : _narrowBody(context),
+    );
+  }
+
+  /// 手机：单列纵向流
+  Widget _narrowBody(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 24),
+      children: [
+        _header(),
+        const SizedBox(height: 16),
+        _quickEntries(context),
+        const SizedBox(height: 18),
+        _recentSection(context),
+        const SizedBox(height: 18),
+        _settings(context),
+      ],
+    );
+  }
+
+  /// 宽屏：左右两栏
+  ///
+  /// 左边是账号卡 + 快捷入口 + 设置，右边是「继续观看」列表。
+  /// 单列拉满 1400 宽的话，每一行都只有一小截内容、剩下全是空白，
+  /// 看起来像没做完。
+  ///
+  /// 但「没有观看记录」时右栏是空的（_recentSection 返回 shrink），
+  /// 双栏就会留下半屏死白——新装用户第一眼看到的就是这个。
+  /// 所以这里按记录数动态决定：没记录就单列铺开，有记录才分两栏。
+  Widget _wideBody(BuildContext context) {
+    return ContentClamp(
+      child: ValueListenableBuilder<List<WatchRecord>>(
+        valueListenable: HistoryStore.instance.records,
+        builder: (c, list, _) {
+          final hasRecent = list.isNotEmpty;
+          final left = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _header(),
+              const SizedBox(height: 16),
+              _quickEntries(context),
+              const SizedBox(height: 18),
+              _settings(context),
+            ],
+          );
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(22, 8, 22, 28),
+            child: hasRecent
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(flex: 5, child: left),
+                      const SizedBox(width: 20),
+                      Expanded(
+                        flex: 6,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [_recentSection(context, previewCount: 8)],
+                        ),
+                      ),
+                    ],
+                  )
+                // 单列时限制到 720：账号卡和设置项本来就是横向宽条，
+                // 拉满 1500 宽会变成一条细长的、读起来很累的行。
+                : Align(
+                    alignment: Alignment.topLeft,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 720),
+                      child: left,
+                    ),
+                  ),
+          );
+        },
       ),
     );
   }
@@ -237,12 +302,12 @@ class ProfilePage extends StatelessWidget {
 
   // ---------------- 最近观看预览 ----------------
 
-  Widget _recentSection(BuildContext context) {
+  Widget _recentSection(BuildContext context, {int previewCount = 3}) {
     return ValueListenableBuilder<List<WatchRecord>>(
       valueListenable: HistoryStore.instance.records,
       builder: (c, list, _) {
         if (list.isEmpty) return const SizedBox.shrink();
-        final show = list.take(3).toList();
+        final show = list.take(previewCount).toList();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -254,7 +319,7 @@ class ProfilePage extends StatelessWidget {
                       TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                 ),
                 const Spacer(),
-                if (list.length > 3)
+                if (list.length > previewCount)
                   TextButton(
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const HistoryPage()),

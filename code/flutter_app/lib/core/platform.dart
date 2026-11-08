@@ -6,14 +6,16 @@
 ///
 ///   1. 屏幕方向 / 沉浸式系统栏：桌面没有「竖屏/横屏」概念，也没有系统状态栏可隐藏。
 ///      直接调用 SystemChrome 不会崩，但会静默无效，全屏后窗口仍是原来大小，
-///      用户会觉得「全屏按钮没反应」。桌面需要走窗口全屏。
+///      用户会觉得「全屏按钮没反应」。桌面需要走窗口全屏（见 desktop_window.dart）。
 ///   2. 下载目录：桌面没有外部存储沙箱，直接用「下载」文件夹更符合直觉。
-///   3. 返回键：桌面没有物理返回键，全屏退出要靠 Esc。
+///   3. 返回键：桌面没有物理返回键，全屏退出要靠 Esc（原生侧已接管）。
 library;
 
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+
+import 'desktop_window.dart';
 
 /// 是否桌面平台
 bool get isDesktop =>
@@ -25,10 +27,14 @@ bool get isMobile => Platform.isAndroid || Platform.isIOS;
 /// 进入/退出全屏（自动分流到平台正确实现）
 ///
 /// 移动端：锁横屏 + 隐藏系统栏。
-/// 桌面端：交给页面自己处理窗口尺寸（见 [DesktopWindow]），
-/// 这里只做 no-op，避免调用无效 API 产生误导性的「已全屏」状态。
+/// 桌面端：真正把窗口切全屏（去掉标题栏、铺满显示器）。
 Future<void> setFullscreen(bool on) async {
-  if (isDesktop) return;
+  if (isDesktop) {
+    if (supportsWindowFullscreen) {
+      await setDesktopFullscreen(on);
+    }
+    return;
+  }
   if (on) {
     await SystemChrome.setPreferredOrientations(const [
       DeviceOrientation.landscapeLeft,
@@ -40,9 +46,14 @@ Future<void> setFullscreen(bool on) async {
   }
 }
 
-/// 恢复竖屏 + 常驻系统栏（移动端）
+/// 恢复竖屏 + 常驻系统栏（移动端）；桌面端退出窗口全屏
 Future<void> restorePortrait() async {
-  if (isDesktop) return;
+  if (isDesktop) {
+    if (supportsWindowFullscreen) {
+      await setDesktopFullscreen(false);
+    }
+    return;
+  }
   await SystemChrome.setPreferredOrientations(const [
     DeviceOrientation.portraitUp,
   ]);

@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../core/download.dart';
+import '../core/layout.dart';
 import '../theme.dart';
 import 'local_player_page.dart';
 
@@ -83,16 +84,20 @@ class _DownloadPageState extends State<DownloadPage> {
               ),
             );
           }
-          return ListView.separated(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: list.length,
-            separatorBuilder: (_, __) => const Divider(
-              height: 1,
-              indent: 16,
-              endIndent: 16,
-              color: Color(0xFF23262F),
+          // 宽屏下把列表夹在舒适宽度内：一条任务只有图标+标题+进度，
+          // 拉满 1400 宽会显得空荡，右侧进度条离标题远到难以对应。
+          return ContentClamp(
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              itemCount: list.length,
+              separatorBuilder: (_, __) => const Divider(
+                height: 1,
+                indent: 16,
+                endIndent: 16,
+                color: Color(0xFF23262F),
+              ),
+              itemBuilder: (c, i) => _tile(list[i]),
             ),
-            itemBuilder: (c, i) => _tile(list[i]),
           );
         },
       ),

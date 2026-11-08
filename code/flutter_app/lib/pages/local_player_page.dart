@@ -11,11 +11,11 @@ library;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../core/api.dart';
 import '../core/danmaku.dart';
+import '../core/layout.dart';
 import '../core/platform.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -312,6 +312,9 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
     if (_err != null) return ErrorView(message: _err!, onRetry: _init);
 
     final c = _ctrl!;
+    // 宽屏：左视频右控制，与在线播放页保持一致的形态
+    if (isWide(context)) return _wideBody(c);
+
     return Column(
       children: [
         GestureDetector(
@@ -362,63 +365,147 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
             color: kBg,
             padding: const EdgeInsets.all(14),
             child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
-                    children: [
-                      Text(
-                        '本地播放',
-                        style: TextStyle(fontSize: 11, color: kAccent),
+              child: _controlPanel(c),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 宽屏：视频铺满左侧，右侧固定宽度放控制
+  Widget _wideBody(VideoPlayerController c) {
+    final aspect = c.value.aspectRatio == 0 ? 16 / 9 : c.value.aspectRatio;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: Container(
+            color: Colors.black,
+            child: Column(
+              children: [
+                Expanded(
+                  child: Center(
+                    child: AspectRatio(
+                      aspectRatio: aspect,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          VideoPlayer(c),
+                          ValueListenableBuilder<bool>(
+                            valueListenable: DanmakuSettings.instance.enabled,
+                            builder: (ctx, on, _) => on
+                                ? Positioned.fill(
+                                    child: DanmakuOverlay(
+                                      ctrl: c,
+                                      items: _danmaku,
+                                      fontSize: 15,
+                                    ),
+                                  )
+                                : const SizedBox.shrink(),
+                          ),
+                          ValueListenableBuilder<VideoPlayerValue>(
+                            valueListenable: c,
+                            builder: (ctx, v, _) => v.isPlaying
+                                ? const SizedBox.shrink()
+                                : IconButton(
+                                    iconSize: 56,
+                                    color: Colors.white,
+                                    icon: const Icon(
+                                        Icons.play_circle_fill_rounded),
+                                    onPressed: c.play,
+                                  ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                  const SizedBox(height: 4),
-                  // 进度 / 倍速 / 音量 / 全屏，与在线播放页完全一致
-                  PlayerControlBar(
+                ),
+                // 控制条常驻底部：桌面上不需要「点画面唤出」
+                Container(
+                  color: Colors.black,
+                  padding: const EdgeInsets.fromLTRB(8, 2, 8, 6),
+                  child: PlayerControlBar(
                     ctrl: c,
                     fullscreen: false,
                     onToggleFullscreen: _toggleFullscreen,
                     extraActions: const [DanmakuToggleButton()],
                   ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            c.value.isPlaying ? c.pause() : c.play();
-                          },
-                          icon: ValueListenableBuilder<VideoPlayerValue>(
-                            valueListenable: c,
-                            builder: (ctx, v, _) => Icon(
-                              v.isPlaying
-                                  ? Icons.pause_rounded
-                                  : Icons.play_arrow_rounded,
-                              size: 18,
-                            ),
-                          ),
-                          label: ValueListenableBuilder<VideoPlayerValue>(
-                            valueListenable: c,
-                            builder: (ctx, v, _) =>
-                                Text(v.isPlaying ? '暂停' : '播放'),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => c.seekTo(Duration.zero),
-                          icon: const Icon(Icons.replay_rounded, size: 18),
-                          label: const Text('从头播'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
+        ),
+        Container(
+          width: 320,
+          color: kBg,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: SingleChildScrollView(child: _controlPanel(c, compact: true)),
+        ),
+      ],
+    );
+  }
+
+  /// 控制面板内容（手机竖屏与宽屏右栏共用）
+  Widget _controlPanel(VideoPlayerController c, {bool compact = false}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Row(
+          children: [
+            Text(
+              '本地播放',
+              style: TextStyle(fontSize: 11, color: kAccent),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        if (compact) ...[
+          Text(
+            widget.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 10),
+        ],
+        // 进度 / 倍速 / 音量 / 全屏，与在线播放页完全一致
+        PlayerControlBar(
+          ctrl: c,
+          fullscreen: false,
+          onToggleFullscreen: _toggleFullscreen,
+          extraActions: const [DanmakuToggleButton()],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  c.value.isPlaying ? c.pause() : c.play();
+                },
+                icon: ValueListenableBuilder<VideoPlayerValue>(
+                  valueListenable: c,
+                  builder: (ctx, v, _) => Icon(
+                    v.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                    size: 18,
+                  ),
+                ),
+                label: ValueListenableBuilder<VideoPlayerValue>(
+                  valueListenable: c,
+                  builder: (ctx, v, _) => Text(v.isPlaying ? '暂停' : '播放'),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => c.seekTo(Duration.zero),
+                icon: const Icon(Icons.replay_rounded, size: 18),
+                label: const Text('从头播'),
+              ),
+            ),
+          ],
         ),
       ],
     );

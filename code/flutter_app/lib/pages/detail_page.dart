@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../core/api.dart';
+import '../core/layout.dart';
 import '../core/models.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -124,6 +125,10 @@ class _DetailPageState extends State<DetailPage> {
     final cur = _curSource ?? (sourceNames.isNotEmpty ? sourceNames.first : null);
     final eps = cur == null ? <DramaVideo>[] : (sources[cur] ?? []);
 
+    // 宽屏：左封面右信息，剧集列表在右栏下方，一屏能看到更多集数。
+    // 手机：保持原来的「大图头部 + 信息 + 剧集」单列纵向流。
+    if (isWide(context)) return _wideBody(d, sourceNames, sources, cur, eps);
+
     return CustomScrollView(
       slivers: [
         // 头部：封面 + 信息
@@ -159,6 +164,158 @@ class _DetailPageState extends State<DetailPage> {
             ),
           ),
         ),
+      ],
+    );
+  }
+
+  /// 宽屏双栏
+  ///
+  /// 左栏固定 260 宽的封面（海报是 2:3，260x390 刚好一屏可见），
+  /// 右栏放可滚动的内容：标题信息 → 播放源 → 剧集网格。
+  /// 剧集网格用自适应列数，窗口越宽一行摆越多集，避免宽屏下四列
+  /// 把每个集数按钮拉成一条长条。
+  Widget _wideBody(
+    DramaDetail d,
+    List<String> sourceNames,
+    Map<String, List<DramaVideo>> sources,
+    String? cur,
+    List<DramaVideo> eps,
+  ) {
+    return ContentClamp(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 左栏：返回 + 封面
+          SizedBox(
+            width: 292,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(18, 14, 6, 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      IconButton(
+                        tooltip: '返回',
+                        icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                            size: 18),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                      const SizedBox(width: 2),
+                      const Text('详情',
+                          style: TextStyle(
+                              fontSize: 14, color: kTextDim)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: AspectRatio(
+                      aspectRatio: 2 / 3,
+                      child: d.cover.best.isEmpty
+                          ? Container(
+                              color: kCard,
+                              child: const Center(
+                                child: Icon(Icons.movie_outlined,
+                                    color: kTextDim, size: 40),
+                              ),
+                            )
+                          : CachedNetworkImage(
+                              imageUrl: d.cover.best,
+                              fit: BoxFit.cover,
+                              memCacheWidth: 520,
+                              errorWidget: (_, __, ___) =>
+                                  Container(color: kCard),
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // 右栏：信息 + 源 + 剧集
+          Expanded(
+            child: CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 46, 20, 0),
+                    child: _infoWide(d),
+                  ),
+                ),
+                if (sourceNames.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: _sourceSelector(sourceNames, sources, cur),
+                    ),
+                  ),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(4, 4, 20, 24),
+                  sliver: SliverGrid(
+                    gridDelegate:
+                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: 82,
+                      crossAxisSpacing: 8,
+                      mainAxisSpacing: 8,
+                      childAspectRatio: 1.9,
+                    ),
+                    delegate: SliverChildBuilderDelegate(
+                      (c, i) => _episodeChip(eps[i]),
+                      childCount: eps.length,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 宽屏信息区：比手机版字号略大、摘要不限 3 行
+  Widget _infoWide(DramaDetail d) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          d.name.isEmpty ? (widget.title ?? '') : d.name,
+          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 9),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            if (d.year > 0) _tag('${d.year}'),
+            if (d.area.isNotEmpty) _tag(d.area),
+            if (d.remark.isNotEmpty) _tag(d.remark, highlight: true),
+            if (d.hits > 0) _tag('${_fmtHits(d.hits)}热度'),
+            _tag('${d.sourcesByCn.length} 个播放源'),
+          ],
+        ),
+        if (d.director.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _kv('导演', d.director),
+        ],
+        if (d.actor.isNotEmpty) ...[
+          const SizedBox(height: 5),
+          _kv('主演', d.actor),
+        ],
+        if (d.brief.isNotEmpty || d.intro.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text(
+            d.intro.isNotEmpty ? d.intro : d.brief,
+            maxLines: 4,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 13,
+              height: 1.62,
+              color: kTextDim,
+            ),
+          ),
+        ],
       ],
     );
   }

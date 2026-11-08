@@ -8,6 +8,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../core/history.dart';
+import '../core/layout.dart';
 import '../theme.dart';
 import 'detail_page.dart';
 
@@ -55,11 +56,13 @@ class HistoryPage extends StatelessWidget {
               ),
             );
           }
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(14, 8, 14, 20),
-            itemCount: list.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 4),
-            itemBuilder: (c, i) => _row(context, list[i]),
+          return ContentClamp(
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 20),
+              itemCount: list.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 4),
+              itemBuilder: (c, i) => _row(context, list[i]),
+            ),
           );
         },
       ),

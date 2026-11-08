@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/material.dart';
 
+import 'core/desktop_window.dart';
 import 'core/download.dart';
 import 'core/history.dart';
+import 'core/layout.dart';
 import 'core/version.dart';
 import 'pages/home_page.dart';
 import 'pages/profile_page.dart';
@@ -12,6 +15,18 @@ import 'widgets/danmaku_overlay.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // 桌面端崩溃要能定位。Release 版默认把异常吞成一块灰/白屏，
+  // 用户在 Windows 上没有 logcat 可看，只能靠这里的输出落到 stderr。
+  FlutterError.onError = (details) {
+    debugPrint('[ERR] ${details.exceptionAsString()}');
+    debugPrint('[ERR] ${details.stack}');
+    FlutterError.presentError(details);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('[ERR] uncaught: $error');
+    debugPrint('[ERR] $stack');
+    return true;
+  };
   // 绝不能在这里 await 磁盘恢复。
   //
   // 之前是 `await DownloadManager.restore()` + `await HistoryStore.restore()`
@@ -52,8 +67,23 @@ Future<void> _restoreInBackground() async {
   debugPrint('[BOOT] restore done');
 }
 
-class ZhuijuApp extends StatelessWidget {
+class ZhuijuApp extends StatefulWidget {
   const ZhuijuApp({super.key});
+
+  @override
+  State<ZhuijuApp> createState() => _ZhuijuAppState();
+}
+
+class _ZhuijuAppState extends State<ZhuijuApp> {
+  @override
+  void initState() {
+    super.initState();
+    // 窗口能力（最小尺寸 / Esc 退出全屏）要等引擎起来才可用，
+    // 放在首帧之后，失败也不该影响主流程。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(initDesktopWindow());
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -76,8 +106,33 @@ class RootPage extends StatefulWidget {
 class _RootPageState extends State<RootPage> {
   int _index = 0;
 
+  static const _destinations = [
+    (icon: Icons.home_outlined, selected: Icons.home_rounded, label: '首页'),
+    (icon: Icons.person_outline_rounded, selected: Icons.person_rounded, label: '我的'),
+  ];
+
+  void _select(int i) => setState(() => _index = i);
+
   @override
   Widget build(BuildContext context) {
+    // 桌面/平板把导航挪到左侧：底部横条是手机形态，宽屏下既浪费
+    // 纵向空间又不符合桌面软件的操作习惯（左上角才是导航区）。
+    if (useSideNav(context)) {
+      return Scaffold(
+        body: Row(
+          children: [
+            _SideRail(index: _index, onSelect: _select),
+            const VerticalDivider(width: 1, thickness: 1, color: Color(0xFF23262F)),
+            Expanded(
+              child: IndexedStack(
+                index: _index,
+                children: const [HomePage(), ProfilePage()],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Scaffold(
       body: IndexedStack(
         index: _index,
@@ -85,28 +140,163 @@ class _RootPageState extends State<RootPage> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        onDestinationSelected: _select,
         backgroundColor: kCard,
         indicatorColor: kAccent,
         height: 58,
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            // 选中态图标必须是深色：indicatorColor 本身就是 kAccent，
-            // 原来 selectedIcon 也用 kAccent，橙画在橙上等于隐形——
-            // 实测底部「下载」Tab 只剩一个空橙色胶囊，图标完全看不见。
-            selectedIcon: Icon(Icons.home_rounded, color: kBg),
-            label: '首页',
-          ),
-          NavigationDestination(
-            // 第二个 Tab 由「下载」改为「我的」：下载只是其中一个功能，
-            // 还需要承载最近观看、清理空间等入口。
-            icon: Icon(Icons.person_outline_rounded),
-            selectedIcon: Icon(Icons.person_rounded, color: kBg),
-            label: '我的',
-          ),
+        destinations: [
+          for (final d in _destinations)
+            NavigationDestination(
+              icon: Icon(d.icon),
+              // 选中态图标必须是深色：indicatorColor 本身就是 kAccent，
+              // 原来 selectedIcon 也用 kAccent，橙画在橙上等于隐形——
+              // 实测底部「下载」Tab 只剩一个空橙色胶囊，图标完全看不见。
+              selectedIcon: Icon(d.selected, color: kBg),
+              label: d.label,
+            ),
         ],
+      ),
+    );
+  }
+}
+
+/// 左侧竖向导航栏
+///
+/// 宽度 208 是「图标 + 文字 + 选中背景」都舒展、又不至于挤压内容区的折中。
+class _SideRail extends StatelessWidget {
+  final int index;
+  final ValueChanged<int> onSelect;
+
+  const _SideRail({required this.index, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 208,
+      color: kCard.withValues(alpha: 0.6),
+      child: SafeArea(
+        right: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 顶部品牌区
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 20, 14, 22),
+              child: Row(
+                children: [
+                  Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      gradient: const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Color(0xFFFF8A4C), kAccent],
+                      ),
+                    ),
+                    child: const Icon(Icons.play_arrow_rounded,
+                        color: Colors.white, size: 20),
+                  ),
+                  const SizedBox(width: 10),
+                  const Text(
+                    kAppTitle,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            for (final (i, d) in _RootPageState._destinations.indexed)
+              _RailItem(
+                icon: d.icon,
+                selectedIcon: d.selected,
+                label: d.label,
+                active: i == index,
+                onTap: () => onSelect(i),
+              ),
+            const Spacer(),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(18, 8, 18, 16),
+              child: Text(
+                'v$kAppVersion',
+                style: TextStyle(fontSize: 11, color: kTextDim),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RailItem extends StatefulWidget {
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _RailItem({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  State<_RailItem> createState() => _RailItemState();
+}
+
+class _RailItemState extends State<_RailItem> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = widget.active;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          behavior: HitTestBehavior.opaque,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+            decoration: BoxDecoration(
+              color: active
+                  ? kAccent.withValues(alpha: 0.16)
+                  : (_hover ? Colors.white.withValues(alpha: 0.05) : null),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  active ? widget.selectedIcon : widget.icon,
+                  size: 20,
+                  color: active ? kAccent : kTextDim,
+                ),
+                const SizedBox(width: 11),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+                    color: active ? kAccent : Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
