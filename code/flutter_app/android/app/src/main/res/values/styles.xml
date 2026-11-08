@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 启动窗口主题。
+         注意 parent 已从 Theme.Light 换成 Theme.Black：
+         原来 windowBackground 走 ?android:colorBackground，
+         在 Light 主题下就是白色，Flutter 首帧前必然白屏，
+         而且 App 本身是深色主题，白底会闪一下再变黑。 -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+    </style>
+    <!-- Flutter UI 已经起来后，窗口本身的背景色（界面之外的留白区域）。
+         同样要深色，否则全屏切换/旋转的瞬间会露出白底。 -->
+    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@color/launch_bg</item>
+    </style>
+</resources>

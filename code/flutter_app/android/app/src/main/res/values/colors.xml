@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 启动窗口背景色，与 App 主题 kBg(#0E0F13) 保持一致。
+         原来 launch_background 用的是 @android:color/white，
+         Flutter 首帧出来之前用户看到的就是一整块白屏。 -->
+    <color name="launch_bg">#0E0F13</color>
+</resources>

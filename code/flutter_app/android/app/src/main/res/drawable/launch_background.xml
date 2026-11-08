@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 深色启动背景：Flutter 首帧渲染完成前显示的就是这一层。
+     原来用 @android:color/white，每次冷启动都有一段刺眼的白屏。 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/launch_bg" />
+</layer-list>

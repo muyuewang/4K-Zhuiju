@@ -1,0 +1,60 @@
+# ---------- Flutter / Dart ----------
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+*.iml
+.idea/
+.vscode/
+*.log
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Flutter 生成的桌面/移动平台脚手架产物
+code/flutter_app/windows/flutter/ephemeral/
+code/flutter_app/android/.gradle/
+code/flutter_app/android/local.properties
+code/flutter_app/android/key.properties
+code/flutter_app/android/app/debug/
+code/flutter_app/android/app/profile/
+code/flutter_app/android/app/release/
+code/flutter_app/ios/Pods/
+code/flutter_app/macos/Pods/
+
+# ---------- 签名与密钥 ----------
+*.jks
+*.keystore
+*.p12
+*.pem
+key.properties
+
+# ---------- 工作区规范目录（不进仓库）----------
+# dist/ 是打包产物，走 GitHub Releases 分发，不进源码历史
+dist/
+logs/
+out/
+
+# ---------- 调试临时文件 ----------
+u*.xml
+ui*.xml
+shot*.png
+shot*.jpg
+d[0-9].png
+d[0-9].jpg
+v[0-9].png
+v[0-9].jpg
+t[0-9].png
+t[0-9].jpg
+q[0-9].png
+w[0-9].png
+n[0-9].png
+dl[0-9].png
+s.png
+s.jpg
+*.bak
+
+# ---------- 系统 ----------
+.DS_Store
+Thumbs.db
+desktop.ini
