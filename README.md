@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v1.1.0-ff7a29?style=flat-square" alt="版本">
+  <img src="https://img.shields.io/badge/版本-v1.2.0-ff7a29?style=flat-square" alt="版本">
   <img src="https://img.shields.io/badge/平台-Android%20%7C%20Windows-3ddc84?style=flat-square" alt="平台">
   <img src="https://img.shields.io/badge/大小-54.6MB-blue?style=flat-square" alt="大小">
   <img src="https://img.shields.io/badge/广告-无-ff4d4f?style=flat-square" alt="无广告">
@@ -171,25 +171,39 @@
 ## 下载安装
 
 <p>
-<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.1.0/4KZhuiju-v1.1.0-release.apk"><b>⬇ Android 版（APK · 54.6 MB）</b></a>
+<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.2.0/4KZhuiju-v1.2.0-release.apk"><b>⬇ Android 版（APK · 54.8 MB）</b></a>
 　|　
-<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.1.0/4KZhuiju-v1.1.0-windows-x64.zip"><b>⬇ Windows 版（ZIP · 11.9 MB）</b></a>
+<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.2.0/4KZhuiju-v1.2.0-windows-x64.zip"><b>⬇ Windows 版（ZIP · 12.0 MB）</b></a>
 </p>
 
 全部版本见 [Releases](https://github.com/muyuewang/4K-Zhuiju/releases)。
 
 ### Android
 
-1. 下载 `4KZhuiju-v1.1.0-release.apk`（54.6 MB）
+1. 下载 `4KZhuiju-v1.2.0-release.apk`（54.8 MB）
 2. 手机上点开安装，如果提示「未知来源」，在设置里允许一次即可
 3. 系统要求：Android 7.0 及以上
 
 ### Windows
 
-1. 下载 `4KZhuiju-v1.1.0-windows-x64.zip`（11.9 MB，解压后约 29 MB）
+1. 下载 `4KZhuiju-v1.2.0-windows-x64.zip`（12.0 MB，解压后约 29 MB）
 2. 解压到任意文件夹（**不要**只把 exe 拖出来，它旁边还有 dll 和 data 目录）
 3. 双击 `zhuiju.exe`
 4. 系统要求：Windows 10 及以上，64 位
+
+**桌面端操作**
+
+窗口拉宽会自动变成侧边导航 + 更多列海报；播放页按下面这些键就能全程不碰鼠标：
+
+| 按键 | 功能 |
+|:---|:---|
+| `空格` | 播放 / 暂停 |
+| `←` `→` | 快退 / 快进 10 秒 |
+| `Shift` + `←` `→` | 快退 / 快进 30 秒 |
+| `↑` `↓` | 音量 ±10% |
+| `F` | 全屏 |
+| `Esc` | 退出全屏 |
+| `M` | 静音 |
 
 > 首次打开 Windows 版如果弹出「Windows 已保护你的电脑」，点「更多信息」→「仍要运行」。
 > 这是因为安装包没有买代码签名证书，不是有毒。
