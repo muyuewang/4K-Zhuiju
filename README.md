@@ -170,6 +170,14 @@
 
 ## 下载安装
 
+<p>
+<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.1.0/4KZhuiju-v1.1.0-release.apk"><b>⬇ Android 版（APK · 54.6 MB）</b></a>
+　|　
+<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.1.0/4KZhuiju-v1.1.0-windows-x64.zip"><b>⬇ Windows 版（ZIP · 11.9 MB）</b></a>
+</p>
+
+全部版本见 [Releases](https://github.com/muyuewang/4K-Zhuiju/releases)。
+
 ### Android
 
 1. 下载 `4KZhuiju-v1.1.0-release.apk`（54.6 MB）
