@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import '../core/history.dart';
 import '../core/layout.dart';
 import '../theme.dart';
+import '../widgets/tv_focus.dart';
 import 'detail_page.dart';
 
 class HistoryPage extends StatelessWidget {
@@ -70,28 +71,39 @@ class HistoryPage extends StatelessWidget {
   }
 
   Widget _row(BuildContext context, WatchRecord r) {
-    return InkWell(
+    final tv = isTv(context);
+    final body = InkWell(
       borderRadius: BorderRadius.circular(12),
+      // 点一条记录就接着上次看：把集数和进度一起带进详情页，
+      // 详情页加载完会自动定位到该集并起播。
+      // 以前只 push 一个裸的详情页，用户点「继续观看」还要再点一次
+      // 那一集才能播 —— 那这个入口就没意义了。
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => DetailPage(dramaId: r.dramaId, title: r.dramaName),
+          builder: (_) => DetailPage(
+            dramaId: r.dramaId,
+            title: r.dramaName,
+            resumeEpisode: r.episode,
+            resumeSource: r.source,
+            resumeSec: r.positionSec,
+          ),
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+        padding: EdgeInsets.symmetric(vertical: tv ? 12 : 8, horizontal: 2),
         child: Row(
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: SizedBox(
-                width: 68,
-                height: 92,
+                width: tv ? 88 : 68,
+                height: tv ? 119 : 92,
                 child: r.cover.isEmpty
                     ? Container(color: context.palette.card)
                     : CachedNetworkImage(
                         imageUrl: r.cover,
                         fit: BoxFit.cover,
-                        memCacheWidth: 220,
+                        memCacheWidth: tv ? 320 : 220,
                         errorWidget: (_, __, ___) => Container(color: context.palette.card),
                       ),
               ),
@@ -106,13 +118,16 @@ class HistoryPage extends StatelessWidget {
                     r.dramaName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                        fontSize: tv ? 17 : 14,
+                        fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 5),
                   Text(
                     r.epLabel.isEmpty ? '未知集数' : r.epLabel,
-                    style: TextStyle(fontSize: 11.5, color: context.palette.textDim),
+                    style: TextStyle(
+                        fontSize: tv ? 14 : 11.5,
+                        color: context.palette.textDim),
                   ),
                   const SizedBox(height: 8),
                   Row(
@@ -155,6 +170,10 @@ class HistoryPage extends StatelessWidget {
         ),
       ),
     );
+
+    // InkWell 自身能聚焦并响应确定键，这里只补一圈可见描边
+    if (!tv) return body;
+    return TvFocusRing(radius: 12, child: body);
   }
 
   Future<void> _confirmClear(BuildContext context) async {

@@ -68,15 +68,28 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
   bool _scrubbing = false;
   double _scrubMs = 0;
 
-  // 浮层定位用的锚点
-  final GlobalKey _stackKey = GlobalKey();
+  /// 浮层挂在 Overlay 上而不是控制条自己的 Stack 里。
+  ///
+  /// 这是必须的，不是洁癖：浮层要向上弹出 200 多像素，一定超出控制条
+  /// 自身的高度。`Stack` 设 `clipBehavior: Clip.none` 只能让它「画」到
+  /// 外面，**命中测试仍被父级尺寸卡死**——RenderBox.hitTest 第一步就是
+  /// 判断点在不在自己的 size 里，不在就直接返回 false，子节点的
+  /// onTap 永远不会被调用。表现就是面板看得见、点不动。
+  /// 竖屏还多一层：控制条在 SingleChildScrollView 里，超出部分直接被裁掉。
+  /// 放进 Overlay 后既不被裁剪，也天然在最上层接收点击。
+  final OverlayPortalController _portal = OverlayPortalController();
   final GlobalKey _speedKey = GlobalKey();
   final GlobalKey _volKey = GlobalKey();
+
+  /// 浮层的屏幕坐标（Overlay 是整屏坐标系）
   double _popLeft = 0;
-  double _popBottom = 0;
+  double _popTop = 0;
 
   static const double _speedPanelW = 92;
   static const double _volPanelW = 54;
+  static const double _rowH = 32;
+  static const double _speedPanelH = 7 * _rowH + 8;
+  static const double _volPanelH = 148;
 
   /// 换源换了 controller：收起浮层、清掉拖动残留。
   /// 不这么做的话，新 controller 会继承上一个源的「拖动中」状态，
@@ -85,9 +98,21 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
   void didUpdateWidget(PlayerControlBar old) {
     super.didUpdateWidget(old);
     if (!identical(old.ctrl, widget.ctrl)) {
+      final wasShowing = _portal.isShowing;
       _panel = null;
       _scrubbing = false;
       _scrubMs = 0;
+      // 换源时浮层必须一起收起：Overlay 条目不随 _panel 置空自动消失，
+      // 否则会挂在屏幕上、还挡住底下的按钮。
+      // hide() 会触发 markNeedsBuild，不能在当前这个 build 阶段直接调，
+      // 挪到帧末执行。
+      if (wasShowing) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _panel == null && _portal.isShowing) {
+            _portal.hide();
+          }
+        });
+      }
     }
   }
 
@@ -96,36 +121,62 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
     // 不用 setState 记值：controller 自己 notify，下面的
     // ValueListenableBuilder 会重建；这里只需收起面板。
     if (!mounted) return;
-    setState(() => _panel = null);
+    _closePanel();
   }
 
   Future<void> _setVolume(double v) => widget.ctrl.setVolume(v);
 
-  void _togglePanel(String p, GlobalKey anchor) {
-    final open = _panel != p;
-    setState(() => _panel = open ? p : null);
-    if (open) _measure(anchor);
+  void _closePanel() {
+    setState(() => _panel = null);
+    // 没 attach 过就 hide() 会断言 '_zOrderIndex != null' 崩掉
+    if (_portal.isShowing) _portal.hide();
   }
 
-  /// 把浮层贴到按钮正上方（右边缘对齐按钮右边缘，再夹在容器内）
-  void _measure(GlobalKey anchor) {
+  void _togglePanel(String p, GlobalKey anchor) {
+    if (_panel == p) {
+      _closePanel();
+      return;
+    }
+    setState(() => _panel = p);
+    // 先算坐标再显示：Overlay 首帧就得落在正确位置，
+    // 否则会出现「先闪一下再跳过去」。
+    _measure(anchor, p);
+    _portal.show();
+  }
+
+  /// 把浮层贴到按钮正上方，右边缘对齐按钮右边缘，再夹在屏幕内
+  void _measure(GlobalKey anchor, String panel) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final sb = _stackKey.currentContext?.findRenderObject() as RenderBox?;
       final bb = anchor.currentContext?.findRenderObject() as RenderBox?;
-      if (sb == null || bb == null || !sb.hasSize || !bb.hasSize) return;
-      final sbOrigin = sb.localToGlobal(Offset.zero);
-      final bbOrigin = bb.localToGlobal(Offset.zero);
-      final w = _panel == 'volume' ? _volPanelW : _speedPanelW;
-      var left = bbOrigin.dx + bb.size.width - sbOrigin.dx - w;
-      left = left.clamp(4.0, (sb.size.width - w - 4).clamp(4.0, double.infinity));
-      final bottom = sbOrigin.dy + sb.size.height - bbOrigin.dy + 6;
+      if (bb == null || !bb.hasSize) return;
+      final size = MediaQuery.sizeOf(context);
+      final bbTopLeft = bb.localToGlobal(Offset.zero);
+      final w = panel == 'volume' ? _volPanelW : _speedPanelW;
+      final h = panel == 'volume' ? _volPanelH : _speedPanelH;
+
+      var left = bbTopLeft.dx + bb.size.width - w;
+      left = left.clamp(4.0, (size.width - w - 4).clamp(4.0, double.infinity));
+
+      // 优先向上弹；上方塞不下就翻到下方，再不行就顶到屏幕顶端。
+      // 横屏全屏时控制条贴着屏幕底部，向上弹一定够；
+      // 竖屏非全屏时控制条偏上，向上不够就自动翻到下方。
+      var top = bbTopLeft.dy - h - 6;
+      if (top < 8) {
+        final below = bbTopLeft.dy + bb.size.height + 6;
+        top = below + h <= size.height - 8 ? below : 8;
+      }
+
       if (!mounted) return;
       setState(() {
         _popLeft = left;
-        _popBottom = bottom;
+        _popTop = top;
       });
     });
   }
+
+  // 这里不要手动 _portal.hide()：OverlayPortal 卸载时会自己移除浮层条目。
+  // 而且浮层从没 show 过时 controller 尚未 attach，hide() 会直接断言
+  // '_zOrderIndex != null' 崩掉——连没点过倍速按钮的用例都过不了。
 
   @override
   Widget build(BuildContext context) {
@@ -141,29 +192,41 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
             ? Duration(milliseconds: _scrubMs.round())
             : v.position;
 
-        return Stack(
-          key: _stackKey,
-          clipBehavior: Clip.none,
-          children: [
-            Column(
-              mainAxisSize: MainAxisSize.min,
+        return OverlayPortal(
+          controller: _portal,
+          // 点击浮层以外的任何地方都收起，避免面板一直挂在屏幕上
+          overlayChildBuilder: (ctx) {
+            // _panel 已置空但 hide() 还在路上的那一帧，
+            // 不要渲染任何面板内容，否则会闪一下音量面板。
+            if (_panel == null) return const SizedBox.shrink();
+            return Stack(
               children: [
-                _progress(c, total, max, value),
-                SizedBox(
-                  height: 42,
-                  child: _bar(v, c, shown),
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: _closePanel,
+                  ),
+                ),
+                Positioned(
+                  left: _popLeft,
+                  top: _popTop,
+                  child: _panel == 'speed'
+                      ? _speedPanel(_speedOf(v))
+                      : _volPanel(_volOf(v)),
                 ),
               ],
-            ),
-            if (_panel != null)
-              Positioned(
-                left: _popLeft,
-                bottom: _popBottom,
-                child: _panel == 'speed'
-                    ? _speedPanel(_speedOf(v))
-                    : _volPanel(_volOf(v)),
+            );
+          },
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _progress(c, total, max, value),
+              SizedBox(
+                height: 42,
+                child: _bar(v, c, shown),
               ),
-          ],
+            ],
+          ),
         );
       },
     );
@@ -321,81 +384,99 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
   // ---------------- 浮层 ----------------
 
   Widget _speedPanel(double speed) {
-    return Container(
-      width: _speedPanelW,
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.86),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 从高到低，和主流播放器一致
-          for (final s in kSpeedOptions.reversed)
-            InkWell(
-              onTap: () => _setSpeed(s),
-              child: SizedBox(
-                height: 32,
-                child: Center(
-                  child: Text(
-                    '${_fmtSpeed(s)}X',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: (s - speed).abs() < 0.01 ? kAccent : Colors.white,
-                      fontWeight: (s - speed).abs() < 0.01
-                          ? FontWeight.w700
-                          : FontWeight.w400,
+    // 浮层画在 Overlay 里，已经不在 Scaffold 之下，没有 Material 祖先。
+    // InkWell / Slider 都要求祖先里有 Material，缺了会直接断言报错，
+    // 所以这里自己包一层（transparent 不影响下面的黑底装饰）。
+    return Material(
+      type: MaterialType.transparency,
+      child: Container(
+        width: _speedPanelW,
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.92),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white24, width: 0.8),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 从高到低，和主流播放器一致
+              for (final s in kSpeedOptions.reversed)
+                InkWell(
+                  onTap: () => _setSpeed(s),
+                  child: SizedBox(
+                    height: _rowH,
+                    child: Center(
+                      child: Text(
+                        '${_fmtSpeed(s)}X',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color:
+                              (s - speed).abs() < 0.01 ? kAccent : Colors.white,
+                          fontWeight: (s - speed).abs() < 0.01
+                              ? FontWeight.w700
+                              : FontWeight.w400,
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ),
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }
 
   Widget _volPanel(double volume) {
-    return Container(
-      width: _volPanelW,
-      height: 148,
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.86),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        children: [
-          Text(
-            '${(volume * 100).round()}',
-            style: const TextStyle(fontSize: 11, color: Colors.white70),
-          ),
-          Expanded(
-            child: RotatedBox(
-              quarterTurns: 3,
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: 2.5,
-                  activeTrackColor: kAccent,
-                  inactiveTrackColor: Colors.white24,
-                  thumbColor: Colors.white,
-                  overlayColor: kAccent.withValues(alpha: 0.22),
-                  thumbShape:
-                      const RoundSliderThumbShape(enabledThumbRadius: 6),
-                  overlayShape:
-                      const RoundSliderOverlayShape(overlayRadius: 12),
+    return Material(
+      type: MaterialType.transparency,
+      child: Container(
+        width: _volPanelW,
+        height: _volPanelH,
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.92),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white24, width: 0.8),
+        ),
+        child: Column(
+          children: [
+            Text(
+              '${(volume * 100).round()}',
+              style: const TextStyle(fontSize: 11, color: Colors.white70),
+            ),
+            Expanded(
+              child: RotatedBox(
+                quarterTurns: 3,
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 2.5,
+                    activeTrackColor: kAccent,
+                    inactiveTrackColor: Colors.white24,
+                    thumbColor: Colors.white,
+                    overlayColor: kAccent.withValues(alpha: 0.22),
+                    thumbShape:
+                        const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    overlayShape:
+                        const RoundSliderOverlayShape(overlayRadius: 12),
+                  ),
+                  child: Slider(
+                    value: volume,
+                    onChanged: _setVolume,
+                  ),
                 ),
-                child: Slider(value: volume, onChanged: _setVolume),
               ),
             ),
-          ),
-          Icon(
-            volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-            size: 18,
-            color: Colors.white70,
-          ),
-        ],
+            Icon(
+              volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+              size: 18,
+              color: Colors.white70,
+            ),
+          ],
+        ),
       ),
     );
   }

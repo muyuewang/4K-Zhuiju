@@ -15,8 +15,10 @@ import '../core/download.dart';
 import '../core/history.dart';
 import '../core/layout.dart';
 import '../core/theme_settings.dart';
+import '../core/tv.dart';
 import '../core/version.dart';
 import '../theme.dart';
+import '../widgets/tv_focus.dart';
 import 'detail_page.dart';
 import 'download_page.dart';
 import 'history_page.dart';
@@ -252,11 +254,13 @@ class ProfilePage extends StatelessWidget {
     required VoidCallback onTap,
     int badge = 0,
   }) {
-    return InkWell(
+    final tv = isTv(context);
+    final card = InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(14),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+        padding: EdgeInsets.symmetric(
+            horizontal: tv ? 18 : 14, vertical: tv ? 22 : 16),
         decoration: BoxDecoration(
           color: context.palette.card,
           borderRadius: BorderRadius.circular(14),
@@ -266,7 +270,7 @@ class ProfilePage extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(icon, color: kAccent, size: 22),
+                Icon(icon, color: kAccent, size: tv ? 28 : 22),
                 if (badge > 0) ...[
                   const SizedBox(width: 6),
                   Container(
@@ -279,7 +283,7 @@ class ProfilePage extends StatelessWidget {
                     child: Text(
                       '$badge',
                       style: TextStyle(
-                          fontSize: 10,
+                          fontSize: tv ? 12 : 10,
                           fontWeight: FontWeight.w700,
                           color: context.palette.bg),
                     ),
@@ -287,21 +291,27 @@ class ProfilePage extends StatelessWidget {
                 ],
               ],
             ),
-            const SizedBox(height: 10),
+            SizedBox(height: tv ? 13 : 10),
             Text(
               title,
-              style: const TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                  fontSize: tv ? 18 : 14, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 3),
             Text(
               subtitle,
-              style: TextStyle(fontSize: 11, color: context.palette.textDim),
+              style: TextStyle(
+                  fontSize: tv ? 13 : 11,
+                  color: context.palette.textDim),
             ),
           ],
         ),
       ),
     );
+    // InkWell 已能聚焦并响应确定键，这里只补一圈描边：
+    // 电视上没有鼠标指针，看不出选中谁就没法操作。
+    if (!tv) return card;
+    return TvFocusRing(radius: 14, child: card);
   }
 
   // ---------------- 最近观看预览 ----------------
@@ -346,9 +356,17 @@ class ProfilePage extends StatelessWidget {
 
   Widget _recentRow(BuildContext context, WatchRecord r) {
     return InkWell(
+      // 与「最近观看」页保持一致：点一下就接着上次看，
+      // 不再只是打开一个还得再点一次的详情页。
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => DetailPage(dramaId: r.dramaId, title: r.dramaName),
+          builder: (_) => DetailPage(
+            dramaId: r.dramaId,
+            title: r.dramaName,
+            resumeEpisode: r.episode,
+            resumeSource: r.source,
+            resumeSec: r.positionSec,
+          ),
         ),
       ),
       borderRadius: BorderRadius.circular(10),
@@ -474,6 +492,25 @@ class ProfilePage extends StatelessWidget {
             ),
           ),
           Divider(height: 1, color: context.palette.divider),
+          // 遥控器模式：自动识别 / 开启 / 关闭
+          //
+          // 为什么需要手动开关：盒子固件五花八门，有的把 UI_MODE 报成
+          // NORMAL、有的不声明 leanback feature，纯靠探测会漏判；
+          // 也有人在 HTPC / 投影上接电视用，需要手动强开。
+          ValueListenableBuilder<TvOverride>(
+            valueListenable: TvMode.instance.override,
+            builder: (c, ov, _) => _settingRow(
+              context,
+              icon: Icons.tv_rounded,
+              title: '遥控器模式',
+              trailing: ov == TvOverride.auto
+                  // 自动档把探测结果显示出来，用户才知道该不该手动开
+                  ? (TvMode.instance.detected ? '已识别电视' : ov.label)
+                  : ov.label,
+              onTap: () => _pickTvMode(context),
+            ),
+          ),
+          Divider(height: 1, color: context.palette.divider),
           _settingRow(
             context,
             icon: Icons.delete_sweep_rounded,
@@ -594,6 +631,84 @@ class ProfilePage extends StatelessWidget {
                       : null,
                   onTap: () {
                     ThemeSettings.instance.set(m);
+                    Navigator.of(sheetCtx).pop();
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// 遥控器模式选择
+  ///
+  /// 和主题选择一样用底部弹层：三档各有说明，弹层能放下副标题。
+  /// 另外把「系统探测结果」显式写进自动档的副标题——用户看到
+  /// 「未识别到电视」时就知道该手动选「开启」，不用猜。
+  Future<void> _pickTvMode(BuildContext context) async {
+    final cur = TvMode.instance.override.value;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.palette.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (sheetCtx) {
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+                child: Text(
+                  '遥控器模式',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: sheetCtx.palette.onSurface,
+                  ),
+                ),
+              ),
+              for (final m in TvOverride.values)
+                ListTile(
+                  dense: true,
+                  leading: Icon(
+                    switch (m) {
+                      TvOverride.auto => Icons.tv_rounded,
+                      TvOverride.on => Icons.settings_remote_rounded,
+                      TvOverride.off => Icons.smartphone_rounded,
+                    },
+                    size: 21,
+                    color: m == cur ? kAccent : sheetCtx.palette.textDim,
+                  ),
+                  title: Text(
+                    m.label,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight:
+                          m == cur ? FontWeight.w600 : FontWeight.w400,
+                      color: m == cur ? kAccent : sheetCtx.palette.onSurface,
+                    ),
+                  ),
+                  subtitle: Text(
+                    // 自动档补一句实际探测结果，避免用户以为开关坏了
+                    m == TvOverride.auto
+                        ? '${m.hint}（当前：'
+                            '${TvMode.instance.detected ? '识别为电视' : '未识别到电视'}）'
+                        : m.hint,
+                    style: TextStyle(
+                        fontSize: 11.5, color: sheetCtx.palette.textDim),
+                  ),
+                  trailing: m == cur
+                      ? const Icon(Icons.check_rounded,
+                          size: 19, color: kAccent)
+                      : null,
+                  onTap: () {
+                    TvMode.instance.setOverride(m);
                     Navigator.of(sheetCtx).pop();
                   },
                 ),

@@ -12,6 +12,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../core/api.dart';
@@ -19,6 +20,7 @@ import '../core/danmaku.dart';
 import '../core/layout.dart';
 import '../core/platform.dart';
 import '../core/screen_awake.dart';
+import '../core/tv.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/danmaku_overlay.dart';
@@ -60,10 +62,104 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
   @override
   void initState() {
     super.initState();
+    // 遥控器/键盘按键走引擎层的全局监听，不挂 Focus 子树。
+    // 理由与 player_page 一致：焦点一旦被页面里的按钮拿走，
+    // Focus 子树就收不到方向键了。本地播放页原来完全没有按键处理，
+    // 电视上放已下载的剧时遥控器只能暂停不了、快进不了。
+    if (isDesktop || tvModeOn) {
+      HardwareKeyboard.instance.addHandler(_onGlobalKey);
+    }
     _init();
     // 弹幕与文件初始化并行，互不依赖；本地文件打开可能要几十秒，
     // 串行会让弹幕白等到文件就绪才开始请求。
     _loadDanmaku();
+  }
+
+  bool _onGlobalKey(KeyEvent e) {
+    // 焦点在输入框里时不要抢键（本页暂时没有，但保留防护）
+    final focused = FocusManager.instance.primaryFocus?.context;
+    if (focused != null && focused.widget is EditableText) return false;
+    return _onKey(e) == KeyEventResult.handled;
+  }
+
+  /// 遥控器 / 键盘按键
+  ///
+  /// 映射与在线播放页保持一致，用户不用记两套：
+  ///   确定/OK     → 播放暂停
+  ///   左右        → 快退/快进 10 秒（Shift 30 秒）
+  ///   上下        → 音量 ±10%
+  ///   多媒体键    → 对应动作
+  KeyEventResult _onKey(KeyEvent e) {
+    if (e is! KeyDownEvent && e is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final c = _ctrl;
+    final k = e.logicalKey;
+    final tv = tvModeOn;
+
+    if (tv) {
+      if (k == LogicalKeyboardKey.select ||
+          k == LogicalKeyboardKey.enter ||
+          k == LogicalKeyboardKey.numpadEnter ||
+          k == LogicalKeyboardKey.gameButtonA) {
+        if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
+        c.value.isPlaying ? c.pause() : c.play();
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.mediaPlayPause) {
+        if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
+        c.value.isPlaying ? c.pause() : c.play();
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.mediaFastForward) {
+        if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
+        _seekBy(c, const Duration(seconds: 10));
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.mediaRewind) {
+        if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
+        _seekBy(c, const Duration(seconds: -10));
+        return KeyEventResult.handled;
+      }
+    }
+
+    if (k == LogicalKeyboardKey.space) {
+      if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
+      c.value.isPlaying ? c.pause() : c.play();
+      return KeyEventResult.handled;
+    }
+
+    if (k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.arrowRight) {
+      if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
+      final big = HardwareKeyboard.instance.isShiftPressed;
+      final fwd = k == LogicalKeyboardKey.arrowRight;
+      final secs = big ? 30 : 10;
+      _seekBy(c, Duration(seconds: fwd ? secs : -secs));
+      return KeyEventResult.handled;
+    }
+
+    if (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.arrowDown) {
+      if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
+      final up = k == LogicalKeyboardKey.arrowUp;
+      c.setVolume(
+          (c.value.volume + (up ? 0.1 : -0.1)).clamp(0.0, 1.0));
+      return KeyEventResult.handled;
+    }
+
+    if (k == LogicalKeyboardKey.keyF) {
+      _toggleFullscreen();
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
+  }
+
+  /// 相对当前位置跳转（负数后退），夹在 [0, duration] 内
+  void _seekBy(VideoPlayerController c, Duration delta) {
+    var target = c.value.position + delta;
+    if (target < Duration.zero) target = Duration.zero;
+    if (target > c.value.duration) target = c.value.duration;
+    c.seekTo(target);
   }
 
   Future<void> _loadDanmaku() async {
@@ -153,6 +249,9 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
 
   @override
   void dispose() {
+    if (isDesktop || tvModeOn) {
+      HardwareKeyboard.instance.removeHandler(_onGlobalKey);
+    }
     // 离开就放开常亮，否则回到列表页屏幕还一直亮着
     unawaited(ScreenAwake.release());
     _ctrl?.dispose();

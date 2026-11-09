@@ -8,17 +8,29 @@ import '../core/api.dart';
 import '../core/layout.dart';
 import '../core/models.dart';
 import '../theme.dart';
+import 'tv_focus.dart';
 
 /// 剧集卡片（竖版海报）
 ///
 /// 桌面端加鼠标悬停反馈：指针变手型、卡片微微上浮、标题变亮。
 /// 手机上永远碰不到 hover，不会有多余开销（isDesktop 判断在编译期常量外，
 /// 但 MouseRegion 在触屏设备上不产生事件）。
+///
+/// TV 模式下外面套一层 [TvFocus]：GestureDetector 只认触摸事件，
+/// 不挂焦点节点的话遥控器方向键根本停不到卡片上（详见 tv_focus.dart）。
 class DramaCard extends StatefulWidget {
   final Drama drama;
   final VoidCallback onTap;
 
-  const DramaCard({super.key, required this.drama, required this.onTap});
+  /// TV 模式下是否为页面初始焦点
+  final bool autofocus;
+
+  const DramaCard({
+    super.key,
+    required this.drama,
+    required this.onTap,
+    this.autofocus = false,
+  });
 
   @override
   State<DramaCard> createState() => _DramaCardState();
@@ -30,7 +42,7 @@ class _DramaCardState extends State<DramaCard> {
   @override
   Widget build(BuildContext context) {
     final drama = widget.drama;
-    return MouseRegion(
+    final body = MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
@@ -121,6 +133,15 @@ class _DramaCardState extends State<DramaCard> {
         ),
       ),
     );
+
+    // 非 TV 模式直接返回原组件，不引入任何额外节点
+    if (!isTv(context)) return body;
+    return TvFocus(
+      autofocus: widget.autofocus,
+      radius: 10,
+      onActivate: widget.onTap,
+      child: body,
+    );
   }
 
   Widget _poster() {
@@ -132,7 +153,7 @@ class _DramaCardState extends State<DramaCard> {
       // 按解码尺寸缓存：源站海报多为 1000px 以上的原图，
       // 网格里实际只占 220px 宽，按原图解码纯属浪费内存——
       // 一屏十几张原图足以让低端机频繁 GC 掉帧。
-      memCacheWidth: 480,
+      memCacheWidth: isTv(context) ? 640 : 480,
       placeholder: (_, __) => _placeholder(),
       errorWidget: (_, __, ___) => _placeholder(),
     );
@@ -226,12 +247,21 @@ class PagedGrid extends StatefulWidget {
   final EdgeInsets padding;
   final double aspect;
 
+  /// TV 下是否让第一张卡自动获得焦点
+  ///
+  /// 不能每个网格都给自己开：首页是 TabBarView，它会同时把相邻页
+  /// 留在树上（为了滑动动画）。若每个网格都 autofocus，两个页面
+  /// 会争夺同一个焦点，光标可能落到用户看不见的相邻 Tab 里，
+  /// 表现就是"方向键乱跳"或"按了没反应"。由外层按当前 Tab 决定。
+  final bool autoFocusFirst;
+
   const PagedGrid({
     super.key,
     required this.loader,
     required this.onTap,
     this.padding = const EdgeInsets.fromLTRB(12, 8, 12, 16),
     this.aspect = 0.56,
+    this.autoFocusFirst = false,
   });
 
   @override
@@ -350,13 +380,16 @@ class PagedGridState extends State<PagedGrid>
       return const EmptyView(text: '暂无内容');
     }
     // 宽屏把网格夹在舒适宽度内，超宽屏两侧留白比塞满更耐看
+    final tv = isTv(context);
     return ContentClamp(
       child: RefreshIndicator(
         onRefresh: refresh,
         child: GridView.builder(
           controller: _scroll,
           padding: widget.padding,
-          gridDelegate: posterGridDelegate(aspect: widget.aspect),
+          // TV 下换更大的目标宽度与间距（见 layout.dart 的说明）
+          gridDelegate:
+              posterGridDelegate(aspect: widget.aspect, tv: tv),
           itemCount: _items.length + (_end ? 0 : 1),
           itemBuilder: (c, i) {
             if (i >= _items.length) {
@@ -386,7 +419,14 @@ class PagedGridState extends State<PagedGrid>
               );
             }
             final d = _items[i];
-            return DramaCard(drama: d, onTap: () => widget.onTap(d));
+            return DramaCard(
+              drama: d,
+              onTap: () => widget.onTap(d),
+              // 只有外层明确指定时才给第一张卡初始焦点。
+              // 见 PagedGrid.autoFocusFirst 的说明：多个网格同时
+              // autofocus 会互相抢焦点。
+              autofocus: tv && widget.autoFocusFirst && i == 0,
+            );
           },
         ),
       ),

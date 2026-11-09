@@ -8,11 +8,13 @@ import 'core/download.dart';
 import 'core/history.dart';
 import 'core/layout.dart';
 import 'core/theme_settings.dart';
+import 'core/tv.dart';
 import 'core/version.dart';
 import 'pages/home_page.dart';
 import 'pages/profile_page.dart';
 import 'theme.dart';
 import 'widgets/danmaku_overlay.dart';
+import 'widgets/tv_focus.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -74,6 +76,14 @@ Future<void> _restoreInBackground() async {
   } catch (e) {
     debugPrint('[BOOT] theme prefs restore failed: $e');
   }
+  // TV 探测要过一次 MethodChannel（原生侧查 UiModeManager），
+  // 比读 SharedPreferences 略贵，放在最后。相同理由不阻塞首帧：
+  // 探测结果通过 ValueNotifier 通知，界面自己切到遥控器布局。
+  try {
+    await TvMode.instance.restore();
+  } catch (e) {
+    debugPrint('[BOOT] tv mode restore failed: $e');
+  }
   debugPrint('[BOOT] restore done');
 }
 
@@ -101,13 +111,25 @@ class _ZhuijuAppState extends State<ZhuijuApp> {
     // 下面所有页面靠 Theme.of / palette 自动跟随，不需要各自监听。
     return ValueListenableBuilder<AppThemeMode>(
       valueListenable: ThemeSettings.instance.mode,
-      builder: (ctx, mode, _) => MaterialApp(
-        title: kAppTitle,
-        debugShowCheckedModeBanner: false,
-        theme: buildTheme(Brightness.light),
-        darkTheme: buildTheme(Brightness.dark),
-        themeMode: mode.material,
-        home: const RootPage(),
+      builder: (ctx, mode, _) => ValueListenableBuilder<bool>(
+        // TV 模式同理：探测结果可能比首帧晚到（走了一次 MethodChannel），
+        // 设置里也能手动切换。放在这里订阅一次，整棵树自动重建，
+        // 各页面不必各自监听 TvMode.instance.enabled。
+        valueListenable: TvMode.instance.enabled,
+        builder: (ctx2, tv, __) => MaterialApp(
+          title: kAppTitle,
+          debugShowCheckedModeBanner: false,
+          theme: buildTheme(Brightness.light),
+          darkTheme: buildTheme(Brightness.dark),
+          // TV 上「跟随系统」实际取深色：客厅环境光线暗，大屏白底
+          // 满屏发光很刺眼，而电视系统的「深色模式」上报又经常不可靠
+          // （不少盒子永远报 light）。用户显式选浅色时仍然尊重，
+          // 这里是只在 auto 档做的兜底。
+          themeMode: (tv && mode == AppThemeMode.system)
+              ? ThemeMode.dark
+              : mode.material,
+          home: const RootPage(),
+        ),
       ),
     );
   }
@@ -134,6 +156,7 @@ class _RootPageState extends State<RootPage> {
   Widget build(BuildContext context) {
     // 桌面/平板把导航挪到左侧：底部横条是手机形态，宽屏下既浪费
     // 纵向空间又不符合桌面软件的操作习惯（左上角才是导航区）。
+    // TV 也走这里（useSideNav 对 TV 恒为 true，理由见 layout.dart）。
     if (useSideNav(context)) {
       return Scaffold(
         body: Row(
@@ -146,7 +169,18 @@ class _RootPageState extends State<RootPage> {
             Expanded(
               child: IndexedStack(
                 index: _index,
-                children: const [HomePage(), ProfilePage()],
+                // IndexedStack 会把所有子页面都留在 widget 树里（只是不绘制
+                // 非当前页）。对触摸没影响，但**焦点系统不认「看不见」**：
+                // 遥控器方向键会走进被隐藏那一页的卡片，光标落到屏幕外，
+                // 表现为"按方向键没反应"。用 ExcludeFocus 把非当前页的
+                // 焦点子树摘掉。
+                children: [
+                  for (final (i, page) in const [HomePage(), ProfilePage()].indexed)
+                    ExcludeFocus(
+                      excluding: i != _index,
+                      child: TickerMode(enabled: i == _index, child: page),
+                    ),
+                ],
               ),
             ),
           ],
@@ -156,7 +190,13 @@ class _RootPageState extends State<RootPage> {
     return Scaffold(
       body: IndexedStack(
         index: _index,
-        children: const [HomePage(), ProfilePage()],
+        children: [
+          for (final (i, page) in const [HomePage(), ProfilePage()].indexed)
+            ExcludeFocus(
+              excluding: i != _index,
+              child: TickerMode(enabled: i == _index, child: page),
+            ),
+        ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
@@ -194,8 +234,11 @@ class _SideRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // TV 下把导航栏加宽：字号和图标都放大了，208 装不下
+    // 「图标 + 文字 + 内边距」，会把中文挤到换行。
+    final tv = isTv(context);
     return Container(
-      width: 208,
+      width: tv ? 268 : 208,
       color: context.palette.card.withValues(alpha: 0.6),
       child: SafeArea(
         right: false,
@@ -204,12 +247,12 @@ class _SideRail extends StatelessWidget {
           children: [
             // 顶部品牌区
             Padding(
-              padding: const EdgeInsets.fromLTRB(18, 20, 14, 22),
+              padding: EdgeInsets.fromLTRB(tv ? 22 : 18, tv ? 26 : 20, 14, tv ? 28 : 22),
               child: Row(
                 children: [
                   Container(
-                    width: 30,
-                    height: 30,
+                    width: tv ? 38 : 30,
+                    height: tv ? 38 : 30,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(8),
                       gradient: const LinearGradient(
@@ -218,14 +261,14 @@ class _SideRail extends StatelessWidget {
                         colors: [Color(0xFFFF8A4C), kAccent],
                       ),
                     ),
-                    child: const Icon(Icons.play_arrow_rounded,
-                        color: Colors.white, size: 20),
+                    child: Icon(Icons.play_arrow_rounded,
+                        color: Colors.white, size: tv ? 26 : 20),
                   ),
                   const SizedBox(width: 10),
-                  const Text(
+                  Text(
                     kAppTitle,
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: tv ? 22 : 16,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.3,
                     ),
@@ -282,8 +325,9 @@ class _RailItemState extends State<_RailItem> {
   @override
   Widget build(BuildContext context) {
     final active = widget.active;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+    final tv = isTv(context);
+    final body = Padding(
+      padding: EdgeInsets.symmetric(horizontal: tv ? 12 : 10, vertical: tv ? 5 : 2),
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hover = true),
@@ -293,7 +337,12 @@ class _RailItemState extends State<_RailItem> {
           behavior: HitTestBehavior.opaque,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+            // TV 下把导航项做得更高更大：遥控器只按上下，
+            // 每项太矮会导致「按一下跳过两项」的错觉，也难瞄准。
+            padding: EdgeInsets.symmetric(
+              horizontal: tv ? 14 : 12,
+              vertical: tv ? 16 : 11,
+            ),
             decoration: BoxDecoration(
               color: active
                   ? kAccent.withValues(alpha: 0.16)
@@ -304,14 +353,14 @@ class _RailItemState extends State<_RailItem> {
               children: [
                 Icon(
                   active ? widget.selectedIcon : widget.icon,
-                  size: 20,
+                  size: tv ? 26 : 20,
                   color: active ? kAccent : context.palette.textDim,
                 ),
-                const SizedBox(width: 11),
+                SizedBox(width: tv ? 14 : 11),
                 Text(
                   widget.label,
                   style: TextStyle(
-                    fontSize: 13.5,
+                    fontSize: tv ? 17 : 13.5,
                     fontWeight: active ? FontWeight.w600 : FontWeight.w400,
                     color: active ? kAccent : context.palette.onSurface,
                   ),
@@ -321,6 +370,13 @@ class _RailItemState extends State<_RailItem> {
           ),
         ),
       ),
+    );
+
+    if (!tv) return body;
+    return TvFocus(
+      radius: 9,
+      onActivate: widget.onTap,
+      child: body,
     );
   }
 }

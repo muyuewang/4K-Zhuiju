@@ -11,10 +11,32 @@
     <!-- 保持屏幕常亮（播放时） -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
 
+    <!-- DLNA 投屏：搜索设备靠 SSDP 多播。
+         这两条缺一不可：
+           - CHANGE_WIFI_MULTICAST_STATE：申请 MulticastLock 的许可。
+             Wi-Fi 芯片默认丢弃目的地址不是本机的多播包，没有这把锁
+             就永远收不到设备的搜索响应（表现为「一台设备都搜不到」）。
+           - ACCESS_WIFI_STATE：创建 MulticastLock 需要读 WifiManager 状态。 -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+
+    <!-- ============ TV 兼容声明 ============
+         这两个 required="false" 是「一个包同时装手机和电视」的关键：
+         不写的话，系统会按隐含特性（触屏）过滤，电视盒子的应用列表里
+         根本看不到这个 APK。电视没有触摸屏、也不一定声明 leanback，
+         必须显式放宽。 -->
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false"/>
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="false"/>
+
     <application
         android:label="4K追剧"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
+        android:banner="@drawable/tv_banner"
         android:usesCleartextTraffic="true"
         android:requestLegacyExternalStorage="true">
         <activity
@@ -37,6 +59,13 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- TV 桌面（Leanback Launcher）只认这个 category。
+                 少了它，APK 能装进盒子，但在电视桌面上不出现，
+                 用户只能靠 adb 或第三方文件管理器启动。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

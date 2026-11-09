@@ -127,4 +127,99 @@ void main() {
     expect(find.text('倍速'), findsOneWidget);
     expect(find.text('2X'), findsNothing);
   });
+
+  // ---------------- 浮层可点击性 ----------------
+  //
+  // 用户反馈「竖屏和横屏的倍速、音量都显示不全、点了没反应」。
+  // 根因：浮层原本画在控制条自己的 Stack 里，向上弹出 200+px，
+  // 一定超出 Stack 的尺寸。Clip.none 只让它「画」出去，
+  // 命中测试仍被父级尺寸卡死；竖屏还多一层 SingleChildScrollView 裁剪。
+  // 这几个测试用「矮容器 + 滚动视图」把原场景复现出来，
+  // 保证浮层必须挂在 Overlay 上，不能退回局部 Stack。
+
+  Future<void> pumpInScroll(WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 60),
+                SizedBox(
+                  width: 420,
+                  height: 90, // 比速度面板（232px）矮得多
+                  child: ColoredBox(
+                    color: Colors.black,
+                    child: PlayerControlBar(ctrl: ctrl),
+                  ),
+                ),
+                const SizedBox(height: 500),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+  }
+
+  testWidgets('矮容器里倍速面板完整显示，并且点得到', (tester) async {
+    await pumpInScroll(tester);
+
+    await tester.tap(find.text('倍速'));
+    await tester.pumpAndSettle();
+
+    // 7 档全部在树里：显示不全的话这里就会缺项
+    for (final s in ['0.5X', '0.75X', '1X', '1.25X', '1.5X', '1.75X', '2X']) {
+      expect(find.text(s), findsOneWidget, reason: '$s 应该可见');
+    }
+
+    // 真正点一下，验证命中测试能穿透到 Overlay 上的浮层
+    await tester.tap(find.text('1.5X'));
+    await tester.pumpAndSettle();
+
+    expect(ctrl.value.playbackSpeed, 1.5);
+    // 选完自动收起，按钮变成 1.5X
+    expect(find.text('1.5X'), findsOneWidget);
+    expect(find.text('0.5X'), findsNothing);
+  });
+
+  testWidgets('矮容器里音量面板能改音量', (tester) async {
+    await pumpInScroll(tester);
+
+    await tester.tap(find.byIcon(Icons.volume_up_rounded));
+    await tester.pumpAndSettle();
+
+    // 面板里的百分比读数（进度条的 Slider 也在树里，所以按类型找有 2 个）
+    expect(find.text('100'), findsOneWidget);
+    expect(find.byType(Slider), findsNWidgets(2));
+
+    // 直接驱动浮层里 Slider 的回调，验证它接的是当前 controller。
+    // 用 RotatedBox 精确定位音量滑杆，别按「第几个 Slider」猜顺序。
+    final volSlider = tester.widget<Slider>(find.descendant(
+      of: find.byType(RotatedBox),
+      matching: find.byType(Slider),
+    ));
+    volSlider.onChanged!(0.4);
+    await tester.pumpAndSettle();
+
+    expect(ctrl.value.volume, closeTo(0.4, 0.001));
+    expect(find.text('40'), findsOneWidget);
+    expect(find.text('100'), findsNothing);
+  });
+
+  testWidgets('点浮层以外的地方会收起面板', (tester) async {
+    await pumpInScroll(tester);
+
+    await tester.tap(find.text('倍速'));
+    await tester.pumpAndSettle();
+    expect(find.text('0.5X'), findsOneWidget);
+
+    // 点顶部那块空白区域（不在浮层上）
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    expect(find.text('0.5X'), findsNothing);
+    expect(find.text('倍速'), findsOneWidget);
+  });
 }

@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../core/download.dart';
 import '../core/layout.dart';
 import '../theme.dart';
+import '../widgets/tv_focus.dart';
 import 'local_player_page.dart';
 
 class DownloadPage extends StatefulWidget {
@@ -107,20 +108,21 @@ class _DownloadPageState extends State<DownloadPage> {
   Widget _tile(BuildContext context, DownloadTask t) {
     final isDone = t.state == DownloadState.done;
     final isRunning = t.state == DownloadState.running;
+    final tv = isTv(context);
 
-    return InkWell(
+    final body = InkWell(
       // 已完成的文件点一下直接本地播放：之前这页只有「删除」，
       // 用户下完几百 MB 却没有任何播放入口，等于白下。
       onTap: isDone && (t.filePath?.isNotEmpty ?? false)
           ? () => _play(t)
           : null,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+        padding: EdgeInsets.fromLTRB(16, tv ? 16 : 10, 8, tv ? 16 : 10),
         child: Row(
           children: [
             Container(
-              width: 40,
-              height: 40,
+              width: tv ? 48 : 40,
+              height: tv ? 48 : 40,
               decoration: BoxDecoration(
                 color: context.palette.card,
                 borderRadius: BorderRadius.circular(9),
@@ -132,7 +134,7 @@ class _DownloadPageState extends State<DownloadPage> {
                         ? Icons.downloading_rounded
                         : Icons.pause_circle_outline_rounded),
                 color: isDone ? kAccent : kAccent,
-                size: isDone ? 26 : 22,
+                size: isDone ? (tv ? 32 : 26) : (tv ? 26 : 22),
               ),
             ),
             const SizedBox(width: 12),
@@ -144,8 +146,9 @@ class _DownloadPageState extends State<DownloadPage> {
                     t.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 13.5, fontWeight: FontWeight.w500),
+                    style: TextStyle(
+                        fontSize: tv ? 16 : 13.5,
+                        fontWeight: FontWeight.w500),
                   ),
                   const SizedBox(height: 5),
                   if (isDone)
@@ -228,6 +231,11 @@ class _DownloadPageState extends State<DownloadPage> {
         ),
       ),
     );
+
+    // InkWell 自身能聚焦并响应确定键，这里只补一圈可见描边：
+    // 电视上没有鼠标指针，看不出选中哪一行就没法操作。
+    if (!tv) return body;
+    return TvFocusRing(radius: 10, child: body);
   }
 
   /// 进度文案：带速率与剩余时间，光一个百分比看不出还要等多久

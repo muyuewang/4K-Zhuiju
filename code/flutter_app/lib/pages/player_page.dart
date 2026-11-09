@@ -28,6 +28,7 @@ import 'package:video_player/video_player.dart';
 import '../core/api.dart';
 import '../core/danmaku.dart';
 import '../core/desktop_window.dart';
+import '../core/dlna.dart';
 import '../core/download.dart';
 import '../core/hls_proxy.dart';
 import '../core/layout.dart';
@@ -36,10 +37,13 @@ import '../core/history.dart';
 import '../core/models.dart';
 import '../core/screen_awake.dart';
 import '../core/source_picker.dart';
+import '../core/tv.dart';
 import '../theme.dart';
+import '../widgets/cast_sheet.dart';
 import '../widgets/common.dart';
 import '../widgets/danmaku_overlay.dart';
 import '../widgets/player_controls.dart';
+import '../widgets/tv_focus.dart';
 
 /// 接口返回了「不是地址」的结果（如独家短剧的专用令牌）
 ///
@@ -68,6 +72,10 @@ class PlayerPage extends StatefulWidget {
   /// 用于全屏选集、按源名精确换源，以及判断「有没有下一集」。
   final Map<String, List<DramaVideo>> sources;
 
+  /// 起播位置（秒）。从「最近观看」直接续播时传入，
+  /// 播放器初始化完成后自动跳到该位置。
+  final int startAtSec;
+
   const PlayerPage({
     super.key,
     required this.video,
@@ -76,6 +84,7 @@ class PlayerPage extends StatefulWidget {
     this.dramaId = 0,
     this.alternates = const [],
     this.sources = const {},
+    this.startAtSec = 0,
   });
 
   @override
@@ -113,8 +122,20 @@ class _PlayerPageState extends State<PlayerPage> {
   bool _showEpisodes = false;
   bool _showSources = false;
 
+  /// 当前投屏的设备名（null 表示没在投屏）。
+  /// 用 Dlna.instance.session 也能查，但它是普通字段不触发重建，
+  /// 状态条不会自己出现，所以这里保存一份并配合 setState。
+  String? _castDeviceName;
+
   /// 本集是否已经处理过「播完」，防止 listener 每帧重复触发自动连播
   bool _autoNextHandled = false;
+
+  /// 续播只做一次。
+  ///
+  /// widget.startAtSec 是「上次看到哪」的快照，只在进页面时有效。
+  /// 换集/换源后如果还拿它去 seek，用户点了下一集却会被拽回上一集
+  /// 的进度，是最容易被当成「换集没反应」的坑。
+  bool _resumeApplied = false;
 
   /// 自动连播倒计时（null 表示没有在等待）
   Timer? _countdownTimer;
@@ -170,7 +191,12 @@ class _PlayerPageState extends State<PlayerPage> {
     // Focus 子树就收不到按键了，表现为「F 键/空格/方向键全都没反应」，
     // 而点界面上的全屏按钮却正常——问题在焦点，不在原生通道。
     // HardwareKeyboard 的 handler 挂在引擎层，与焦点无关。
-    if (isDesktop) {
+    //
+    // TV 也走这条路，理由更硬：遥控器按下左右键时，焦点可能正停在
+    // 选集面板的某一集上，走 Focus 子树的话方向键会被「移动焦点」
+    // 吃掉，根本到不了快进逻辑。全局监听才能保证按的每个键都落到
+    // 播放控制上。
+    if (isDesktop || tvModeOn) {
       HardwareKeyboard.instance.addHandler(_onGlobalKey);
     }
     _resolve();
@@ -205,7 +231,7 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   void dispose() {
     desktopFullscreen.removeListener(_onNativeFullscreenChanged);
-    if (isDesktop) {
+    if (isDesktop || tvModeOn) {
       HardwareKeyboard.instance.removeHandler(_onGlobalKey);
     }
     // 离开播放页必须放开常亮，否则回到列表页手机还一直亮着屏。
@@ -216,6 +242,11 @@ class _PlayerPageState extends State<PlayerPage> {
     _noticeTimer?.cancel();
     _saveHistory();
     _ctrl?.dispose();
+    // 退出播放页时结束投屏：不主动 Stop，电视会停在最后一帧，
+    // 用户还得自己拿遥控器退出投屏 App。异步发出即可，dispose 不能 await。
+    if (Dlna.instance.session != null) {
+      unawaited(Dlna.instance.stop());
+    }
     // 离开播放页就关掉本地 HLS 代理，别让 127.0.0.1 的端口一直挂着。
     // 不 await：dispose 是同步的，代理关闭失败也不该影响页面销毁。
     if (isDesktop) unawaited(HlsProxy.instance.shutdown());
@@ -238,11 +269,12 @@ class _PlayerPageState extends State<PlayerPage> {
     }
     final c = _ctrl;
     final k = e.logicalKey;
+    final tv = tvModeOn;
 
     // 全屏时 Esc 由原生 WM_KEYDOWN 接管（会退出窗口全屏并回调），
     // 这里不再重复处理，避免一次按键退两次。
     if (k == LogicalKeyboardKey.escape) {
-      if (_fullscreen) return KeyEventResult.handled;
+      if (_fullscreen && isDesktop) return KeyEventResult.handled;
       if (_showEpisodes || _showSources) {
         setState(() {
           _showEpisodes = false;
@@ -250,7 +282,80 @@ class _PlayerPageState extends State<PlayerPage> {
         });
         return KeyEventResult.handled;
       }
+      // TV 上没有 Esc，遥控器的返回键在 Flutter 里映射成 goBack，
+      // 由 PopScope 接管；这里处理的是外接键盘场景。
       return KeyEventResult.ignored;
+    }
+
+    // ---- 遥控器「确定 / OK」键 ----
+    //
+    // 电视上的确定键在 Flutter 里是 select（对应 Android 的
+    // KEYCODE_DPAD_CENTER），部分盒子报 enter。两种都认。
+    //
+    // 行为按主流电视播放器：控制条藏着时先呼出来，已经出来时切播放/暂停。
+    // 直接做成「一按就暂停」的话，用户想调音量按一下确定，画面停了，
+    // 反而添乱。
+    if (tv &&
+        (k == LogicalKeyboardKey.select ||
+            k == LogicalKeyboardKey.enter ||
+            k == LogicalKeyboardKey.numpadEnter ||
+            k == LogicalKeyboardKey.gameButtonA)) {
+      if (_showEpisodes || _showSources) {
+        // 面板开着时确定键不做事，交给面板里的焦点项处理
+        return KeyEventResult.ignored;
+      }
+      if (!_showCtrl) {
+        setState(() => _showCtrl = true);
+        return KeyEventResult.handled;
+      }
+      if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
+      c.value.isPlaying ? c.pause() : c.play();
+      return KeyEventResult.handled;
+    }
+
+    // ---- 遥控器多媒体键 ----
+    //
+    // 不少遥控器（尤其电视自带的那种）带播放/暂停、快进、快退的专用键，
+    // 上报的是 mediaPlayPause / mediaFastForward 这类 key。
+    // 不处理的话这些键完全没反应，而它们恰恰是用户最想按的。
+    if (tv) {
+      if (k == LogicalKeyboardKey.mediaPlayPause) {
+        if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
+        c.value.isPlaying ? c.pause() : c.play();
+        setState(() => _showCtrl = true);
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.mediaPlay) {
+        if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
+        c.play();
+        setState(() => _showCtrl = true);
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.mediaPause) {
+        if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
+        c.pause();
+        setState(() => _showCtrl = true);
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.mediaFastForward ||
+          k == LogicalKeyboardKey.mediaTrackNext) {
+        if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
+        _seekBy(c, const Duration(seconds: 10));
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.mediaRewind ||
+          k == LogicalKeyboardKey.mediaTrackPrevious) {
+        if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
+        _seekBy(c, const Duration(seconds: -10));
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.mediaStop) {
+        if (c == null) return KeyEventResult.ignored;
+        c.pause();
+        c.seekTo(Duration.zero);
+        setState(() => _showCtrl = true);
+        return KeyEventResult.handled;
+      }
     }
 
     if (k == LogicalKeyboardKey.space) {
@@ -260,24 +365,33 @@ class _PlayerPageState extends State<PlayerPage> {
       return KeyEventResult.handled;
     }
 
+    // ---- 方向键 ----
+    //
+    // TV 上左右键被选中面板时应该用来选集/选源，而不是快进；
+    // 但本项目的面板项是靠焦点系统走的，方向键会先被焦点消费掉，
+    // 到不了这里（HardwareKeyboard 的 handler 在焦点之前）。
+    // 所以这里统一按「快进/快退」处理，面板内的移动交给焦点系统：
+    // 只要面板打开时把左右键让出去就行。
     if (k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.arrowRight) {
       if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
+      // 面板打开时左右键让给焦点系统（选集网格里横向移动）
+      if (tv && (_showEpisodes || _showSources)) {
+        return KeyEventResult.ignored;
+      }
       // Shift + 方向键步子更大，和主流播放器一致
       final big = HardwareKeyboard.instance.isShiftPressed;
-      final step = Duration(seconds: big ? 30 : 10);
       final fwd = k == LogicalKeyboardKey.arrowRight;
-      final total = c.value.duration;
-      var target = c.value.position + (fwd ? step : -step);
-      if (target < Duration.zero) target = Duration.zero;
-      if (target > total) target = total;
-      c.seekTo(target);
-      _showNotice(fwd ? '快进 ${big ? 30 : 10} 秒' : '快退 ${big ? 30 : 10} 秒');
-      setState(() => _showCtrl = true);
+      final secs = big ? 30 : 10;
+      _seekBy(c, Duration(seconds: fwd ? secs : -secs));
       return KeyEventResult.handled;
     }
 
     if (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.arrowDown) {
       if (c == null) return KeyEventResult.ignored;
+      // 面板打开时上下键让给焦点系统（选集列表里纵向移动）
+      if (tv && (_showEpisodes || _showSources)) {
+        return KeyEventResult.ignored;
+      }
       final up = k == LogicalKeyboardKey.arrowUp;
       final v = (c.value.volume + (up ? 0.1 : -0.1)).clamp(0.0, 1.0);
       c.setVolume(v);
@@ -300,6 +414,18 @@ class _PlayerPageState extends State<PlayerPage> {
     }
 
     return KeyEventResult.ignored;
+  }
+
+  /// 相对当前位置跳转（负数表示后退），并夹在 [0, duration] 内
+  void _seekBy(VideoPlayerController c, Duration delta) {
+    final total = c.value.duration;
+    var target = c.value.position + delta;
+    if (target < Duration.zero) target = Duration.zero;
+    if (target > total) target = total;
+    c.seekTo(target);
+    final secs = delta.inSeconds.abs();
+    _showNotice('${delta.isNegative ? '快退' : '快进'} $secs 秒');
+    setState(() => _showCtrl = true);
   }
 
   /// 释放旧播放器（换源/重新解析前必须调用，否则会泄漏解码器）
@@ -426,6 +552,12 @@ class _PlayerPageState extends State<PlayerPage> {
     debugPrint('[PLAY] src=${_cur.sourceCn.isNotEmpty ? _cur.sourceCn : _cur.source}'
         ' tip=$_tip ep=${_cur.episode} url=$url');
 
+    // 投屏中换集/换源：地址变了，同步推给电视。不等待结果，
+    // 推流和本地播放器初始化各走各的，互不拖慢。
+    if (Dlna.instance.session != null) {
+      unawaited(_recast(url));
+    }
+
     await _startPlay(url);
   }
 
@@ -476,7 +608,39 @@ class _PlayerPageState extends State<PlayerPage> {
       // 超时保护：源站半死不活时 initialize 可能挂几分钟，
       // 没有超时用户只会看到一个永远转圈的 loading。
       await ctrl.initialize().timeout(const Duration(seconds: 30));
-      await ctrl.play();
+
+      // 续播：仅首次进入、且调用方给了进度时跳一次。
+      // 必须在 play() 之前 seek —— 先 play 再 seek，用户会先听到
+      // 开头的几百毫秒声音再跳走，观感很差。
+      if (!_resumeApplied && widget.startAtSec > 0) {
+        _resumeApplied = true;
+        final total = ctrl.value.duration;
+        var target = Duration(seconds: widget.startAtSec);
+        // 已经看到结尾（差 5 秒以内）就别再跳过去了，那样一进去就是
+        // 结束画面、还会立刻触发自动连播。从头开始更符合预期。
+        if (total > Duration.zero &&
+            target >= total - const Duration(seconds: 5)) {
+          target = Duration.zero;
+        }
+        if (target > Duration.zero) {
+          try {
+            await ctrl.seekTo(target);
+            _tip = '已续播到 ${_mmss(target)}';
+          } catch (_) {
+            // seek 失败不影响正常播放，静默降级
+          }
+        }
+      }
+
+      // 投屏中：本地只解码、不出声也不继续走进度。
+      // 换集/换源会走到这里，若照常 play()，手机会和电视同时播，
+      // 两个声音叠在一起基本没法听。
+      if (Dlna.instance.session != null) {
+        await ctrl.pause();
+        await ctrl.setVolume(0);
+      } else {
+        await ctrl.play();
+      }
 
       if (!mounted) {
         await ctrl.dispose();
@@ -754,6 +918,74 @@ class _PlayerPageState extends State<PlayerPage> {
         .showSnackBar(SnackBar(content: Text(s), duration: const Duration(seconds: 2)));
   }
 
+  /// 把时长格式化成 mm:ss（超过 1 小时则是 h:mm:ss）
+  String _mmss(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+
+  // ---------------- 投屏 ----------------
+
+  /// 打开设备列表并投屏。
+  ///
+  /// 投屏成功后把本地播放器暂停：电视和手机同时出声是最刺耳的体验，
+  /// 而且手机继续解码会白耗电。用户点「停止投屏」再恢复本地播放。
+  Future<void> _openCast() async {
+    if (_realUrl.isEmpty) {
+      _toast('地址还没解析好，稍等一下');
+      return;
+    }
+    // 记录当前地址：用户在列表里挑设备的这几秒里可能刚好换集，
+    // 推流必须用「点确定那一刻」的最新地址。
+    await showCastSheet(
+      context,
+      onPick: (d) async {
+        final url = _realUrl;
+        if (url.isEmpty) return false;
+        final title = widget.dramaName.isEmpty
+            ? _cur.epLabel
+            : '${widget.dramaName} ${_cur.epLabel}';
+        final ok = await Dlna.instance.play(d, url, title: title);
+        if (!ok || !mounted) return ok;
+        // 本地静音并暂停，画面留着方便用户看进度
+        await _ctrl?.pause();
+        setState(() => _castDeviceName = d.name);
+        _toast('已投屏到 ${d.name}');
+        return true;
+      },
+    );
+  }
+
+  Future<void> _stopCast() async {
+    await Dlna.instance.stop();
+    if (!mounted) return;
+    setState(() => _castDeviceName = null);
+    // 恢复本地播放：用户点「停止投屏」通常就是想接着在手机上看了
+    try {
+      await _ctrl?.play();
+    } catch (_) {}
+    _toast('已停止投屏');
+  }
+
+  /// 投屏中换集/换源：把新地址重新推给同一台电视。
+  ///
+  /// 不重新推的话，手机已经播下一集、电视还停在上一集，
+  /// 用户会以为「投屏后选集失效了」。
+  Future<void> _recast(String url) async {
+    final s = Dlna.instance.session;
+    if (s == null) return;
+    final title = widget.dramaName.isEmpty
+        ? _cur.epLabel
+        : '${widget.dramaName} ${_cur.epLabel}';
+    final ok = await Dlna.instance.play(s.device, url, title: title);
+    if (!mounted) return;
+    if (!ok) {
+      _toast('换集后重新投屏失败，请手动停止再投一次');
+    }
+  }
+
   void _download() {
     if (_realUrl.isEmpty) {
       _toast('尚未解析到地址');
@@ -901,6 +1133,18 @@ class _PlayerPageState extends State<PlayerPage> {
           style: const TextStyle(fontSize: 15),
         ),
         actions: [
+          // 投屏只在 Android 提供：DLNA 走的是局域网 SSDP 多播，
+          // 桌面端虽然技术上能发，但用户投屏的对象通常是客厅电视，
+          // 且本地 HLS 代理地址（127.0.0.1）电视根本访问不到。
+          if (!isDesktop && _realUrl.isNotEmpty)
+            IconButton(
+              tooltip: _castDeviceName == null ? '投屏' : '投屏中',
+              icon: Icon(_castDeviceName == null
+                  ? Icons.cast_rounded
+                  : Icons.cast_connected_rounded),
+              color: _castDeviceName == null ? null : kAccent,
+              onPressed: _openCast,
+            ),
           if (_isSeries)
             IconButton(
               tooltip: '选集',
@@ -990,6 +1234,23 @@ class _PlayerPageState extends State<PlayerPage> {
                 child: _fullscreenTopBar(),
               ),
 
+            // 投屏状态条：贴在顶栏下方。跟着控制条一起显隐，
+            // 否则沉浸看片时一条横幅会一直压在画面上。
+            if (_showCtrl && _castDeviceName != null)
+              Positioned(
+                top: 48,
+                left: 0,
+                right: 0,
+                child: SafeArea(
+                  top: false,
+                  bottom: false,
+                  child: CastBar(
+                    deviceName: _castDeviceName!,
+                    onStop: _stopCast,
+                  ),
+                ),
+              ),
+
             // 底部控制条
             if (inited && _showCtrl)
               Positioned(
@@ -1016,6 +1277,23 @@ class _PlayerPageState extends State<PlayerPage> {
                           // 弹幕开关：全屏是最常用的看弹幕场景，
                           // 开关必须在这里就能按到，不用退回竖屏。
                           const DanmakuToggleButton(),
+                          // 投屏：横屏看剧时想换到大屏是高频动作
+                          if (!isDesktop && _realUrl.isNotEmpty)
+                            IconButton(
+                              iconSize: 22,
+                              color: _castDeviceName == null
+                                  ? Colors.white
+                                  : kAccent,
+                              tooltip: '投屏',
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 6),
+                              constraints: const BoxConstraints(
+                                  minWidth: 34, minHeight: 34),
+                              icon: Icon(_castDeviceName == null
+                                  ? Icons.cast_rounded
+                                  : Icons.cast_connected_rounded),
+                              onPressed: _openCast,
+                            ),
                           IconButton(
                             iconSize: 22,
                             color: Colors.white,
@@ -1178,19 +1456,20 @@ class _PlayerPageState extends State<PlayerPage> {
 
   Widget _episodeGrid({int crossAxisCount = 4, EdgeInsets? padding}) {
     final eps = _curEpisodes;
+    final tv = tvModeOn;
     return GridView.builder(
       padding: padding ?? const EdgeInsets.fromLTRB(12, 4, 12, 16),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: crossAxisCount,
         crossAxisSpacing: 8,
         mainAxisSpacing: 8,
-        childAspectRatio: 1.75,
+        childAspectRatio: tv ? 1.5 : 1.75,
       ),
       itemCount: eps.length,
       itemBuilder: (c, i) {
         final e = eps[i];
         final active = e.path == _cur.path;
-        return GestureDetector(
+        final body = GestureDetector(
           onTap: () => _playEpisode(e),
           child: Container(
             alignment: Alignment.center,
@@ -1203,12 +1482,18 @@ class _PlayerPageState extends State<PlayerPage> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: tv ? 14 : 12,
                 color: active ? Colors.white : Colors.white70,
                 fontWeight: active ? FontWeight.w700 : FontWeight.w400,
               ),
             ),
           ),
+        );
+        if (!tv) return body;
+        return TvFocus(
+          radius: 7,
+          onActivate: () => _playEpisode(e),
+          child: body,
         );
       },
     );
@@ -1216,6 +1501,7 @@ class _PlayerPageState extends State<PlayerPage> {
 
   Widget _sourceList() {
     final cur = _srcKey(_cur);
+    final tv = tvModeOn;
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
       itemCount: _sourceNames.length,
@@ -1223,44 +1509,55 @@ class _PlayerPageState extends State<PlayerPage> {
         final n = _sourceNames[i];
         final active = n == cur;
         final cnt = widget.sources[n]?.length ?? 0;
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: GestureDetector(
-            onTap: active ? null : () => _switchToSource(n),
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: active ? kAccent.withValues(alpha: 0.18) : Colors.white10,
-                borderRadius: BorderRadius.circular(8),
-                border: active ? Border.all(color: kAccent, width: 1) : null,
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      n,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: active ? kAccent : Colors.white,
-                        fontWeight:
-                            active ? FontWeight.w600 : FontWeight.w400,
-                      ),
+        final body = GestureDetector(
+          onTap: active ? null : () => _switchToSource(n),
+          child: Container(
+            padding: EdgeInsets.symmetric(
+                horizontal: 12, vertical: tv ? 14 : 10),
+            decoration: BoxDecoration(
+              color: active ? kAccent.withValues(alpha: 0.18) : Colors.white10,
+              borderRadius: BorderRadius.circular(8),
+              border: active ? Border.all(color: kAccent, width: 1) : null,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    n,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: tv ? 15 : 13,
+                      color: active ? kAccent : Colors.white,
+                      fontWeight: active ? FontWeight.w600 : FontWeight.w400,
                     ),
                   ),
-                  Text('$cnt 集',
-                      style:
-                          const TextStyle(fontSize: 11, color: Colors.white38)),
-                  if (active) ...[
-                    const SizedBox(width: 6),
-                    const Text('播放中',
-                        style: TextStyle(fontSize: 11, color: kAccent)),
-                  ],
+                ),
+                Text('$cnt 集',
+                    style: TextStyle(
+                        fontSize: tv ? 12.5 : 11,
+                        color: Colors.white38)),
+                if (active) ...[
+                  const SizedBox(width: 6),
+                  Text('播放中',
+                      style: TextStyle(
+                          fontSize: tv ? 12.5 : 11, color: kAccent)),
                 ],
-              ),
+              ],
             ),
+          ),
+        );
+        if (!tv) {
+          return Padding(padding: const EdgeInsets.only(bottom: 8), child: body);
+        }
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: TvFocus(
+            radius: 8,
+            onActivate: () {
+              if (!active) _switchToSource(n);
+            },
+            child: body,
           ),
         );
       },
@@ -1454,6 +1751,11 @@ class _PlayerPageState extends State<PlayerPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (_castDeviceName != null)
+                    CastBar(
+                      deviceName: _castDeviceName!,
+                      onStop: _stopCast,
+                    ),
                   _statusRow(),
                   const SizedBox(height: 10),
                   if (_ctrl != null)
@@ -1613,6 +1915,11 @@ class _PlayerPageState extends State<PlayerPage> {
                           const TextStyle(fontSize: 11.5, color: kOnVideoDim),
                     ),
                     const SizedBox(height: 10),
+                    if (_castDeviceName != null)
+                      CastBar(
+                        deviceName: _castDeviceName!,
+                        onStop: _stopCast,
+                      ),
                     _statusRow(),
                     const SizedBox(height: 10),
                     _actionButtons(),
@@ -1784,7 +2091,7 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   Widget _actionButtons() {
-    return Row(
+    final row = Row(
       children: [
         Expanded(
           child: OutlinedButton.icon(
@@ -1811,6 +2118,26 @@ class _PlayerPageState extends State<PlayerPage> {
             label: const Text('下载本集'),
           ),
         ),
+      ],
+    );
+
+    // 投屏单独占一行：和「重新解析/换源/下载」挤在一排会太窄，
+    // 而且这是新功能，藏在 AppBar 的小图标里用户根本找不到。
+    if (isDesktop || _realUrl.isEmpty) return row;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        OutlinedButton.icon(
+          onPressed: _openCast,
+          icon: Icon(_castDeviceName == null
+              ? Icons.cast_rounded
+              : Icons.cast_connected_rounded),
+          label: Text(_castDeviceName == null
+              ? '投屏到电视'
+              : '投屏中 · $_castDeviceName（点此切换设备）'),
+        ),
+        const SizedBox(height: 10),
+        row,
       ],
     );
   }

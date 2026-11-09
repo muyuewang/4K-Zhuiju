@@ -7,6 +7,7 @@ import '../core/api.dart';
 import '../core/layout.dart';
 import '../core/models.dart';
 import '../widgets/common.dart';
+import '../widgets/tv_focus.dart';
 import '../theme.dart';
 import 'detail_page.dart';
 
@@ -41,8 +42,25 @@ class _HomePageState extends State<HomePage>
 
   final Map<int, GlobalKey<PagedGridState>> _keys = {};
 
+  /// 当前 Tab 下标。TV 下要靠它决定「哪个网格的第一张卡拿初始焦点」：
+  /// TabBarView 会把相邻页一起留在树上，若每个网格都 autofocus，
+  /// 两个页面会争夺焦点，光标可能跑到看不见的隔壁 Tab。见 PagedGrid。
+  int _tabIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _tab.addListener(_onTabChanged);
+  }
+
+  void _onTabChanged() {
+    if (_tab.index == _tabIndex) return;
+    setState(() => _tabIndex = _tab.index);
+  }
+
   @override
   void dispose() {
+    _tab.removeListener(_onTabChanged);
     _tab.dispose();
     super.dispose();
   }
@@ -67,27 +85,53 @@ class _HomePageState extends State<HomePage>
     // 宽屏下左侧导航栏已有品牌区，AppBar 不再重复写「4K追剧」，
     // 把横向空间让给分类 Tab。
     final wide = useSideNav(context);
+    final tv = isTv(context);
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        title: wide ? null : const Text('4K追剧'),
-        toolbarHeight: wide ? 54 : null,
+        title: (wide || tv) ? null : const Text('4K追剧'),
+        toolbarHeight: tv ? 64 : (wide ? 54 : null),
         bottom: TabBar(
           controller: _tab,
           isScrollable: true,
           tabAlignment: TabAlignment.start,
           dividerColor: Colors.transparent,
+          // TV 下把分类 Tab 整体放大：电视上 14pt 在 3 米外基本看不清，
+          // Tab 也太窄，遥控器左右移动时容易一步跳过头。
+          labelPadding: tv
+              ? const EdgeInsets.symmetric(horizontal: 20)
+              : null,
+          labelStyle: tv
+              ? const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)
+              : null,
+          unselectedLabelStyle:
+              tv ? const TextStyle(fontSize: 18) : null,
           tabs: kCategories.map((e) => Tab(text: e.name)).toList(),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.search_rounded),
-            tooltip: '搜索',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SearchPage()),
+          if (tv)
+            // TV 下放大搜索按钮并补焦点描边，否则遥控器移到右上角
+            // 时看不出选中了没有。
+            TvFocusRing(
+              radius: 24,
+              child: IconButton(
+                iconSize: 28,
+                icon: const Icon(Icons.search_rounded),
+                tooltip: '搜索',
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SearchPage()),
+                ),
+              ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.search_rounded),
+              tooltip: '搜索',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SearchPage()),
+              ),
             ),
-          ),
-          const SizedBox(width: 4),
+          SizedBox(width: tv ? 12 : 4),
         ],
       ),
       body: TabBarView(
@@ -98,6 +142,8 @@ class _HomePageState extends State<HomePage>
             key: key,
             loader: (p) => _loader(i, p),
             onTap: _open,
+            // 只有当前 Tab 的网格才拿初始焦点（TV 下）
+            autoFocusFirst: i == _tabIndex,
           );
         }),
       ),
@@ -234,7 +280,7 @@ class _SearchPageState extends State<SearchPage> {
     return ContentClamp(
       child: GridView.builder(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
-        gridDelegate: posterGridDelegate(),
+        gridDelegate: posterGridDelegate(tv: isTv(context)),
         itemCount: _result.length,
         itemBuilder: (c, i) {
           final d = _result[i];
@@ -243,6 +289,8 @@ class _SearchPageState extends State<SearchPage> {
             onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => DetailPage(dramaId: d.id, title: d.name),
             )),
+            // 搜索结果列表没有 Tab 并存问题，第一张可直接拿焦点
+            autofocus: i == 0,
           );
         },
       ),
@@ -251,23 +299,35 @@ class _SearchPageState extends State<SearchPage> {
 
   Widget _hotWords() {
     const words = ['尚公主', '仙逆', '凡人修仙传', '吞噬星空', '完美世界', '兰香如故'];
+    final tv = isTv(context);
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(tv ? 24 : 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('热门搜索',
-              style: TextStyle(fontSize: 13, color: context.palette.textDim)),
+              style: TextStyle(
+                  fontSize: tv ? 16 : 13,
+                  color: context.palette.textDim)),
           const SizedBox(height: 12),
           Wrap(
             spacing: 9,
             runSpacing: 9,
             children: words
-                .map((w) => ActionChip(
-                      label: Text(w, style: const TextStyle(fontSize: 12)),
-                      backgroundColor: context.palette.card,
-                      side: BorderSide.none,
-                      onPressed: () => _doSearch(w),
+                .map((w) => TvFocusRing(
+                      radius: 18,
+                      child: ActionChip(
+                        label: Text(w,
+                            style: TextStyle(fontSize: tv ? 15 : 12)),
+                        backgroundColor: context.palette.card,
+                        side: BorderSide.none,
+                        // TV 下把热词做成更大的胶囊，遥控器好瞄准
+                        padding: tv
+                            ? const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 5)
+                            : null,
+                        onPressed: () => _doSearch(w),
+                      ),
                     ))
                 .toList(),
           ),
