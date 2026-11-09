@@ -10,8 +10,8 @@ import zipfile
 
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 src = os.path.join(root_dir, "code", "flutter_app", "build", "windows", "x64", "runner", "Release")
-root = "4KZhuiju-v1.6.0-windows-x64"
-out = os.path.join(root_dir, "dist", "v1.6.0", "4KZhuiju-v1.6.0-windows-x64.zip")
+root = "4KZhuiju-v1.6.1-windows-x64"
+out = os.path.join(root_dir, "dist", "v1.6.1", "4KZhuiju-v1.6.1-windows-x64.zip")
 
 if not os.path.isdir(src):
     sys.exit(f"源目录不存在: {src}")

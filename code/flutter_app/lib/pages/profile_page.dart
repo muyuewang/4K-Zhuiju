@@ -153,7 +153,8 @@ class ProfilePage extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   '数据仅保存在本机',
-                  style: TextStyle(fontSize: 11.5, color: context.palette.textDim),
+                  style:
+                      TextStyle(fontSize: 11.5, color: context.palette.textDim),
                 ),
               ],
             ),
@@ -196,7 +197,8 @@ class ProfilePage extends StatelessWidget {
                 fontSize: 15, fontWeight: FontWeight.w700, color: kAccent),
           ),
           const SizedBox(width: 4),
-          Text(label, style: TextStyle(fontSize: 11, color: context.palette.textDim)),
+          Text(label,
+              style: TextStyle(fontSize: 11, color: context.palette.textDim)),
         ],
       );
 
@@ -208,65 +210,72 @@ class ProfilePage extends StatelessWidget {
     // 用户只能靠记忆重新搜索——这是和主流影视 App 差得最明显的一处。
     // 三个卡片在 360dp 宽的手机上刚好放得下（每个约 102dp），
     // 副标题也压到了 5 个字以内，不会换行。
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: StreamBuilder<List<DownloadTask>>(
-            stream: DownloadManager.instance.stream,
-            initialData: DownloadManager.instance.tasks,
-            builder: (c, snap) {
-              final list = snap.data ?? const <DownloadTask>[];
-              final running = list
-                  .where((t) =>
-                      t.state == DownloadState.running ||
-                      t.state == DownloadState.paused ||
-                      t.state == DownloadState.pending)
-                  .length;
-              return _entryCard(
+    //
+    // 必须套 IntrinsicHeight：调用方是 ListView / SingleChildScrollView，
+    // 纵向约束是无限大，而 stretch 会把「无限高」原样传给子卡片，
+    // 直接抛 "BoxConstraints forces an infinite height"。
+    // 布局断言一炸，排在它后面的设置区（含「主题外观」）就整块不渲染了。
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: StreamBuilder<List<DownloadTask>>(
+              stream: DownloadManager.instance.stream,
+              initialData: DownloadManager.instance.tasks,
+              builder: (c, snap) {
+                final list = snap.data ?? const <DownloadTask>[];
+                final running = list
+                    .where((t) =>
+                        t.state == DownloadState.running ||
+                        t.state == DownloadState.paused ||
+                        t.state == DownloadState.pending)
+                    .length;
+                return _entryCard(
+                  context,
+                  icon: Icons.download_rounded,
+                  title: '下载',
+                  subtitle: running > 0 ? '$running 进行中' : '${list.length} 个任务',
+                  badge: running,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const DownloadPage()),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: ValueListenableBuilder<List<FavoriteItem>>(
+              valueListenable: FavoriteStore.instance.items,
+              builder: (c, list, _) => _entryCard(
                 context,
-                icon: Icons.download_rounded,
-                title: '下载',
-                subtitle: running > 0 ? '$running 进行中' : '${list.length} 个任务',
-                badge: running,
+                icon: Icons.bookmark_rounded,
+                title: '收藏',
+                subtitle: list.isEmpty ? '还没有收藏' : '${list.length} 部在追',
                 onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const DownloadPage()),
+                  MaterialPageRoute(builder: (_) => const FavoritesPage()),
                 ),
-              );
-            },
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: ValueListenableBuilder<List<FavoriteItem>>(
-            valueListenable: FavoriteStore.instance.items,
-            builder: (c, list, _) => _entryCard(
-              context,
-              icon: Icons.bookmark_rounded,
-              title: '收藏',
-              subtitle: list.isEmpty ? '还没有收藏' : '${list.length} 部在追',
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const FavoritesPage()),
               ),
             ),
           ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: ValueListenableBuilder<List<WatchRecord>>(
-            valueListenable: HistoryStore.instance.records,
-            builder: (c, list, _) => _entryCard(
-              context,
-              icon: Icons.history_rounded,
-              title: '最近观看',
-              subtitle: list.isEmpty ? '还没有记录' : '${list.length} 条记录',
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const HistoryPage()),
+          const SizedBox(width: 10),
+          Expanded(
+            child: ValueListenableBuilder<List<WatchRecord>>(
+              valueListenable: HistoryStore.instance.records,
+              builder: (c, list, _) => _entryCard(
+                context,
+                icon: Icons.history_rounded,
+                title: '最近观看',
+                subtitle: list.isEmpty ? '还没有记录' : '${list.length} 条记录',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const HistoryPage()),
+                ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -325,8 +334,7 @@ class ProfilePage extends StatelessWidget {
             Text(
               subtitle,
               style: TextStyle(
-                  fontSize: tv ? 13 : 11,
-                  color: context.palette.textDim),
+                  fontSize: tv ? 13 : 11, color: context.palette.textDim),
             ),
           ],
         ),
@@ -353,8 +361,7 @@ class ProfilePage extends StatelessWidget {
               children: [
                 const Text(
                   '继续观看',
-                  style:
-                      TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                 ),
                 const Spacer(),
                 if (list.length > previewCount)
@@ -446,8 +453,7 @@ class ProfilePage extends StatelessWidget {
                       value: r.progress,
                       minHeight: 3,
                       backgroundColor: context.palette.bg,
-                      valueColor:
-                          const AlwaysStoppedAnimation<Color>(kAccent),
+                      valueColor: const AlwaysStoppedAnimation<Color>(kAccent),
                     ),
                   ),
                 ],
@@ -470,11 +476,13 @@ class ProfilePage extends StatelessWidget {
   // ---------------- 设置 ----------------
 
   Widget _settings(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: context.palette.card,
-        borderRadius: BorderRadius.circular(14),
-      ),
+    // 用 Material 而不是带 BoxDecoration 的 Container 来上底色：
+    // 里面是一列 ListTile，它的水波纹和背景是画在最近的 Material 上的。
+    // 如果中间夹一层 DecoratedBox，水波纹会被盖住并且 debug 版直接抛断言。
+    return Material(
+      color: context.palette.card,
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
           // 下载目录是懒创建的：第一次真正下载时才建。之前这里直接读
@@ -559,7 +567,8 @@ class ProfilePage extends StatelessWidget {
               children: [
                 Text(
                   '第三方影视客户端，内容来自公开接口，仅用于学习交流。',
-                  style: TextStyle(fontSize: 12, color: context.palette.textDim),
+                  style:
+                      TextStyle(fontSize: 12, color: context.palette.textDim),
                 ),
               ],
             ),
@@ -585,10 +594,12 @@ class ProfilePage extends StatelessWidget {
         children: [
           if (trailing != null) ...[
             Text(trailing,
-                style: TextStyle(fontSize: 11.5, color: context.palette.textDim)),
+                style:
+                    TextStyle(fontSize: 11.5, color: context.palette.textDim)),
             const SizedBox(width: 4),
           ],
-          Icon(Icons.chevron_right_rounded, size: 18, color: context.palette.textDim),
+          Icon(Icons.chevron_right_rounded,
+              size: 18, color: context.palette.textDim),
         ],
       ),
       onTap: onTap,
@@ -644,8 +655,7 @@ class ProfilePage extends StatelessWidget {
                     m.label,
                     style: TextStyle(
                       fontSize: 14,
-                      fontWeight:
-                          m == cur ? FontWeight.w600 : FontWeight.w400,
+                      fontWeight: m == cur ? FontWeight.w600 : FontWeight.w400,
                       color: m == cur ? kAccent : sheetCtx.palette.onSurface,
                     ),
                   ),
@@ -718,8 +728,7 @@ class ProfilePage extends StatelessWidget {
                     m.label,
                     style: TextStyle(
                       fontSize: 14,
-                      fontWeight:
-                          m == cur ? FontWeight.w600 : FontWeight.w400,
+                      fontWeight: m == cur ? FontWeight.w600 : FontWeight.w400,
                       color: m == cur ? kAccent : sheetCtx.palette.onSurface,
                     ),
                   ),

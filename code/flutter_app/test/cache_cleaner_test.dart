@@ -60,7 +60,7 @@ void main() {
     test('边界：差 1 字节到 1MB 时归入 MB 而不是 1024 KB', () {
       // 1048575 B = 1023.999 KB，四舍五入后正好是 1024 KB。
       // 只要不出现「1023.9 KB」这种带小数的 KB 就算对。
-      final u = CacheUsage(bytes: 1048575, files: 1);
+      const u = CacheUsage(bytes: 1048575, files: 1);
       expect(u.human, '1024 KB');
     });
   });
