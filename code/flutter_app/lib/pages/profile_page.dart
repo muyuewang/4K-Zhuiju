@@ -12,6 +12,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../core/download.dart';
+import '../core/favorites.dart';
 import '../core/history.dart';
 import '../core/layout.dart';
 import '../core/theme_settings.dart';
@@ -21,6 +22,7 @@ import '../theme.dart';
 import '../widgets/tv_focus.dart';
 import 'detail_page.dart';
 import 'download_page.dart';
+import 'favorites_page.dart';
 import 'history_page.dart';
 
 class ProfilePage extends StatelessWidget {
@@ -200,7 +202,13 @@ class ProfilePage extends StatelessWidget {
   // ---------------- 快捷入口 ----------------
 
   Widget _quickEntries(BuildContext context) {
+    // 三个入口并排：下载 / 收藏 / 最近观看。
+    // 之前只有两个（下载、最近观看），「想追的剧」没有任何存放位置，
+    // 用户只能靠记忆重新搜索——这是和主流影视 App 差得最明显的一处。
+    // 三个卡片在 360dp 宽的手机上刚好放得下（每个约 102dp），
+    // 副标题也压到了 5 个字以内，不会换行。
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
           child: StreamBuilder<List<DownloadTask>>(
@@ -217,8 +225,8 @@ class ProfilePage extends StatelessWidget {
               return _entryCard(
                 context,
                 icon: Icons.download_rounded,
-                title: '下载管理',
-                subtitle: running > 0 ? '$running 个进行中' : '${list.length} 个任务',
+                title: '下载',
+                subtitle: running > 0 ? '$running 进行中' : '${list.length} 个任务',
                 badge: running,
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const DownloadPage()),
@@ -227,7 +235,22 @@ class ProfilePage extends StatelessWidget {
             },
           ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 10),
+        Expanded(
+          child: ValueListenableBuilder<List<FavoriteItem>>(
+            valueListenable: FavoriteStore.instance.items,
+            builder: (c, list, _) => _entryCard(
+              context,
+              icon: Icons.bookmark_rounded,
+              title: '收藏',
+              subtitle: list.isEmpty ? '还没有收藏' : '${list.length} 部在追',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const FavoritesPage()),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
         Expanded(
           child: ValueListenableBuilder<List<WatchRecord>>(
             valueListenable: HistoryStore.instance.records,

@@ -16,10 +16,15 @@ library;
 const String kAppTitle = '4K追剧';
 
 /// 展示用版本号（与 pubspec.yaml 的 version 的 `+` 之前部分保持一致）
-const String kAppVersion = '1.3.0';
+///
+/// 这两个常量曾经漏同步过一次：pubspec 改了 1.4.0+6，这里还停在
+/// 1.3.0+5，「我的 → 关于」和侧栏显示的版本号是错的，用户报问题时
+/// 给的版本号也对不上。现在有 test/version_sync_test.dart 盯着，
+/// 任何一个改错都会让 `flutter test` 直接失败。
+const String kAppVersion = '1.5.0';
 
 /// 构建号（pubspec.yaml 的 version 中 `+` 之后部分）
-const String kAppBuild = '5';
+const String kAppBuild = '7';
 
 /// 完整标识，如 `1.1.0 (3)`
 const String kAppVersionFull = '$kAppVersion ($kAppBuild)';

@@ -40,16 +40,57 @@ class _DownloadPageState extends State<DownloadPage> {
               ));
             },
           ),
-          IconButton(
-            tooltip: '全部开始',
-            icon: const Icon(Icons.play_arrow_rounded),
-            onPressed: () {
-              for (final t in DownloadManager.instance.tasks) {
-                if (t.state == DownloadState.paused ||
-                    t.state == DownloadState.failed) {
-                  DownloadManager.instance.resume(t.id);
-                }
-              }
+          // 「全部开始 / 全部暂停」必须成对出现。
+          //
+          // 原来只有「全部开始」：用户一次加了十几集，想出门前先停下
+          // 省流量，只能一集一集点暂停——手机上点十几次，电视上更没法做。
+          // 主流下载管理器都有这个成对的批量开关。
+          //
+          // 用 StreamBuilder 订阅任务列表，按钮的可点状态跟着实际状态走：
+          // 没有待恢复的任务时「全部开始」置灰，没有在跑的任务时
+          // 「全部暂停」置灰，用户一眼能看出当前能做什么。
+          StreamBuilder<List<DownloadTask>>(
+            stream: DownloadManager.instance.stream,
+            initialData: DownloadManager.instance.tasks,
+            builder: (c, snap) {
+              final list = snap.data ?? const <DownloadTask>[];
+              final canResume = list.any((t) =>
+                  t.state == DownloadState.paused ||
+                  t.state == DownloadState.failed);
+              final canPause =
+                  list.any((t) => t.state == DownloadState.running);
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: '全部开始',
+                    icon: const Icon(Icons.play_arrow_rounded),
+                    onPressed: canResume
+                        ? () {
+                            for (final t in list) {
+                              if (t.state == DownloadState.paused ||
+                                  t.state == DownloadState.failed) {
+                                DownloadManager.instance.resume(t.id);
+                              }
+                            }
+                          }
+                        : null,
+                  ),
+                  IconButton(
+                    tooltip: '全部暂停',
+                    icon: const Icon(Icons.pause_rounded),
+                    onPressed: canPause
+                        ? () {
+                            for (final t in list) {
+                              if (t.state == DownloadState.running) {
+                                DownloadManager.instance.pause(t.id);
+                              }
+                            }
+                          }
+                        : null,
+                  ),
+                ],
+              );
             },
           ),
         ],

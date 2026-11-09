@@ -696,12 +696,30 @@ class _PlayerPageState extends State<PlayerPage> {
 
   /// 找到当前集的下一集（在当前源内按集数顺序）
   DramaVideo? _nextEpisode() {
+    final i = _curEpisodeIndex();
     final eps = _curEpisodes;
-    if (eps.length <= 1) return null;
-    var i = eps.indexWhere((e) => e.path == _cur.path);
-    if (i < 0) i = eps.indexWhere((e) => e.epLabel == _cur.epLabel);
     if (i < 0 || i >= eps.length - 1) return null;
     return eps[i + 1];
+  }
+
+  /// 找到当前集的上一集；第一集返回 null
+  ///
+  /// 之前只有自动连播（播完才切下一集），想回看上一集只能退回详情页重选。
+  /// 主流播放器（B站/爱奇艺/YouTube）都有显式的上一集/下一集按钮，
+  /// 遥控器上更是刚需——没有它，看第二遍某一段要按很多次快退。
+  DramaVideo? _prevEpisode() {
+    final i = _curEpisodeIndex();
+    if (i <= 0) return null;
+    return _curEpisodes[i - 1];
+  }
+
+  /// 当前集在 _curEpisodes 里的下标（找不到返回 -1）
+  int _curEpisodeIndex() {
+    final eps = _curEpisodes;
+    if (eps.length <= 1) return -1;
+    var i = eps.indexWhere((e) => e.path == _cur.path);
+    if (i < 0) i = eps.indexWhere((e) => e.epLabel == _cur.epLabel);
+    return i;
   }
 
   void _scheduleAutoNext() {
@@ -1277,6 +1295,24 @@ class _PlayerPageState extends State<PlayerPage> {
                           // 弹幕开关：全屏是最常用的看弹幕场景，
                           // 开关必须在这里就能按到，不用退回竖屏。
                           const DanmakuToggleButton(),
+                          // 下一集：枕在沙发上看剧最高频的动作。
+                          // 原来全屏只能等播完自动连播，或者退出全屏去选集，
+                          // 和主流播放器（B站/爱奇艺的「下一集」）差得很远。
+                          if (_nextEpisode() != null)
+                            IconButton(
+                              iconSize: 22,
+                              color: Colors.white,
+                              tooltip: '下一集',
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 6),
+                              constraints: const BoxConstraints(
+                                  minWidth: 34, minHeight: 34),
+                              icon: const Icon(Icons.skip_next_rounded),
+                              onPressed: () {
+                                final n = _nextEpisode();
+                                if (n != null) _playEpisode(n);
+                              },
+                            ),
                           // 投屏：横屏看剧时想换到大屏是高频动作
                           if (!isDesktop && _realUrl.isNotEmpty)
                             IconButton(
@@ -1766,31 +1802,15 @@ class _PlayerPageState extends State<PlayerPage> {
                       extraActions: const [DanmakuToggleButton()],
                     ),
                   const SizedBox(height: 12),
-                  const Text('播放地址',
-                      style: TextStyle(fontSize: 12, color: kOnVideoDim)),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: SelectableText(
-                          _realUrl,
-                          maxLines: 3,
-                          style: const TextStyle(
-                              fontSize: 11, color: Colors.white54),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: '复制',
-                        icon: const Icon(Icons.copy_rounded, size: 16),
-                        onPressed: () {
-                          Clipboard.setData(ClipboardData(text: _realUrl));
-                          _toast('地址已复制');
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
                   _actionButtons(),
+                  const SizedBox(height: 14),
+                  // 播放地址等排障信息收进折叠区。
+                  //
+                  // 原来这里直接平铺「播放地址」+ 一整串几百字符的 m3u8
+                  // 带签名 URL，占了小半屏；这是给开发者排障用的，
+                  // 普通用户看到只会觉得「这 App 没做完」。主流播放器
+                  // 都不会把线路地址摊在界面上。默认收起，需要时展开。
+                  _techDetails(),
                 ],
               ),
             ),
@@ -1799,6 +1819,54 @@ class _PlayerPageState extends State<PlayerPage> {
           ],
         );
       },
+    );
+  }
+
+  /// 折叠的排障信息：播放地址 + 复制
+  Widget _techDetails() {
+    return Theme(
+      // ExpansionTile 的默认分割线/图标颜色来自主题，这里是深色视频区，
+      // 不覆盖的话浅色主题下会出现一条亮线和一个看不清的箭头。
+      data: Theme.of(context).copyWith(
+        dividerColor: Colors.transparent,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+      ),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: EdgeInsets.zero,
+        dense: true,
+        iconColor: kOnVideoDim,
+        collapsedIconColor: kOnVideoDim,
+        title: const Text(
+          '技术信息',
+          style: TextStyle(fontSize: 12, color: kOnVideoDim),
+        ),
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: SelectableText(
+                  _realUrl,
+                  maxLines: 4,
+                  style:
+                      const TextStyle(fontSize: 10.5, color: Colors.white54),
+                ),
+              ),
+              IconButton(
+                tooltip: '复制地址',
+                icon: const Icon(Icons.copy_rounded, size: 16),
+                color: kOnVideoDim,
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: _realUrl));
+                  _toast('地址已复制');
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -2090,6 +2158,43 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
+  /// 上一集 / 下一集
+  ///
+  /// 只在真的有相邻集时才出现；对应方向没有集时按钮禁用而不是隐藏——
+  /// 位置固定，用户不用每次重新找「下一集在哪」。
+  Widget _episodeNav() {
+    final prev = _prevEpisode();
+    final next = _nextEpisode();
+    if (prev == null && next == null) return const SizedBox.shrink();
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: prev == null ? null : () => _playEpisode(prev),
+            icon: const Icon(Icons.skip_previous_rounded, size: 19),
+            label: Text(
+              prev == null ? '已是第一集' : '上一集',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: next == null ? null : () => _playEpisode(next),
+            icon: const Icon(Icons.skip_next_rounded, size: 19),
+            label: Text(
+              next == null ? '已是最后一集' : '下一集',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _actionButtons() {
     final row = Row(
       children: [
@@ -2121,22 +2226,32 @@ class _PlayerPageState extends State<PlayerPage> {
       ],
     );
 
-    // 投屏单独占一行：和「重新解析/换源/下载」挤在一排会太窄，
-    // 而且这是新功能，藏在 AppBar 的小图标里用户根本找不到。
-    if (isDesktop || _realUrl.isEmpty) return row;
+    // 版式从「功能密度」而不是「有什么就堆什么」出发：
+    //   1. 上一集/下一集   —— 追剧最高频，放最上面、整行大按钮
+    //   2. 投屏            —— 次高频，整行
+    //   3. 重新解析/换源/下载 —— 兜底操作，挤在一行
+    // 之前把「重新解析」放在第一行最左，用户最常点的「下一集」根本不存在，
+    // 只能等自动连播——和主流播放器的习惯差得很远。
+    final hasNav = _prevEpisode() != null || _nextEpisode() != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        OutlinedButton.icon(
-          onPressed: _openCast,
-          icon: Icon(_castDeviceName == null
-              ? Icons.cast_rounded
-              : Icons.cast_connected_rounded),
-          label: Text(_castDeviceName == null
-              ? '投屏到电视'
-              : '投屏中 · $_castDeviceName（点此切换设备）'),
-        ),
-        const SizedBox(height: 10),
+        if (hasNav) ...[
+          _episodeNav(),
+          const SizedBox(height: 10),
+        ],
+        if (!isDesktop && _realUrl.isNotEmpty) ...[
+          OutlinedButton.icon(
+            onPressed: _openCast,
+            icon: Icon(_castDeviceName == null
+                ? Icons.cast_rounded
+                : Icons.cast_connected_rounded),
+            label: Text(_castDeviceName == null
+                ? '投屏到电视'
+                : '投屏中 · $_castDeviceName（点此切换设备）'),
+          ),
+          const SizedBox(height: 10),
+        ],
         row,
       ],
     );

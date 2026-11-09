@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 
 import 'core/desktop_window.dart';
 import 'core/download.dart';
+import 'core/favorites.dart';
 import 'core/history.dart';
 import 'core/layout.dart';
+import 'core/search_history.dart';
 import 'core/theme_settings.dart';
 import 'core/tv.dart';
 import 'core/version.dart';
@@ -60,6 +62,12 @@ Future<void> _restoreInBackground() async {
   } catch (e) {
     debugPrint('[BOOT] history restore failed: $e');
   }
+  // 收藏同样是「我的」页要展示的内容，紧跟历史之后读
+  try {
+    await FavoriteStore.instance.restore();
+  } catch (e) {
+    debugPrint('[BOOT] favorites restore failed: $e');
+  }
   // 弹幕开关很小（一个 bool），放在最后读：它只影响播放页，
   // 而且 SharedPreferences 首次调用要加载整个 xml，不该挡在下载索引前面。
   try {
@@ -75,6 +83,13 @@ Future<void> _restoreInBackground() async {
     await ThemeSettings.instance.restore();
   } catch (e) {
     debugPrint('[BOOT] theme prefs restore failed: $e');
+  }
+  // 搜索历史同样存在 SharedPreferences，实例已缓存，几乎零成本。
+  // 搜索页是用户手动打开的，晚一点读到也不影响首帧。
+  try {
+    await SearchHistory.instance.restore();
+  } catch (e) {
+    debugPrint('[BOOT] search history restore failed: $e');
   }
   // TV 探测要过一次 MethodChannel（原生侧查 UiModeManager），
   // 比读 SharedPreferences 略贵，放在最后。相同理由不阻塞首帧：

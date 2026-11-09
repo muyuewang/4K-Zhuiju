@@ -21,8 +21,8 @@ import tempfile
 REPO = "muyuewang/4K-Zhuiju"
 ROOT = r"C:\Users\fengxin\WorkBuddy\vivos7"
 PROXY = "http://127.0.0.1:7897"
-TAG = "v1.4.0"
-TAG_MSG = "4K追剧 v1.4.0"
+TAG = "v1.5.0"
+TAG_MSG = "4K追剧 v1.5.0"
 API = "https://api.github.com"
 
 _tok = None

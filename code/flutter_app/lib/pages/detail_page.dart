@@ -5,6 +5,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../core/api.dart';
+import '../core/favorites.dart';
+import '../core/history.dart';
 import '../core/layout.dart';
 import '../core/models.dart';
 import '../core/source_picker.dart';
@@ -47,10 +49,39 @@ class _DetailPageState extends State<DetailPage> {
   /// 当前选中的源显示名
   String? _curSource;
 
+  /// 本剧的观看记录（没有就是 null）。
+  ///
+  /// 主流影视 App 的详情页都靠它做两件事，缺一件用户就得自己找：
+  ///   1. 主按钮从「播放」变成「继续观看 第N集 12:34」；
+  ///   2. 剧集网格里把正在看的那一集高亮出来。
+  /// 没有账号体系，这个记录就是本机的 HistoryStore。
+  WatchRecord? _record;
+
+  /// 简介是否已展开（默认 3 行截断，主流 App 都有「展开」）
+  bool _introExpanded = false;
+
+  /// 剧集是否倒序显示。40 集以上的剧，最新一集在末尾，
+  /// 每次进来都要滚到底，主流 App 都提供「倒序」切换。
+  bool _epDesc = false;
+
   @override
   void initState() {
     super.initState();
+    // 先读本地记录：网络详情回来之前就能知道「上次看到哪一集」，
+    // 主按钮不必先显示成「播放」再跳成「继续观看」。
+    _readRecord();
     _load();
+  }
+
+  /// 从本机历史里取本剧的记录（没有则为 null）
+  void _readRecord() {
+    final id = widget.dramaId;
+    for (final r in HistoryStore.instance.records.value) {
+      if (r.dramaId == id) {
+        if (mounted) setState(() => _record = r);
+        return;
+      }
+    }
   }
 
   Future<void> _load() async {
@@ -128,12 +159,43 @@ class _DetailPageState extends State<DetailPage> {
     _play(target, startAtSec: widget.resumeSec);
   }
 
-  /// 选默认源：优先稳定 MP4 源 → 可播且分集粒度细 → 可播的单条目 → 集数最多。
+  /// 从剧集列表里挑默认源：优先稳定 MP4 源 → 可播且分集粒度细 →
+  /// 可播的单条目 → 集数最多。
   /// 判定细节见 core/source_picker.dart（有单测覆盖）。
   String _pickDefaultSource(Map<String, List<DramaVideo>> m) =>
       pickDefaultSource(m);
 
-  void _play(DramaVideo v, {int startAtSec = 0}) {
+  /// 记录对应的那一集（在当前源里找；找不到返回 null）
+  DramaVideo? _resumeTarget(List<DramaVideo> eps) {
+    final r = _record;
+    if (r == null || eps.isEmpty) return null;
+    for (final e in eps) {
+      if (e.episode == r.episode) return e;
+    }
+    // 有些源 episode 恒为 0，退回按集名匹配
+    if (r.epLabel.isNotEmpty) {
+      for (final e in eps) {
+        if (e.epLabel == r.epLabel) return e;
+      }
+    }
+    return null;
+  }
+
+  /// 正在看的那一集的集数 key（用于网格高亮），没有记录时返回 -1
+  int get _watchingEpisode => _record?.episode ?? 0;
+
+  /// 主按钮该播哪一集、从第几秒开始
+  void _playPrimary(List<DramaVideo> eps) {
+    if (eps.isEmpty) return;
+    final t = _resumeTarget(eps);
+    if (t != null) {
+      _play(t, startAtSec: _record?.positionSec ?? 0);
+      return;
+    }
+    _play(eps.first);
+  }
+
+  void _play(DramaVideo v, {int startAtSec = 0}) async {
     // 收集所有源里同一集的其他候选（用于播放失败时换源）
     final alts = <DramaVideo>[];
     final d = _detail;
@@ -144,7 +206,7 @@ class _DetailPageState extends State<DetailPage> {
         }
       }
     }
-    Navigator.of(context).push(MaterialPageRoute(
+    await Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => PlayerPage(
         video: v,
         dramaName: d?.name ?? '',
@@ -159,17 +221,41 @@ class _DetailPageState extends State<DetailPage> {
         startAtSec: startAtSec,
       ),
     ));
+    // 从播放页回来必须重读一次记录，否则「继续观看」按钮和剧集高亮
+    // 还停在上次进详情页时的进度，用户刚看完第 3 集回来却看到第 1 集
+    // 被高亮，会以为进度没保存。
+    if (!mounted) return;
+    setState(() => _record = null);
+    _readRecord();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: _loading
-          ? const Loading()
-          : _err != null
-              ? ErrorView(message: _err!, onRetry: _load)
-              : _buildBody(),
-    );
+    // 加载中 / 失败这两种状态原来直接返回一个裸的 Loading / ErrorView，
+    // 没有 AppBar 也就没有返回按钮：用户在弱网下点进来、看到「连接失败」
+    // 之后，除了按系统返回键没有任何出路，看起来就像卡死在白屏里。
+    // 这里始终保留一条返回栏。
+    if (_loading || _err != null) {
+      return Scaffold(
+        backgroundColor: context.palette.bg,
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: Text(
+            widget.title ?? '详情',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 15),
+          ),
+        ),
+        body: _loading
+            ? const Loading()
+            : ErrorView(message: _err!, onRetry: _load),
+      );
+    }
+    return Scaffold(body: _buildBody());
   }
 
   Widget _buildBody() {
@@ -199,14 +285,25 @@ class _DetailPageState extends State<DetailPage> {
             icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
             onPressed: () => Navigator.pop(context),
           ),
+          actions: [
+            if (sourceNames.isNotEmpty || eps.isNotEmpty)
+              _favButton(d),
+            const SizedBox(width: 4),
+          ],
           flexibleSpace: FlexibleSpaceBar(
             background: _header(d),
           ),
         ),
         SliverToBoxAdapter(child: _info(d)),
+        // 主操作区：继续观看 / 播放。主流影视 App 在简介下面必有一条
+        // 醒目的主按钮，用户不必去剧集网格里找「我该点哪一集」。
+        if (eps.isNotEmpty)
+          SliverToBoxAdapter(child: _primaryActions(eps)),
         // 源选择
         if (sourceNames.isNotEmpty)
           SliverToBoxAdapter(child: _sourceSelector(sourceNames, sources, cur)),
+        // 剧集区标题（带集数与正序/倒序切换）
+        SliverToBoxAdapter(child: _episodeHeader(eps)),
         // 剧集网格
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(12, 4, 12, 20),
@@ -218,13 +315,170 @@ class _DetailPageState extends State<DetailPage> {
               childAspectRatio: 2.1,
             ),
             delegate: SliverChildBuilderDelegate(
-              (c, i) => _episodeChip(eps[i]),
+              (c, i) => _episodeChip(_ordered(eps)[i]),
               childCount: eps.length,
             ),
           ),
         ),
       ],
     );
+  }
+
+  /// 按当前排序返回剧集列表（倒序时第 1 集在最后）
+  List<DramaVideo> _ordered(List<DramaVideo> eps) =>
+      _epDesc ? eps.reversed.toList() : eps;
+
+  /// 收藏按钮（详情页右上角）
+  ///
+  /// 用 ValueListenableBuilder 订阅收藏列表：在别处取消了收藏再回到
+  /// 这一页，图标要是同步的，否则会出现「显示已收藏但点一下变成已收藏」
+  /// 这种点不动第二次的状态错乱。
+  Widget _favButton(DramaDetail d) {
+    return ValueListenableBuilder<List<FavoriteItem>>(
+      valueListenable: FavoriteStore.instance.items,
+      builder: (c, list, _) {
+        final on = list.any((e) => e.dramaId == d.id);
+        final btn = IconButton(
+          tooltip: on ? '取消收藏' : '收藏',
+          icon: Icon(
+            on ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+            color: on ? kAccent : null,
+          ),
+          onPressed: () {
+            final now = FavoriteStore.instance.toggle(
+              dramaId: d.id,
+              name: d.name.isEmpty ? (widget.title ?? '') : d.name,
+              cover: d.cover.best,
+              year: d.year,
+              area: d.area,
+              remark: d.remark,
+            );
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(now ? '已加入我的收藏' : '已取消收藏',
+                  style: const TextStyle(fontSize: 12.5)),
+              duration: const Duration(seconds: 2),
+            ));
+          },
+        );
+        // TV 下补焦点描边，否则遥控器移到右上角看不出选中了谁
+        return isTv(context) ? TvFocusRing(radius: 22, child: btn) : btn;
+      },
+    );
+  }
+
+  /// 剧集区标题 + 倒序开关
+  ///
+  /// 长剧（40 集以上）最新一集在最末尾，每次进来都要滚很久。
+  /// 主流 App 都提供「倒序」，这里补上；集数少时不必显示，省得干扰。
+  Widget _episodeHeader(List<DramaVideo> eps) {
+    final tv = isTv(context);
+    final showSort = eps.length > 12;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 10, 8, 0),
+      child: Row(
+        children: [
+          Text(
+            eps.length > 1 ? '选集' : '播放',
+            style: TextStyle(
+              fontSize: tv ? 17 : 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '共 ${eps.length} ${eps.length > 1 ? '集' : '条线路'}',
+            style: TextStyle(
+              fontSize: tv ? 13 : 11.5,
+              color: context.palette.textDim,
+            ),
+          ),
+          const Spacer(),
+          if (showSort)
+            TvFocusRing(
+              radius: 16,
+              child: TextButton.icon(
+                onPressed: () => setState(() => _epDesc = !_epDesc),
+                style: TextButton.styleFrom(
+                  minimumSize: Size(0, tv ? 40 : 30),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  foregroundColor: context.palette.textDim,
+                ),
+                icon: Icon(
+                  _epDesc
+                      ? Icons.arrow_downward_rounded
+                      : Icons.arrow_upward_rounded,
+                  size: tv ? 18 : 15,
+                ),
+                label: Text(
+                  _epDesc ? '倒序' : '正序',
+                  style: TextStyle(fontSize: tv ? 14 : 12),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 主操作区：一个大播放按钮 + 上次看到哪一集的提示
+  Widget _primaryActions(List<DramaVideo> eps) {
+    final tv = isTv(context);
+    final t = _resumeTarget(eps);
+    final r = _record;
+    // 只有「确实看过一部分」才叫继续观看；刚点开就退出（<10 秒）
+    // 不算，否则用户会一直看到「继续观看 00:03」这种没意义的文案。
+    final resumable = t != null && r != null && r.positionSec >= 10;
+
+    final label = resumable
+        ? '继续观看 · ${t.epLabel} ${_mmss(r.positionSec)}'
+        : (eps.length > 1 ? '播放第 1 集' : '立即播放');
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: SizedBox(
+              height: tv ? 52 : 44,
+              child: TvFocusRing(
+                radius: 10,
+                child: FilledButton.icon(
+                  onPressed: () => _playPrimary(eps),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: kAccent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  icon: Icon(Icons.play_arrow_rounded, size: tv ? 28 : 22),
+                  label: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: tv ? 17 : 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 秒 → mm:ss / h:mm:ss
+  String _mmss(int sec) {
+    if (sec <= 0) return '00:00';
+    final h = sec ~/ 3600;
+    final m = (sec % 3600) ~/ 60;
+    final s = sec % 60;
+    final mm = m.toString().padLeft(2, '0');
+    final ss = s.toString().padLeft(2, '0');
+    return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
   }
 
   /// 宽屏双栏
@@ -264,6 +518,9 @@ class _DetailPageState extends State<DetailPage> {
                       Text('详情',
                           style: TextStyle(
                               fontSize: 14, color: context.palette.textDim)),
+                      const Spacer(),
+                      // 宽屏没有 AppBar，收藏按钮挂在标题行右端
+                      _favButton(d),
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -302,6 +559,14 @@ class _DetailPageState extends State<DetailPage> {
                     child: _infoWide(d),
                   ),
                 ),
+                // 主操作区：继续观看 / 播放
+                if (eps.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: _primaryActions(eps),
+                    ),
+                  ),
                 if (sourceNames.isNotEmpty)
                   SliverToBoxAdapter(
                     child: Padding(
@@ -309,6 +574,13 @@ class _DetailPageState extends State<DetailPage> {
                       child: _sourceSelector(sourceNames, sources, cur),
                     ),
                   ),
+                // 剧集标题 + 正序/倒序
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: _episodeHeader(eps),
+                  ),
+                ),
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(4, 4, 20, 24),
                   sliver: SliverGrid(
@@ -320,7 +592,7 @@ class _DetailPageState extends State<DetailPage> {
                       childAspectRatio: 1.9,
                     ),
                     delegate: SliverChildBuilderDelegate(
-                      (c, i) => _episodeChip(eps[i]),
+                      (c, i) => _episodeChip(_ordered(eps)[i]),
                       childCount: eps.length,
                     ),
                   ),
@@ -364,15 +636,10 @@ class _DetailPageState extends State<DetailPage> {
         ],
         if (d.brief.isNotEmpty || d.intro.isNotEmpty) ...[
           const SizedBox(height: 12),
-          Text(
+          _introText(
             d.intro.isNotEmpty ? d.intro : d.brief,
-            maxLines: 4,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 13,
-              height: 1.62,
-              color: context.palette.textDim,
-            ),
+            fontSize: 13,
+            lines: 4,
           ),
         ],
       ],
@@ -437,19 +704,79 @@ class _DetailPageState extends State<DetailPage> {
           ],
           if (d.brief.isNotEmpty || d.intro.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(
+            _introText(
               d.intro.isNotEmpty ? d.intro : d.brief,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12.5,
-                height: 1.5,
-                color: context.palette.textDim,
-              ),
+              fontSize: 12.5,
+              lines: 3,
             ),
           ],
         ],
       ),
+    );
+  }
+
+  /// 简介：默认截断 + 「展开」
+  ///
+  /// 原来固定 maxLines: 3 + ellipsis，长简介（很多剧的介绍是整段剧情梗概）
+  /// 永远只能看到前三行，用户没有任何办法读完——主流 App 都有展开按钮。
+  Widget _introText(String text, {required double fontSize, required int lines}) {
+    final style = TextStyle(
+      fontSize: fontSize,
+      height: 1.55,
+      color: context.palette.textDim,
+    );
+    return LayoutBuilder(
+      builder: (ctx, cons) {
+        // 先量一下这段文字在给定宽度下到底要几行。
+        // 只有真的超出行数上限才显示「展开」，否则短简介底下挂一个
+        // 点了没反应的「展开」会显得很怪。
+        final tp = TextPainter(
+          text: TextSpan(text: text, style: style),
+          maxLines: lines,
+          textDirection: Directionality.of(ctx),
+        )..layout(maxWidth: cons.maxWidth);
+        final overflows = tp.didExceedMaxLines;
+        // 资源要及时释放，这个 LayoutBuilder 每次重建都会量一次
+        tp.dispose();
+
+        final body = Text(
+          text,
+          maxLines: _introExpanded ? null : lines,
+          overflow: _introExpanded ? null : TextOverflow.ellipsis,
+          style: style,
+        );
+        if (!overflows && !_introExpanded) return body;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            body,
+            GestureDetector(
+              onTap: () => setState(() => _introExpanded = !_introExpanded),
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _introExpanded ? '收起' : '展开',
+                      style: const TextStyle(fontSize: 12, color: kAccent),
+                    ),
+                    Icon(
+                      _introExpanded
+                          ? Icons.keyboard_arrow_up_rounded
+                          : Icons.keyboard_arrow_down_rounded,
+                      size: 16,
+                      color: kAccent,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -558,26 +885,45 @@ class _DetailPageState extends State<DetailPage> {
 
   Widget _episodeChip(DramaVideo v) {
     final tv = isTv(context);
+    // 正在观看的那一集：主色描边 + 淡橙底 + 播放小角标。
+    // 之前所有集长得一模一样，用户从详情页回来根本认不出自己看到哪了，
+    // 只能靠回想（40 集的剧这基本不可能）。
+    final watching = v.episode > 0 && v.episode == _watchingEpisode;
     final body = GestureDetector(
       onTap: () => _play(v),
       child: Container(
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: context.palette.card,
+          color: watching
+              ? kAccent.withValues(alpha: 0.16)
+              : context.palette.card,
           borderRadius: BorderRadius.circular(8),
+          border: watching
+              ? Border.all(color: kAccent.withValues(alpha: 0.75), width: 1.2)
+              : null,
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Text(
               v.epLabel,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               // TV 下放大集数文字：3 米外 12pt 基本读不出来
               style: TextStyle(
                 fontSize: tv ? 15 : 12,
-                fontWeight: FontWeight.w500,
+                fontWeight: watching ? FontWeight.w700 : FontWeight.w500,
+                color: watching ? kAccent : context.palette.onSurface,
               ),
             ),
-            if (v.isVip)
+            if (watching)
+              Text(
+                '看到 ${_mmss(_record?.positionSec ?? 0)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: tv ? 11 : 9, color: kAccent),
+              )
+            else if (v.isVip)
               Text('VIP',
                   style: TextStyle(fontSize: tv ? 11 : 9, color: kAccent)),
           ],
