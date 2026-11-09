@@ -122,6 +122,16 @@ class _SearchPageState extends State<SearchPage> {
   bool _searched = false;
   String? _err;
 
+  /// 请求序号：只认最后一次发起的搜索。
+  ///
+  /// 没有它会出两种错：
+  ///   1. 快速连着搜两次（改关键词再回车），先发的那个如果后回来，
+  ///      会把后发的结果覆盖掉——界面上显示的是上一次的词。
+  ///   2. 搜索进行中点「清空」，请求还在飞，回来后又把结果填回去，
+  ///      清空等于没生效。
+  /// 每次发起 +1，回来时对不上就直接丢弃。
+  int _seq = 0;
+
   @override
   void initState() {
     super.initState();
@@ -139,6 +149,7 @@ class _SearchPageState extends State<SearchPage> {
     final q = (kw ?? _input.text).trim();
     if (q.isEmpty) return;
     _input.text = q;
+    final seq = ++_seq;
     setState(() {
       _loading = true;
       _searched = true;
@@ -146,18 +157,30 @@ class _SearchPageState extends State<SearchPage> {
     });
     try {
       final r = await ZhuijuApi.instance.search(q);
-      if (!mounted) return;
+      if (!mounted || seq != _seq) return;
       setState(() {
         _result = r;
         _loading = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || seq != _seq) return;
       setState(() {
         _loading = false;
         _err = friendlyError(e);
       });
     }
+  }
+
+  /// 清空输入：同时让在飞的请求作废，否则它回来还会把结果填上。
+  void _clear() {
+    _seq++;
+    setState(() {
+      _input.clear();
+      _result = const [];
+      _searched = false;
+      _loading = false;
+      _err = null;
+    });
   }
 
   @override
@@ -181,11 +204,7 @@ class _SearchPageState extends State<SearchPage> {
               prefixIcon: const Icon(Icons.search_rounded, size: 20),
               suffixIcon: IconButton(
                 icon: const Icon(Icons.close_rounded, size: 18),
-                onPressed: () => setState(() {
-                  _input.clear();
-                  _result = const [];
-                  _searched = false;
-                }),
+                onPressed: _clear,
               ),
             ),
           ),
@@ -237,8 +256,8 @@ class _SearchPageState extends State<SearchPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('热门搜索',
-              style: TextStyle(fontSize: 13, color: kTextDim)),
+          Text('热门搜索',
+              style: TextStyle(fontSize: 13, color: context.palette.textDim)),
           const SizedBox(height: 12),
           Wrap(
             spacing: 9,
@@ -246,7 +265,7 @@ class _SearchPageState extends State<SearchPage> {
             children: words
                 .map((w) => ActionChip(
                       label: Text(w, style: const TextStyle(fontSize: 12)),
-                      backgroundColor: kCard,
+                      backgroundColor: context.palette.card,
                       side: BorderSide.none,
                       onPressed: () => _doSearch(w),
                     ))

@@ -121,7 +121,7 @@ class _DetailPageState extends State<DetailPage> {
         SliverAppBar(
           expandedHeight: 260,
           pinned: true,
-          backgroundColor: kBg,
+          backgroundColor: context.palette.bg,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
             onPressed: () => Navigator.pop(context),
@@ -188,9 +188,9 @@ class _DetailPageState extends State<DetailPage> {
                         onPressed: () => Navigator.pop(context),
                       ),
                       const SizedBox(width: 2),
-                      const Text('详情',
+                      Text('详情',
                           style: TextStyle(
-                              fontSize: 14, color: kTextDim)),
+                              fontSize: 14, color: context.palette.textDim)),
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -200,10 +200,10 @@ class _DetailPageState extends State<DetailPage> {
                       aspectRatio: 2 / 3,
                       child: d.cover.best.isEmpty
                           ? Container(
-                              color: kCard,
-                              child: const Center(
+                              color: context.palette.card,
+                              child: Center(
                                 child: Icon(Icons.movie_outlined,
-                                    color: kTextDim, size: 40),
+                                    color: context.palette.textDim, size: 40),
                               ),
                             )
                           : CachedNetworkImage(
@@ -211,7 +211,7 @@ class _DetailPageState extends State<DetailPage> {
                               fit: BoxFit.cover,
                               memCacheWidth: 520,
                               errorWidget: (_, __, ___) =>
-                                  Container(color: kCard),
+                                  Container(color: context.palette.card),
                             ),
                     ),
                   ),
@@ -283,11 +283,11 @@ class _DetailPageState extends State<DetailPage> {
         ),
         if (d.director.isNotEmpty) ...[
           const SizedBox(height: 12),
-          _kv('导演', d.director),
+          _kv(context, '导演', d.director),
         ],
         if (d.actor.isNotEmpty) ...[
           const SizedBox(height: 5),
-          _kv('主演', d.actor),
+          _kv(context, '主演', d.actor),
         ],
         if (d.brief.isNotEmpty || d.intro.isNotEmpty) ...[
           const SizedBox(height: 12),
@@ -295,10 +295,10 @@ class _DetailPageState extends State<DetailPage> {
             d.intro.isNotEmpty ? d.intro : d.brief,
             maxLines: 4,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               height: 1.62,
-              color: kTextDim,
+              color: context.palette.textDim,
             ),
           ),
         ],
@@ -316,16 +316,16 @@ class _DetailPageState extends State<DetailPage> {
             fit: BoxFit.cover,
             // 头部只有 260 高，按原图解码会白白吃掉十几 MB
             memCacheWidth: 720,
-            errorWidget: (_, __, ___) => Container(color: kCard),
+            errorWidget: (_, __, ___) => Container(color: context.palette.card),
           ),
         // 顶部/底部渐变
-        const DecoratedBox(
+        DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [Colors.black54, Colors.transparent, kBg],
-              stops: [0, 0.45, 1],
+              colors: [Colors.black54, Colors.transparent, context.palette.bg],
+              stops: const [0, 0.45, 1],
             ),
           ),
         ),
@@ -356,11 +356,11 @@ class _DetailPageState extends State<DetailPage> {
           ),
           if (d.director.isNotEmpty) ...[
             const SizedBox(height: 8),
-            _kv('导演', d.director),
+            _kv(context, '导演', d.director),
           ],
           if (d.actor.isNotEmpty) ...[
             const SizedBox(height: 4),
-            _kv('主演', d.actor),
+            _kv(context, '主演', d.actor),
           ],
           if (d.brief.isNotEmpty || d.intro.isNotEmpty) ...[
             const SizedBox(height: 8),
@@ -368,10 +368,10 @@ class _DetailPageState extends State<DetailPage> {
               d.intro.isNotEmpty ? d.intro : d.brief,
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12.5,
                 height: 1.5,
-                color: kTextDim,
+                color: context.palette.textDim,
               ),
             ),
           ],
@@ -383,28 +383,30 @@ class _DetailPageState extends State<DetailPage> {
   Widget _tag(String s, {bool highlight = false}) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
-          color: highlight ? kAccent.withValues(alpha: 0.16) : kCard,
+          color: highlight ? kAccent.withValues(alpha: 0.16) : context.palette.card,
           borderRadius: BorderRadius.circular(6),
         ),
         child: Text(
           s,
           style: TextStyle(
             fontSize: 11,
-            color: highlight ? kAccent : kTextDim,
+            color: highlight ? kAccent : context.palette.textDim,
           ),
         ),
       );
 
-  Widget _kv(String k, String v) => Row(
+  Widget _kv(BuildContext context, String k, String v) => Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('$k  ', style: const TextStyle(fontSize: 12, color: kTextDim)),
+          Text('$k  ', style: TextStyle(fontSize: 12, color: context.palette.textDim)),
           Expanded(
             child: Text(
               v,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, color: Colors.white70),
+              // 原来写死 Colors.white70：浅色主题下压在浅底上等于白字白底，
+              // 导演/主演这两行会直接消失。改用主题正文色。
+              style: TextStyle(fontSize: 12, color: context.palette.onSurface),
             ),
           ),
         ],
@@ -429,7 +431,7 @@ class _DetailPageState extends State<DetailPage> {
                   style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
               const SizedBox(width: 6),
               Text('${names.length} 个可用',
-                  style: const TextStyle(fontSize: 11, color: kTextDim)),
+                  style: TextStyle(fontSize: 11, color: context.palette.textDim)),
             ],
           ),
           const SizedBox(height: 8),
@@ -448,14 +450,14 @@ class _DetailPageState extends State<DetailPage> {
                     padding: const EdgeInsets.symmetric(horizontal: 13),
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: active ? kAccent : kCard,
+                      color: active ? kAccent : context.palette.card,
                       borderRadius: BorderRadius.circular(17),
                     ),
                     child: Text(
                       n,
                       style: TextStyle(
                         fontSize: 12,
-                        color: active ? Colors.white : kTextDim,
+                        color: active ? Colors.white : context.palette.textDim,
                         fontWeight: active ? FontWeight.w600 : FontWeight.w400,
                       ),
                     ),
@@ -475,7 +477,7 @@ class _DetailPageState extends State<DetailPage> {
       child: Container(
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: kCard,
+          color: context.palette.card,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Column(

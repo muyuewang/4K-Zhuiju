@@ -15,15 +15,15 @@ import urllib.parse
 import urllib.request
 
 REPO = "muyuewang/4K-Zhuiju"
-TAG = "v1.1.0"
-NAME = "4K追剧 v1.1.0"
+TAG = "v1.3.0"
+NAME = "4K追剧 v1.3.0"
 
 ROOT = r"C:\Users\fengxin\WorkBuddy\vivos7"
 ASSETS = [
-    (r"dist\v1.1.0\4KZhuiju-v1.1.0-release.apk", "4KZhuiju-v1.1.0-release.apk"),
-    (r"dist\v1.1.0\4KZhuiju-v1.1.0-windows-x64.zip", "4KZhuiju-v1.1.0-windows-x64.zip"),
+    (r"dist\v1.3.0\4KZhuiju-v1.3.0-release.apk", "4KZhuiju-v1.3.0-release.apk"),
+    (r"dist\v1.3.0\4KZhuiju-v1.3.0-windows-x64.zip", "4KZhuiju-v1.3.0-windows-x64.zip"),
 ]
-NOTES = r"out\release_notes.md"
+NOTES = r"dist\v1.3.0\RELEASE_NOTES.md"
 
 
 def get_token():

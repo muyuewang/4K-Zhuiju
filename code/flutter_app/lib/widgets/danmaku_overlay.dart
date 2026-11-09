@@ -357,7 +357,7 @@ class DanmakuEmptyHint extends StatelessWidget {
             '本集暂无弹幕',
             style: TextStyle(
               fontSize: 11,
-              color: kTextDim.withValues(alpha: 0.7),
+              color: kOnVideoDim.withValues(alpha: 0.7),
             ),
           ),
         ),

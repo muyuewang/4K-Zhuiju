@@ -8,6 +8,7 @@
 /// 所以统一用 widgets/player_controls.dart 里的 PlayerControlBar。
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -17,6 +18,7 @@ import '../core/api.dart';
 import '../core/danmaku.dart';
 import '../core/layout.dart';
 import '../core/platform.dart';
+import '../core/screen_awake.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/danmaku_overlay.dart';
@@ -121,6 +123,8 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
         _loading = false;
         _err = null;
       });
+      // 播放成功才保持常亮，加载失败时不该阻止系统息屏
+      await ScreenAwake.set(true);
     } catch (e) {
       try {
         await c?.dispose();
@@ -149,6 +153,8 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
 
   @override
   void dispose() {
+    // 离开就放开常亮，否则回到列表页屏幕还一直亮着
+    unawaited(ScreenAwake.release());
     _ctrl?.dispose();
     if (_fullscreen) _restoreOrientation();
     super.dispose();
@@ -362,7 +368,7 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
         Expanded(
           child: Container(
             width: double.infinity,
-            color: kBg,
+            color: kVideoBg,
             padding: const EdgeInsets.all(14),
             child: SingleChildScrollView(
               child: _controlPanel(c),
@@ -438,7 +444,7 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
         ),
         Container(
           width: 320,
-          color: kBg,
+          color: kVideoBg,
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
           child: SingleChildScrollView(child: _controlPanel(c, compact: true)),
         ),

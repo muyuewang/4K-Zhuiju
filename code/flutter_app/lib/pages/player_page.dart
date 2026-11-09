@@ -34,6 +34,7 @@ import '../core/layout.dart';
 import '../core/platform.dart';
 import '../core/history.dart';
 import '../core/models.dart';
+import '../core/screen_awake.dart';
 import '../core/source_picker.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -207,6 +208,9 @@ class _PlayerPageState extends State<PlayerPage> {
     if (isDesktop) {
       HardwareKeyboard.instance.removeHandler(_onGlobalKey);
     }
+    // 离开播放页必须放开常亮，否则回到列表页手机还一直亮着屏。
+    // 不 await：dispose 是同步的，且平台调用失败也不该拦住页面销毁。
+    unawaited(ScreenAwake.release());
     _histTimer?.cancel();
     _countdownTimer?.cancel();
     _noticeTimer?.cancel();
@@ -488,6 +492,10 @@ class _PlayerPageState extends State<PlayerPage> {
       });
       _startHistTimer();
       _saveHistory();
+      // 真正开始播放后才保持常亮。放在这里而不是 initState：
+      // 解析失败或一直转圈时不该阻止系统息屏，否则用户放着不管
+      // 手机一直亮着，纯耗电。
+      await ScreenAwake.set(true);
     } catch (e) {
       try {
         await ctrl?.dispose();
@@ -1324,7 +1332,7 @@ class _PlayerPageState extends State<PlayerPage> {
     final eps = _curEpisodes;
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: kCard,
+      backgroundColor: kVideoCard,
       isScrollControlled: true,
       builder: (ctx) => SafeArea(
         child: SizedBox(
@@ -1367,7 +1375,7 @@ class _PlayerPageState extends State<PlayerPage> {
                       child: Container(
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
-                          color: active ? kAccent : kBg,
+                          color: active ? kAccent : kVideoBg,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
@@ -1399,7 +1407,7 @@ class _PlayerPageState extends State<PlayerPage> {
             CircularProgressIndicator(strokeWidth: 2.4),
             SizedBox(height: 14),
             Text('正在解析播放地址…',
-                style: TextStyle(color: kTextDim, fontSize: 12)),
+                style: TextStyle(color: kOnVideoDim, fontSize: 12)),
           ],
         ),
       );
@@ -1440,7 +1448,7 @@ class _PlayerPageState extends State<PlayerPage> {
             Expanded(
           child: Container(
             width: double.infinity,
-            color: kBg,
+            color: kVideoBg,
             padding: const EdgeInsets.all(14),
             child: SingleChildScrollView(
               child: Column(
@@ -1457,7 +1465,7 @@ class _PlayerPageState extends State<PlayerPage> {
                     ),
                   const SizedBox(height: 12),
                   const Text('播放地址',
-                      style: TextStyle(fontSize: 12, color: kTextDim)),
+                      style: TextStyle(fontSize: 12, color: kOnVideoDim)),
                   const SizedBox(height: 6),
                   Row(
                     children: [
@@ -1576,7 +1584,7 @@ class _PlayerPageState extends State<PlayerPage> {
         // 右栏
         Container(
           width: 340,
-          color: kBg,
+          color: kVideoBg,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1602,7 +1610,7 @@ class _PlayerPageState extends State<PlayerPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style:
-                          const TextStyle(fontSize: 11.5, color: kTextDim),
+                          const TextStyle(fontSize: 11.5, color: kOnVideoDim),
                     ),
                     const SizedBox(height: 10),
                     _statusRow(),
@@ -1626,7 +1634,7 @@ class _PlayerPageState extends State<PlayerPage> {
                       _isSeries
                           ? '共 ${_curEpisodes.length} 集'
                           : '${_sourceNames.length} 个源',
-                      style: const TextStyle(fontSize: 11, color: kTextDim),
+                      style: const TextStyle(fontSize: 11, color: kOnVideoDim),
                     ),
                   ],
                 ),
@@ -1770,7 +1778,7 @@ class _PlayerPageState extends State<PlayerPage> {
         const Spacer(),
         if (_playLoading)
           const Text('加载中…',
-              style: TextStyle(fontSize: 11, color: kTextDim)),
+              style: TextStyle(fontSize: 11, color: kOnVideoDim)),
       ],
     );
   }
@@ -1835,14 +1843,14 @@ class _PlayerPageState extends State<PlayerPage> {
   Widget _chip(String s, {bool dim = false}) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
         decoration: BoxDecoration(
-          color: dim ? kCard : kAccent.withValues(alpha: 0.18),
+          color: dim ? kVideoCard : kAccent.withValues(alpha: 0.18),
           borderRadius: BorderRadius.circular(6),
         ),
         child: Text(
           s,
           style: TextStyle(
             fontSize: 11,
-            color: dim ? kTextDim : kAccent,
+            color: dim ? kOnVideoDim : kAccent,
           ),
         ),
       );

@@ -65,20 +65,20 @@ class _DownloadPageState extends State<DownloadPage> {
         builder: (c, snap) {
           final list = snap.data ?? const <DownloadTask>[];
           if (list.isEmpty) {
-            return const Center(
+            return Center(
               child: Padding(
-                padding: EdgeInsets.all(28),
+                padding: const EdgeInsets.all(28),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.download_done_rounded,
-                        color: kTextDim, size: 44),
-                    SizedBox(height: 12),
+                        color: context.palette.textDim, size: 44),
+                    const SizedBox(height: 12),
                     Text('暂无下载任务',
-                        style: TextStyle(color: kTextDim, fontSize: 13)),
-                    SizedBox(height: 6),
+                        style: TextStyle(color: context.palette.textDim, fontSize: 13)),
+                    const SizedBox(height: 6),
                     Text('在播放页点右上角下载按钮即可加入',
-                        style: TextStyle(color: kTextDim, fontSize: 11)),
+                        style: TextStyle(color: context.palette.textDim, fontSize: 11)),
                   ],
                 ),
               ),
@@ -90,13 +90,13 @@ class _DownloadPageState extends State<DownloadPage> {
             child: ListView.separated(
               padding: const EdgeInsets.symmetric(vertical: 8),
               itemCount: list.length,
-              separatorBuilder: (_, __) => const Divider(
+              separatorBuilder: (_, __) => Divider(
                 height: 1,
                 indent: 16,
                 endIndent: 16,
-                color: Color(0xFF23262F),
+                color: context.palette.divider,
               ),
-              itemBuilder: (c, i) => _tile(list[i]),
+              itemBuilder: (c, i) => _tile(c, list[i]),
             ),
           );
         },
@@ -104,7 +104,7 @@ class _DownloadPageState extends State<DownloadPage> {
     );
   }
 
-  Widget _tile(DownloadTask t) {
+  Widget _tile(BuildContext context, DownloadTask t) {
     final isDone = t.state == DownloadState.done;
     final isRunning = t.state == DownloadState.running;
 
@@ -122,7 +122,7 @@ class _DownloadPageState extends State<DownloadPage> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: kCard,
+                color: context.palette.card,
                 borderRadius: BorderRadius.circular(9),
               ),
               child: Icon(
@@ -152,7 +152,7 @@ class _DownloadPageState extends State<DownloadPage> {
                     Text(
                       '已完成 · ${t.ext.toUpperCase()}'
                       '${t.total > 0 ? ' · ${_size(t.total)}' : ''}',
-                      style: const TextStyle(fontSize: 11, color: kTextDim),
+                      style: TextStyle(fontSize: 11, color: context.palette.textDim),
                     )
                   else if (t.state == DownloadState.failed)
                     Text(
@@ -168,7 +168,7 @@ class _DownloadPageState extends State<DownloadPage> {
                       child: LinearProgressIndicator(
                         value: t.progress <= 0 ? null : t.progress,
                         minHeight: 3.5,
-                        backgroundColor: const Color(0xFF23262F),
+                        backgroundColor: context.palette.divider,
                         valueColor:
                             const AlwaysStoppedAnimation<Color>(kAccent),
                       ),
@@ -178,7 +178,7 @@ class _DownloadPageState extends State<DownloadPage> {
                       _progressText(t),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 10.5, color: kTextDim),
+                      style: TextStyle(fontSize: 10.5, color: context.palette.textDim),
                     ),
                   ],
                 ],
@@ -272,7 +272,7 @@ class _DownloadPageState extends State<DownloadPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        backgroundColor: kCard,
+        backgroundColor: context.palette.card,
         title: Text(
           withFile ? '删除任务和文件？' : '删除这个任务？',
           style: const TextStyle(fontSize: 15),
@@ -281,7 +281,7 @@ class _DownloadPageState extends State<DownloadPage> {
           withFile
               ? '「${t.title}」已下载的文件会一并删除，此操作不可恢复。'
               : '「${t.title}」尚未下载完成，已缓存的临时分片会被清除。',
-          style: const TextStyle(fontSize: 12.5, color: kTextDim),
+          style: TextStyle(fontSize: 12.5, color: context.palette.textDim),
         ),
         actions: [
           TextButton(

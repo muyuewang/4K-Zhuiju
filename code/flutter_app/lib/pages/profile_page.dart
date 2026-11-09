@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import '../core/download.dart';
 import '../core/history.dart';
 import '../core/layout.dart';
+import '../core/theme_settings.dart';
 import '../core/version.dart';
 import '../theme.dart';
 import 'detail_page.dart';
@@ -27,7 +28,7 @@ class ProfilePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final wide = isWide(context);
     return Scaffold(
-      backgroundColor: kBg,
+      backgroundColor: context.palette.bg,
       appBar: AppBar(title: const Text('我的')),
       body: wide ? _wideBody(context) : _narrowBody(context),
     );
@@ -38,7 +39,7 @@ class ProfilePage extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(14, 4, 14, 24),
       children: [
-        _header(),
+        _header(context),
         const SizedBox(height: 16),
         _quickEntries(context),
         const SizedBox(height: 18),
@@ -67,7 +68,7 @@ class ProfilePage extends StatelessWidget {
           final left = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _header(),
+              _header(context),
               const SizedBox(height: 16),
               _quickEntries(context),
               const SizedBox(height: 18),
@@ -109,7 +110,10 @@ class ProfilePage extends StatelessWidget {
 
   // ---------------- 顶部统计 ----------------
 
-  Widget _header() {
+  // context 必须显式传参：这两个是 StatelessWidget 的私有方法，
+  // 不是 build，拿不到隐式的 context（写成 context.palette 会报
+  // undefined_identifier）。
+  Widget _header(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -117,7 +121,7 @@ class ProfilePage extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [kAccent.withValues(alpha: 0.22), kCard],
+          colors: [kAccent.withValues(alpha: 0.22), context.palette.card],
         ),
       ),
       child: Row(
@@ -132,19 +136,19 @@ class ProfilePage extends StatelessWidget {
             child: const Icon(Icons.person_rounded, color: kAccent, size: 28),
           ),
           const SizedBox(width: 14),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
+                const Text(
                   '本地用户',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
-                SizedBox(height: 4),
+                const SizedBox(height: 4),
                 Text(
                   '数据仅保存在本机',
-                  style: TextStyle(fontSize: 11.5, color: kTextDim),
+                  style: TextStyle(fontSize: 11.5, color: context.palette.textDim),
                 ),
               ],
             ),
@@ -163,13 +167,13 @@ class ProfilePage extends StatelessWidget {
                   final list = snap.data ?? const <DownloadTask>[];
                   final done =
                       list.where((t) => t.state == DownloadState.done).length;
-                  return _stat('$done', '已下载');
+                  return _stat(context, '$done', '已下载');
                 },
               ),
               const SizedBox(height: 6),
               ValueListenableBuilder<List<WatchRecord>>(
                 valueListenable: HistoryStore.instance.records,
-                builder: (c, list, _) => _stat('${list.length}', '看过'),
+                builder: (c, list, _) => _stat(context, '${list.length}', '看过'),
               ),
             ],
           ),
@@ -178,7 +182,7 @@ class ProfilePage extends StatelessWidget {
     );
   }
 
-  Widget _stat(String v, String label) => Row(
+  Widget _stat(BuildContext context, String v, String label) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
@@ -187,7 +191,7 @@ class ProfilePage extends StatelessWidget {
                 fontSize: 15, fontWeight: FontWeight.w700, color: kAccent),
           ),
           const SizedBox(width: 4),
-          Text(label, style: const TextStyle(fontSize: 11, color: kTextDim)),
+          Text(label, style: TextStyle(fontSize: 11, color: context.palette.textDim)),
         ],
       );
 
@@ -254,7 +258,7 @@ class ProfilePage extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
         decoration: BoxDecoration(
-          color: kCard,
+          color: context.palette.card,
           borderRadius: BorderRadius.circular(14),
         ),
         child: Column(
@@ -274,10 +278,10 @@ class ProfilePage extends StatelessWidget {
                     ),
                     child: Text(
                       '$badge',
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
-                          color: kBg),
+                          color: context.palette.bg),
                     ),
                   ),
                 ],
@@ -292,7 +296,7 @@ class ProfilePage extends StatelessWidget {
             const SizedBox(height: 3),
             Text(
               subtitle,
-              style: const TextStyle(fontSize: 11, color: kTextDim),
+              style: TextStyle(fontSize: 11, color: context.palette.textDim),
             ),
           ],
         ),
@@ -358,14 +362,14 @@ class ProfilePage extends StatelessWidget {
                 width: 62,
                 height: 84,
                 child: r.cover.isEmpty
-                    ? Container(color: kCard)
+                    ? Container(color: context.palette.card)
                     : CachedNetworkImage(
                         imageUrl: r.cover,
                         fit: BoxFit.cover,
                         // 62px 宽的小图，按原图解码纯属浪费内存
                         memCacheWidth: 200,
                         errorWidget: (_, __, ___) =>
-                            Container(color: kCard),
+                            Container(color: context.palette.card),
                       ),
               ),
             ),
@@ -390,7 +394,7 @@ class ProfilePage extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style:
-                        const TextStyle(fontSize: 11, color: kTextDim),
+                        TextStyle(fontSize: 11, color: context.palette.textDim),
                   ),
                   const SizedBox(height: 6),
                   // 进度条：一眼看出看到哪了
@@ -399,7 +403,7 @@ class ProfilePage extends StatelessWidget {
                     child: LinearProgressIndicator(
                       value: r.progress,
                       minHeight: 3,
-                      backgroundColor: kBg,
+                      backgroundColor: context.palette.bg,
                       valueColor:
                           const AlwaysStoppedAnimation<Color>(kAccent),
                     ),
@@ -411,7 +415,7 @@ class ProfilePage extends StatelessWidget {
             IconButton(
               tooltip: '移除记录',
               icon: const Icon(Icons.close_rounded, size: 16),
-              color: kTextDim,
+              color: context.palette.textDim,
               onPressed: () =>
                   HistoryStore.instance.remove(r.dramaId, r.dramaName),
             ),
@@ -426,7 +430,7 @@ class ProfilePage extends StatelessWidget {
   Widget _settings(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: kCard,
+        color: context.palette.card,
         borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
@@ -453,14 +457,30 @@ class ProfilePage extends StatelessWidget {
               },
             ),
           ),
-          const Divider(height: 1, color: kBg),
+          Divider(height: 1, color: context.palette.divider),
+          // 主题：跟随系统 / 深色 / 浅色
+          ValueListenableBuilder<AppThemeMode>(
+            valueListenable: ThemeSettings.instance.mode,
+            builder: (c, m, _) => _settingRow(
+              context,
+              icon: m == AppThemeMode.light
+                  ? Icons.light_mode_rounded
+                  : (m == AppThemeMode.dark
+                      ? Icons.dark_mode_rounded
+                      : Icons.brightness_auto_rounded),
+              title: '主题外观',
+              trailing: m.label,
+              onTap: () => _pickTheme(context),
+            ),
+          ),
+          Divider(height: 1, color: context.palette.divider),
           _settingRow(
             context,
             icon: Icons.delete_sweep_rounded,
             title: '清空观看记录',
             onTap: () => _confirmClearHistory(context),
           ),
-          const Divider(height: 1, color: kBg),
+          Divider(height: 1, color: context.palette.divider),
           _settingRow(
             context,
             icon: Icons.info_outline_rounded,
@@ -470,10 +490,10 @@ class ProfilePage extends StatelessWidget {
               context: context,
               applicationName: '4K追剧',
               applicationVersion: kAppVersionFull,
-              children: const [
+              children: [
                 Text(
                   '第三方影视客户端，内容来自公开接口，仅用于学习交流。',
-                  style: TextStyle(fontSize: 12, color: kTextDim),
+                  style: TextStyle(fontSize: 12, color: context.palette.textDim),
                 ),
               ],
             ),
@@ -492,20 +512,96 @@ class ProfilePage extends StatelessWidget {
   }) {
     return ListTile(
       dense: true,
-      leading: Icon(icon, size: 20, color: kTextDim),
+      leading: Icon(icon, size: 20, color: context.palette.textDim),
       title: Text(title, style: const TextStyle(fontSize: 13.5)),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (trailing != null) ...[
             Text(trailing,
-                style: const TextStyle(fontSize: 11.5, color: kTextDim)),
+                style: TextStyle(fontSize: 11.5, color: context.palette.textDim)),
             const SizedBox(width: 4),
           ],
-          const Icon(Icons.chevron_right_rounded, size: 18, color: kTextDim),
+          Icon(Icons.chevron_right_rounded, size: 18, color: context.palette.textDim),
         ],
       ),
       onTap: onTap,
+    );
+  }
+
+  /// 主题选择
+  ///
+  /// 用底部弹层而不是下拉菜单：三档选项各有说明文字，
+  /// 弹层能放下副标题，用户不用猜「跟随系统」到底跟着什么。
+  /// 点一下即生效并收起——主题是所见即所得的东西，再点一次「确定」多余。
+  Future<void> _pickTheme(BuildContext context) async {
+    final cur = ThemeSettings.instance.mode.value;
+    await showModalBottomSheet<void>(
+      context: context,
+      // 用 surface 而不是默认色：默认在深色下是偏灰的容器色，
+      // 和设置页卡片色对不上，看起来像另一层皮肤。
+      backgroundColor: context.palette.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (sheetCtx) {
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+                child: Text(
+                  '主题外观',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: sheetCtx.palette.onSurface,
+                  ),
+                ),
+              ),
+              for (final m in AppThemeMode.values)
+                ListTile(
+                  dense: true,
+                  leading: Icon(
+                    switch (m) {
+                      AppThemeMode.system => Icons.brightness_auto_rounded,
+                      AppThemeMode.dark => Icons.dark_mode_rounded,
+                      AppThemeMode.light => Icons.light_mode_rounded,
+                    },
+                    size: 21,
+                    color: m == cur ? kAccent : sheetCtx.palette.textDim,
+                  ),
+                  title: Text(
+                    m.label,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight:
+                          m == cur ? FontWeight.w600 : FontWeight.w400,
+                      color: m == cur ? kAccent : sheetCtx.palette.onSurface,
+                    ),
+                  ),
+                  subtitle: Text(
+                    m.hint,
+                    style: TextStyle(
+                        fontSize: 11.5, color: sheetCtx.palette.textDim),
+                  ),
+                  trailing: m == cur
+                      ? const Icon(Icons.check_rounded,
+                          size: 19, color: kAccent)
+                      : null,
+                  onTap: () {
+                    ThemeSettings.instance.set(m);
+                    Navigator.of(sheetCtx).pop();
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
     );
   }
 

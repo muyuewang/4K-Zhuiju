@@ -7,6 +7,7 @@ import 'core/desktop_window.dart';
 import 'core/download.dart';
 import 'core/history.dart';
 import 'core/layout.dart';
+import 'core/theme_settings.dart';
 import 'core/version.dart';
 import 'pages/home_page.dart';
 import 'pages/profile_page.dart';
@@ -64,6 +65,15 @@ Future<void> _restoreInBackground() async {
   } catch (e) {
     debugPrint('[BOOT] danmaku prefs restore failed: $e');
   }
+  // 主题和弹幕开关同在 SharedPreferences，实例已缓存，这里几乎零成本。
+  // 读到后 ThemeSettings.mode 会 notify，MaterialApp 自动换肤，
+  // 所以首帧可能先按系统主题画一次再切换——这是刻意的取舍，
+  // 不为一个设置项把启动路径改成 await。
+  try {
+    await ThemeSettings.instance.restore();
+  } catch (e) {
+    debugPrint('[BOOT] theme prefs restore failed: $e');
+  }
   debugPrint('[BOOT] restore done');
 }
 
@@ -87,11 +97,18 @@ class _ZhuijuAppState extends State<ZhuijuApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: kAppTitle,
-      debugShowCheckedModeBanner: false,
-      theme: buildTheme(),
-      home: const RootPage(),
+    // 订阅主题设置：用户切一次主题，这里重建一次，
+    // 下面所有页面靠 Theme.of / palette 自动跟随，不需要各自监听。
+    return ValueListenableBuilder<AppThemeMode>(
+      valueListenable: ThemeSettings.instance.mode,
+      builder: (ctx, mode, _) => MaterialApp(
+        title: kAppTitle,
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(Brightness.light),
+        darkTheme: buildTheme(Brightness.dark),
+        themeMode: mode.material,
+        home: const RootPage(),
+      ),
     );
   }
 }
@@ -122,7 +139,10 @@ class _RootPageState extends State<RootPage> {
         body: Row(
           children: [
             _SideRail(index: _index, onSelect: _select),
-            const VerticalDivider(width: 1, thickness: 1, color: Color(0xFF23262F)),
+            VerticalDivider(
+                width: 1,
+                thickness: 1,
+                color: context.palette.divider),
             Expanded(
               child: IndexedStack(
                 index: _index,
@@ -141,7 +161,7 @@ class _RootPageState extends State<RootPage> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: _select,
-        backgroundColor: kCard,
+        backgroundColor: context.palette.card,
         indicatorColor: kAccent,
         height: 58,
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
@@ -152,7 +172,9 @@ class _RootPageState extends State<RootPage> {
               // 选中态图标必须是深色：indicatorColor 本身就是 kAccent，
               // 原来 selectedIcon 也用 kAccent，橙画在橙上等于隐形——
               // 实测底部「下载」Tab 只剩一个空橙色胶囊，图标完全看不见。
-              selectedIcon: Icon(d.selected, color: kBg),
+              // 用 kOnAccent 而不是 palette.bg：浅色主题下 bg 是浅灰，
+              // 压在橙上同样看不见。
+              selectedIcon: Icon(d.selected, color: kOnAccent),
               label: d.label,
             ),
         ],
@@ -174,7 +196,7 @@ class _SideRail extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: 208,
-      color: kCard.withValues(alpha: 0.6),
+      color: context.palette.card.withValues(alpha: 0.6),
       child: SafeArea(
         right: false,
         child: Column(
@@ -220,11 +242,12 @@ class _SideRail extends StatelessWidget {
                 onTap: () => onSelect(i),
               ),
             const Spacer(),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(18, 8, 18, 16),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 8, 18, 16),
               child: Text(
                 'v$kAppVersion',
-                style: TextStyle(fontSize: 11, color: kTextDim),
+                style: TextStyle(
+                    fontSize: 11, color: context.palette.textDim),
               ),
             ),
           ],
@@ -274,7 +297,7 @@ class _RailItemState extends State<_RailItem> {
             decoration: BoxDecoration(
               color: active
                   ? kAccent.withValues(alpha: 0.16)
-                  : (_hover ? Colors.white.withValues(alpha: 0.05) : null),
+                  : (_hover ? context.palette.hover : null),
               borderRadius: BorderRadius.circular(9),
             ),
             child: Row(
@@ -282,7 +305,7 @@ class _RailItemState extends State<_RailItem> {
                 Icon(
                   active ? widget.selectedIcon : widget.icon,
                   size: 20,
-                  color: active ? kAccent : kTextDim,
+                  color: active ? kAccent : context.palette.textDim,
                 ),
                 const SizedBox(width: 11),
                 Text(
@@ -290,7 +313,7 @@ class _RailItemState extends State<_RailItem> {
                   style: TextStyle(
                     fontSize: 13.5,
                     fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-                    color: active ? kAccent : Colors.white70,
+                    color: active ? kAccent : context.palette.onSurface,
                   ),
                 ),
               ],

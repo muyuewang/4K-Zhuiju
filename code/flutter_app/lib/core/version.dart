@@ -16,10 +16,10 @@ library;
 const String kAppTitle = '4K追剧';
 
 /// 展示用版本号（与 pubspec.yaml 的 version 的 `+` 之前部分保持一致）
-const String kAppVersion = '1.2.0';
+const String kAppVersion = '1.3.0';
 
 /// 构建号（pubspec.yaml 的 version 中 `+` 之后部分）
-const String kAppBuild = '4';
+const String kAppBuild = '5';
 
 /// 完整标识，如 `1.1.0 (3)`
 const String kAppVersionFull = '$kAppVersion ($kAppBuild)';

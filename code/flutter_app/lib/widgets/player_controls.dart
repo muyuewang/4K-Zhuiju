@@ -47,8 +47,17 @@ class PlayerControlBar extends StatefulWidget {
 }
 
 class _PlayerControlBarState extends State<PlayerControlBar> {
-  double _speed = 1.0;
-  double _volume = 1.0;
+  /// 倍速和音量**不存本地副本**，每次 build 都从 controller 的
+  /// [VideoPlayerValue] 现读。原因有两条，都是实测踩出来的：
+  ///
+  ///   1. 换源后 Widget 在树里的位置和类型都没变，Flutter 会复用同一个
+  ///      State，`initState` 根本不会重跑。本地副本于是停在上一个源的
+  ///      倍速/音量上，按钮显示和实际播放对不上。
+  ///   2. 键盘快捷键（↑↓ 调音量、M 静音）在 player_page 里直接改
+  ///      controller，压根不经过这个组件，本地副本同样不会更新。
+  ///
+  /// controller 本身是 ValueNotifier，setVolume / setPlaybackSpeed 都会
+  /// notifyListeners，下面的 ValueListenableBuilder 自动就刷新了。
 
   /// 当前展开的浮层：null / 'speed' / 'volume'
   String? _panel;
@@ -69,29 +78,28 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
   static const double _speedPanelW = 92;
   static const double _volPanelW = 54;
 
+  /// 换源换了 controller：收起浮层、清掉拖动残留。
+  /// 不这么做的话，新 controller 会继承上一个源的「拖动中」状态，
+  /// 进度条一直停在旧位置不动，直到用户再拖一次才恢复。
   @override
-  void initState() {
-    super.initState();
-    // 从 controller 读初始值，换源后新 controller 会重新 initState
-    _speed = widget.ctrl.value.playbackSpeed;
-    if (_speed <= 0) _speed = 1.0;
-    _volume = widget.ctrl.value.volume.clamp(0.0, 1.0);
+  void didUpdateWidget(PlayerControlBar old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.ctrl, widget.ctrl)) {
+      _panel = null;
+      _scrubbing = false;
+      _scrubMs = 0;
+    }
   }
 
   Future<void> _setSpeed(double v) async {
     await widget.ctrl.setPlaybackSpeed(v);
+    // 不用 setState 记值：controller 自己 notify，下面的
+    // ValueListenableBuilder 会重建；这里只需收起面板。
     if (!mounted) return;
-    setState(() {
-      _speed = v;
-      _panel = null;
-    });
+    setState(() => _panel = null);
   }
 
-  Future<void> _setVolume(double v) async {
-    await widget.ctrl.setVolume(v);
-    if (!mounted) return;
-    setState(() => _volume = v);
-  }
+  Future<void> _setVolume(double v) => widget.ctrl.setVolume(v);
 
   void _togglePanel(String p, GlobalKey anchor) {
     final open = _panel != p;
@@ -151,7 +159,9 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
               Positioned(
                 left: _popLeft,
                 bottom: _popBottom,
-                child: _panel == 'speed' ? _speedPanel() : _volPanel(),
+                child: _panel == 'speed'
+                    ? _speedPanel(_speedOf(v))
+                    : _volPanel(_volOf(v)),
               ),
           ],
         );
@@ -183,16 +193,25 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
       child: Slider(
         value: value,
         max: max,
-        onChangeStart:
-            enabled ? (x) => setState(() => _scrubMs = x) : null,
-        onChanged: enabled
+        // onChangeStart 里必须同时把 _scrubbing 置位。
+        // 只记 _scrubMs 的话，按下那一帧 _scrubbing 还是 false，
+        // value 又回落到 v.position（旧位置），滑块会先弹回旧位置
+        // 再跳到手指处，肉眼就是「点一下闪一下」。
+        onChangeStart: enabled
             ? (x) => setState(() {
                   _scrubbing = true;
                   _scrubMs = x;
                 })
             : null,
+        onChanged: enabled
+            ? (x) => setState(() => _scrubMs = x)
+            : null,
         onChangeEnd: enabled
             ? (x) async {
+                // 先把目标位置钉住，等 seekTo 回来再放开。
+                // 顺序反了的话，松手瞬间进度条会先跳回视频的旧 position，
+                // 等 seek 生效再跳过去，中间那一下很像卡了。
+                setState(() => _scrubMs = x);
                 await c.seekTo(Duration(milliseconds: x.round()));
                 if (!mounted) return;
                 setState(() => _scrubbing = false);
@@ -224,8 +243,8 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
           ),
         ),
         const Spacer(),
-        _speedBtn(),
-        _volumeBtn(),
+        _speedBtn(_speedOf(v)),
+        _volumeBtn(_volOf(v)),
         ...widget.extraActions,
         if (widget.onToggleFullscreen != null)
           _iconBtn(
@@ -258,21 +277,30 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
         onPressed: onTap,
       );
 
-  Widget _speedBtn() => TextButton(
+  /// 从当前值里取倍速。插件在 setPlaybackSpeed 时会 copyWith 并 notify，
+  /// 所以这里永远是真实生效的那个值，不会和播放内核脱节。
+  double _speedOf(VideoPlayerValue v) {
+    final s = v.playbackSpeed;
+    return s <= 0 ? 1.0 : s;
+  }
+
+  double _volOf(VideoPlayerValue v) => v.volume.clamp(0.0, 1.0);
+
+  Widget _speedBtn(double speed) => TextButton(
         key: _speedKey,
         onPressed: () => _togglePanel('speed', _speedKey),
         style: TextButton.styleFrom(
           minimumSize: const Size(40, 32),
           padding: const EdgeInsets.symmetric(horizontal: 6),
-          foregroundColor: (_speed - 1.0).abs() < 0.01 ? Colors.white : kAccent,
+          foregroundColor: (speed - 1.0).abs() < 0.01 ? Colors.white : kAccent,
         ),
         child: Text(
-          (_speed - 1.0).abs() < 0.01 ? '倍速' : '${_fmtSpeed(_speed)}X',
+          (speed - 1.0).abs() < 0.01 ? '倍速' : '${_fmtSpeed(speed)}X',
           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
         ),
       );
 
-  Widget _volumeBtn() => IconButton(
+  Widget _volumeBtn(double volume) => IconButton(
         key: _volKey,
         iconSize: 22,
         color: Colors.white,
@@ -281,9 +309,9 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
         constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
         visualDensity: VisualDensity.compact,
         icon: Icon(
-          _volume == 0
+          volume == 0
               ? Icons.volume_off_rounded
-              : (_volume < 0.5
+              : (volume < 0.5
                   ? Icons.volume_down_rounded
                   : Icons.volume_up_rounded),
         ),
@@ -292,7 +320,7 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
 
   // ---------------- 浮层 ----------------
 
-  Widget _speedPanel() {
+  Widget _speedPanel(double speed) {
     return Container(
       width: _speedPanelW,
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -314,8 +342,8 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
                     '${_fmtSpeed(s)}X',
                     style: TextStyle(
                       fontSize: 13,
-                      color: (s - _speed).abs() < 0.01 ? kAccent : Colors.white,
-                      fontWeight: (s - _speed).abs() < 0.01
+                      color: (s - speed).abs() < 0.01 ? kAccent : Colors.white,
+                      fontWeight: (s - speed).abs() < 0.01
                           ? FontWeight.w700
                           : FontWeight.w400,
                     ),
@@ -328,7 +356,7 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
     );
   }
 
-  Widget _volPanel() {
+  Widget _volPanel(double volume) {
     return Container(
       width: _volPanelW,
       height: 148,
@@ -340,7 +368,7 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
       child: Column(
         children: [
           Text(
-            '${(_volume * 100).round()}',
+            '${(volume * 100).round()}',
             style: const TextStyle(fontSize: 11, color: Colors.white70),
           ),
           Expanded(
@@ -358,12 +386,12 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
                   overlayShape:
                       const RoundSliderOverlayShape(overlayRadius: 12),
                 ),
-                child: Slider(value: _volume, onChanged: _setVolume),
+                child: Slider(value: volume, onChanged: _setVolume),
               ),
             ),
           ),
           Icon(
-            _volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+            volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded,
             size: 18,
             color: Colors.white70,
           ),

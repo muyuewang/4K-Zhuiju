@@ -18,7 +18,7 @@ class HistoryPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: kBg,
+      backgroundColor: context.palette.bg,
       appBar: AppBar(
         title: const Text('最近观看'),
         actions: [
@@ -38,19 +38,19 @@ class HistoryPage extends StatelessWidget {
         valueListenable: HistoryStore.instance.records,
         builder: (c, list, _) {
           if (list.isEmpty) {
-            return const Center(
+            return Center(
               child: Padding(
-                padding: EdgeInsets.all(28),
+                padding: const EdgeInsets.all(28),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.history_rounded, color: kTextDim, size: 44),
-                    SizedBox(height: 12),
+                    Icon(Icons.history_rounded, color: context.palette.textDim, size: 44),
+                    const SizedBox(height: 12),
                     Text('还没有观看记录',
-                        style: TextStyle(fontSize: 13, color: kTextDim)),
-                    SizedBox(height: 6),
+                        style: TextStyle(fontSize: 13, color: context.palette.textDim)),
+                    const SizedBox(height: 6),
                     Text('看过的剧会自动出现在这里',
-                        style: TextStyle(fontSize: 11, color: kTextDim)),
+                        style: TextStyle(fontSize: 11, color: context.palette.textDim)),
                   ],
                 ),
               ),
@@ -87,12 +87,12 @@ class HistoryPage extends StatelessWidget {
                 width: 68,
                 height: 92,
                 child: r.cover.isEmpty
-                    ? Container(color: kCard)
+                    ? Container(color: context.palette.card)
                     : CachedNetworkImage(
                         imageUrl: r.cover,
                         fit: BoxFit.cover,
                         memCacheWidth: 220,
-                        errorWidget: (_, __, ___) => Container(color: kCard),
+                        errorWidget: (_, __, ___) => Container(color: context.palette.card),
                       ),
               ),
             ),
@@ -112,7 +112,7 @@ class HistoryPage extends StatelessWidget {
                   const SizedBox(height: 5),
                   Text(
                     r.epLabel.isEmpty ? '未知集数' : r.epLabel,
-                    style: const TextStyle(fontSize: 11.5, color: kTextDim),
+                    style: TextStyle(fontSize: 11.5, color: context.palette.textDim),
                   ),
                   const SizedBox(height: 8),
                   Row(
@@ -123,7 +123,7 @@ class HistoryPage extends StatelessWidget {
                           child: LinearProgressIndicator(
                             value: r.progress,
                             minHeight: 3,
-                            backgroundColor: kBg,
+                            backgroundColor: context.palette.bg,
                             valueColor: const AlwaysStoppedAnimation<Color>(
                                 kAccent),
                           ),
@@ -136,8 +136,8 @@ class HistoryPage extends StatelessWidget {
                             ? '已看完'
                             : '${_dur(r.positionSec)} / '
                                 '${r.durationSec > 0 ? _dur(r.durationSec) : "--:--"}',
-                        style: const TextStyle(
-                            fontSize: 10.5, color: kTextDim),
+                        style: TextStyle(
+                            fontSize: 10.5, color: context.palette.textDim),
                       ),
                     ],
                   ),
@@ -147,7 +147,7 @@ class HistoryPage extends StatelessWidget {
             IconButton(
               tooltip: '移除记录',
               icon: const Icon(Icons.close_rounded, size: 17),
-              color: kTextDim,
+              color: context.palette.textDim,
               onPressed: () =>
                   HistoryStore.instance.remove(r.dramaId, r.dramaName),
             ),
