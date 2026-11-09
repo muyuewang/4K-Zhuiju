@@ -120,29 +120,52 @@ def main():
     base_tree = commit["tree"]["sha"]
     print("远程 tree:", base_tree)
 
-    entries = []
-    if remote_sha != local_head:
-        out = git("diff", "--name-status", remote_sha, local_head)
-        for line in out.splitlines():
-            parts = line.split("\t")
-            if len(parts) >= 2:
-                entries.append((parts[0], parts[-1]))
-    print(f"待上传文件: {len(entries)}")
+    # 不能用 git diff <remote_sha> <local_head>：远程那个 commit 是上一次
+    # 用 API 造出来的，本地对象库里根本没有它，diff 直接报 bad object。
+    # 改为分别取两边的完整 tree，按「路径 -> blob sha」比对。
+    # git 的 blob sha 是内容寻址的，两边算法一致，sha 不同即内容不同。
+    local = {}
+    raw = git("ls-tree", "-r", "-z", "HEAD", binary=True)
+    for rec in raw.split(b"\0"):
+        if not rec:
+            continue
+        meta, _, path = rec.partition(b"\t")
+        mode, typ, sha = meta.split()
+        local[path.decode("utf-8")] = (mode.decode(), sha.decode())
+
+    st, rtree = api(f"/git/trees/{base_tree}?recursive=1")
+    if st != 200:
+        raise SystemExit(f"读远程 tree 失败: {st} {rtree}")
+    if rtree.get("truncated"):
+        raise SystemExit("远程 tree 被截断，不能用增量方式推送")
+    remote = {
+        e["path"]: e["sha"]
+        for e in rtree["tree"]
+        if e["type"] == "blob"
+    }
+
+    changed = [(p, m) for p, (m, s) in local.items() if remote.get(p) != s]
+    deleted = [p for p in remote if p not in local]
+    print(f"本地文件 {len(local)}，远程文件 {len(remote)}，"
+          f"待上传 {len(changed)}，待删除 {len(deleted)}")
 
     tree_entries = []
-    for status, path in entries:
-        if status.startswith("D"):
-            print(f"  删除 {path}（需从 tree 移除，本项目本版无此情况）")
-            continue
-        content = git("cat-file", "blob", f"{local_head}:{path}", binary=True)
+    for path in sorted(deleted):
+        tree_entries.append({"path": path, "mode": "100644",
+                             "type": "blob", "sha": None})
+        print(f"  删除 {path}")
+
+    for path, mode in sorted(changed):
+        sha = local[path][1]
+        content = git("cat-file", "blob", sha, binary=True)
         st, blob = api("/git/blobs", "POST", {
             "content": __import__("base64").b64encode(content).decode("ascii"),
             "encoding": "base64",
         })
         if st not in (200, 201):
             raise SystemExit(f"blob {path} 失败: {st} {blob}")
-        mode = git("ls-tree", local_head, "--", path).split()[0]
-        tree_entries.append({"path": path, "mode": mode, "type": "blob", "sha": blob["sha"]})
+        tree_entries.append({"path": path, "mode": mode,
+                             "type": "blob", "sha": blob["sha"]})
         print(f"  blob {path} -> {blob['sha'][:8]} ({len(content)} B, {mode})")
 
     new_commit_sha = remote_sha
