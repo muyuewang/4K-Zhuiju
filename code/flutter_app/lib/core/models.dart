@@ -197,6 +197,25 @@ class DramaVideo {
   /// path 本身就是完整 URL（bfzym3u8 / qq 两类源）
   bool get isDirectPath => path.startsWith('http');
 
+  /// path 是否「可能是地址」。
+  ///
+  /// 独家短剧（source=hgdj）这类源返回的 path 是
+  /// `7512797350914444313&1` —— 原版播放器的内部令牌，既不是 URL，
+  /// 也不是站内路径。直接丢给 VideoPlayerController 只会得到
+  /// UnrecognizedInputFormat，用户根本看不懂。而它偏偏集数最多
+  /// （90 集），一旦被选成默认源，点任何一集都放不出来。
+  ///
+  /// 判据刻意保守：地址要么带 scheme、要么以 / 开头、要么含「.」
+  /// （xxx.m3u8 / xxx.mp4 / index.php）。令牌形态三者都不满足。
+  /// 判错的代价只是「多试一次接口」，判漏的代价是整部剧不能播。
+  bool get pathLooksPlayable {
+    final p = path.trim();
+    if (p.isEmpty) return false;
+    if (p.startsWith('http://') || p.startsWith('https://')) return true;
+    if (p.startsWith('/')) return true;
+    return p.contains('.');
+  }
+
   String get epLabel => episode > 0 ? '第$episode集' : title;
 }
 

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../core/api.dart';
 import '../core/layout.dart';
 import '../core/models.dart';
+import '../core/source_picker.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'player_page.dart';
@@ -60,25 +61,10 @@ class _DetailPageState extends State<DetailPage> {
     }
   }
 
-  /// 已知可稳定下载完整 MP4 的源（实测 support Range，token 不失效）。
-  /// 这些源优先作为默认选中项，用户点开就能直接播、直接下。
-  static const _stableMp4Sources = {
-    'pylg', // 自建蓝光   425MB
-    'tocyyds', // 自建4K-4  1.78GB
-    'qq', // QQ         722MB
-  };
-
-  /// 选默认源：优先「能直连 MP4」的稳定源 → 其次集数最多的源。
-  String _pickDefaultSource(Map<String, List<DramaVideo>> m) {
-    // 1. 先按稳定 MP4 源找（用 source 字段精确匹配，不靠中文名）
-    for (final key in m.keys) {
-      final list = m[key] ?? const <DramaVideo>[];
-      if (list.isEmpty) continue;
-      if (_stableMp4Sources.contains(list.first.source)) return key;
-    }
-    // 2. 退化：集数最多的源
-    return m.keys.reduce((a, b) => m[a]!.length >= m[b]!.length ? a : b);
-  }
+  /// 选默认源：优先稳定 MP4 源 → 可播且分集粒度细 → 可播的单条目 → 集数最多。
+  /// 判定细节见 core/source_picker.dart（有单测覆盖）。
+  String _pickDefaultSource(Map<String, List<DramaVideo>> m) =>
+      pickDefaultSource(m);
 
   void _play(DramaVideo v) {
     // 收集所有源里同一集的其他候选（用于播放失败时换源）

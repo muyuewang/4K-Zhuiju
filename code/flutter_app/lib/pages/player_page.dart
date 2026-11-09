@@ -29,14 +29,28 @@ import '../core/api.dart';
 import '../core/danmaku.dart';
 import '../core/desktop_window.dart';
 import '../core/download.dart';
+import '../core/hls_proxy.dart';
 import '../core/layout.dart';
 import '../core/platform.dart';
 import '../core/history.dart';
 import '../core/models.dart';
+import '../core/source_picker.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/danmaku_overlay.dart';
 import '../widgets/player_controls.dart';
+
+/// 接口返回了「不是地址」的结果（如独家短剧的专用令牌）
+///
+/// 单独建一个类型，是为了让错误页能给出人话提示，
+/// 而不是把 UnrecognizedInputFormat 这种底层异常丢给用户。
+class _UnplayableException implements Exception {
+  final String message;
+  _UnplayableException(String sourceName)
+      : message = '「$sourceName」返回的是播放器专用令牌，不是可播放地址，请换一个源';
+  @override
+  String toString() => message;
+}
 
 class PlayerPage extends StatefulWidget {
   final DramaVideo video;
@@ -198,6 +212,9 @@ class _PlayerPageState extends State<PlayerPage> {
     _noticeTimer?.cancel();
     _saveHistory();
     _ctrl?.dispose();
+    // 离开播放页就关掉本地 HLS 代理，别让 127.0.0.1 的端口一直挂着。
+    // 不 await：dispose 是同步的，代理关闭失败也不该影响页面销毁。
+    if (isDesktop) unawaited(HlsProxy.instance.shutdown());
     // 页面被销毁时务必还原屏幕方向，否则退出播放页后整个 App 还是横屏
     if (_fullscreen) {
       _restoreOrientation();
@@ -294,6 +311,44 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   /// 解析真实播放地址
+  ///
+  /// 策略：**先走接口，失败再退回直链**。顺序不能反，两个原因：
+  ///   1. BL 源（bilibili）的 path 是番剧网页地址，只有接口能换出
+  ///      带时效签名的 m3u8（`/9792d90c…/6AF10B57/…m3u8`）。
+  ///      签名会过期，实测复用一个旧地址很快就 403，所以每次播放
+  ///      都必须重新换一次，绝不能缓存。
+  ///   2. B蓝光 的 path 虽是可直连的 `…/全集/index.m3u8`，但接口会
+  ///      下发同一份清单的 CDN 镜像（122.228.193.79:6688），
+  ///      响应快 4 倍左右，且原站随时可能加防盗链。
+  /// 只有接口真的挂了（网络异常/返回空）才用直链兜底，保证不至于
+  /// 因为接口单点故障而完全不能播。
+  Future<String> _resolveUrl(DramaVideo v) async {
+    final direct = ZhuijuApi.isDirectUrl(v.path) &&
+        (v.path.endsWith('.m3u8') || v.path.endsWith('.mp4'));
+
+    try {
+      final info = await ZhuijuApi.instance.playUrl(v.source, v.path);
+      final u = info.playUrl;
+      if (u.isNotEmpty && ZhuijuApi.isDirectUrl(u)) {
+        _tip = direct ? '接口解析(CDN)' : '接口解析';
+        return u;
+      }
+      // 接口返回了非地址（独家短剧令牌）：直链可用就先用直链，
+      // 否则把令牌原样返回，交给调用方抛「专用令牌」的明确错误。
+      if (direct) {
+        _tip = '直链';
+        return v.path;
+      }
+      return u;
+    } catch (e) {
+      if (direct) {
+        _tip = '直链（接口失败）';
+        return v.path;
+      }
+      rethrow;
+    }
+  }
+
   Future<void> _resolve({DramaVideo? video}) async {
     if (video != null) _cur = video;
 
@@ -323,22 +378,27 @@ class _PlayerPageState extends State<PlayerPage> {
     String url;
     try {
       final v = _cur;
-      if (ZhuijuApi.isDirectUrl(v.path) &&
-          (v.path.endsWith('.m3u8') || v.path.endsWith('.mp4'))) {
-        url = v.path;
-        _tip = '直链';
-      } else {
-        final info = await ZhuijuApi.instance.playUrl(v.source, v.path);
-        url = info.playUrl;
-        _tip = '接口解析';
-      }
+      url = await _resolveUrl(v);
+      // 接口「成功」不代表拿到的是能播的地址。
+      //
+      // 独家短剧（hgdj）实测返回 code=200 且 playUrl 就是
+      // `7512797350914444313&1` —— 这是原版播放器内部的令牌，
+      // 必须由它自己的播放器去换取真实流，我们拿到手无法使用。
+      // 不拦这一层的话，值会一路传到 VideoPlayerController，
+      // 抛出 UnrecognizedInputFormat，用户看到的是
+      // 「当前源无法播放（源站限制或分片失效）」，完全没说清原因。
       if (url.isEmpty) throw Exception('解析结果为空');
+      if (!ZhuijuApi.isDirectUrl(url)) {
+        throw _UnplayableException(v.sourceCn.isNotEmpty
+            ? v.sourceCn
+            : (v.source.isNotEmpty ? v.source : '当前线路'));
+      }
       _realUrl = url;
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _resolving = false;
-        _err = friendlyError(e);
+        _err = e is _UnplayableException ? e.message : friendlyError(e);
       });
       return;
     }
@@ -352,6 +412,16 @@ class _PlayerPageState extends State<PlayerPage> {
       _err = null;
     });
 
+    // 诊断日志：把「线路名 / 接口解析方式 / 最终地址」打到 stdout。
+    //
+    // 排查「某条线路播不出来」时，光看界面截图分不清两件事：
+    //   (a) 换源压根没生效（线路名没变）
+    //   (b) 换源生效了，但这条线路的地址 Media Foundation 解析不了
+    // 两者在界面上都表现成「正在加载视频…」，只能靠这行日志区分。
+    // 级别用 debugPrint，release 包里也不会被裁掉。
+    debugPrint('[PLAY] src=${_cur.sourceCn.isNotEmpty ? _cur.sourceCn : _cur.source}'
+        ' tip=$_tip ep=${_cur.episode} url=$url');
+
     await _startPlay(url);
   }
 
@@ -359,12 +429,45 @@ class _PlayerPageState extends State<PlayerPage> {
   Future<void> _startPlay(String url) async {
     VideoPlayerController? ctrl;
     try {
+      // 桌面端把 m3u8 包一层本地代理再交给 Media Foundation。
+      //
+      // MF 自带的 HLS 解析器对「相对分片地址 + 含百分号编码的基址」
+      // 处理有缺陷，实测短剧 B蓝光（清单里是 `0000000.ts` 这种相对路径，
+      // 基址是 `.../video/xxx/全集/index.m3u8`）会直接报
+      // `MF_MEDIA_ENGINE_EVENT_ERROR: file not found / corrupted / not supported`，
+      // 而分片地址是绝对路径的 BL 线路一直正常。
+      // 代理负责把相对地址展开、清掉源站私货注释，具体原因见 hls_proxy.dart。
+      //
+      // 只对 m3u8 生效：mp4 直链在 MF 上一直没问题，没必要多一跳。
+      // Android 走 ExoPlayer，原生支持相对地址，保持直连（少一层转发）。
+      final playUrl = isDesktop ? await HlsProxy.instance.wrap(url) : url;
+
       ctrl = VideoPlayerController.networkUrl(
-        Uri.parse(url),
-        httpHeaders: const {
-          'User-Agent':
-              'Mozilla/5.0 (Linux; Android 9; SM-N9700) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
-        },
+        Uri.parse(playUrl),
+        // 桌面端绝不能带 httpHeaders，这是 HLS 在 Windows 上播不出来的死因。
+        //
+        // video_player_win 的原生实现（my_grabber_player.cpp:OpenURL）有两条分支：
+        //     if (!httpHeaders.empty() && url 以 http 开头)
+        //         → SetSourceFromByteStream(自己实现的 WinHttp 字节流)
+        //     else
+        //         → SetSource(url)   // 交给 Media Foundation 自己解析
+        //
+        // 也就是说：只要传了请求头，m3u8 就会被当成一个「普通字节流」喂给
+        // Media Foundation，播放列表的语义彻底丢失（它拿到的是清单文本，
+        // 而不是可解码的媒体流），于是直接报 SRC_NOT_SUPPORTED。
+        // 短剧的 B蓝光 / BL 全是 HLS，因此桌面端一条都放不出来，
+        // 而 Android 走 ExoPlayer 原生支持 HLS，同一地址一直正常——
+        // 这就是「APK 能播、桌面版不能播」的全部原因。
+        //
+        // 不传请求头时走 SetSource(url)，Media Foundation 会自行处理
+        // m3u8 清单与分片请求。实测 B蓝光 / BL 两条线路都不需要
+        // 自定义 UA 或 Referer，所以桌面端去掉请求头不影响可用性。
+        httpHeaders: isDesktop
+            ? const {}
+            : const {
+                'User-Agent':
+                    'Mozilla/5.0 (Linux; Android 9; SM-N9700) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
+              },
       );
       // 超时保护：源站半死不活时 initialize 可能挂几分钟，
       // 没有超时用户只会看到一个永远转圈的 loading。
@@ -663,13 +766,13 @@ class _PlayerPageState extends State<PlayerPage> {
         dramaId: widget.dramaId,
         episode: _cur.episode,
         resolver: () async {
-          final v = _cur;
-          if (ZhuijuApi.isDirectUrl(v.path) &&
-              (v.path.endsWith('.m3u8') || v.path.endsWith('.mp4'))) {
-            return v.path;
+          // 与播放共用同一套解析规则（接口优先、直链兜底），
+          // 否则会出现「能播但下载下到的是原站地址/令牌」的割裂。
+          final u = await _resolveUrl(_cur);
+          if (u.isEmpty || !ZhuijuApi.isDirectUrl(u)) {
+            throw Exception('该线路未返回可下载地址');
           }
-          final info = await ZhuijuApi.instance.playUrl(v.source, v.path);
-          return info.playUrl;
+          return u;
         },
       );
 
@@ -711,44 +814,22 @@ class _PlayerPageState extends State<PlayerPage> {
   /// 一旦自动连播/选集切到别的集，快照里根本没有新一集的候选，
   /// 于是 _canSwitch 变成 false，「换源」按钮凭空消失——这个 bug 实测
   /// 在自动连播到第 3 集后复现。sources 是「源 → 全部剧集」，才能按集重算。
+  ///
+  /// 具体判定（含短剧「一条装全集」的兼容）见 core/source_picker.dart，
+  /// 那边有单测覆盖，这里只负责组装。
   List<DramaVideo> get _switchCandidates {
-    final curSrc = _srcKey(_cur);
-    final out = <DramaVideo>[];
-    final seen = <String>{};
-
-    // 首选：从 sources 里按集精确取（能覆盖切集后的场景）
-    for (final entry in widget.sources.entries) {
-      final name = entry.key;
-      if (name == curSrc) continue;
-      if (_triedSrc.contains(name)) continue;
-      DramaVideo? pick;
-      for (final v in entry.value) {
-        if (v.episode == _cur.episode) {
-          pick = v;
-          break;
-        }
-      }
-      // 没有同集就用同集数标签兜底（少数源集数编号不一致）
-      if (pick == null) {
-        for (final v in entry.value) {
-          if (v.epLabel == _cur.epLabel) {
-            pick = v;
-            break;
-          }
-        }
-      }
-      if (pick == null) continue;
-      if (seen.add(name)) out.add(pick);
-    }
+    final out = switchCandidates(widget.sources, _cur, tried: _triedSrc);
 
     // 兜底：sources 为空（老调用方/本地播放）时退回快照
     if (widget.sources.isEmpty) {
+      final curSrc = _srcKey(_cur);
+      final seen = <String>{};
       for (final v in widget.alternates) {
         final k = _srcKey(v);
         if (k == curSrc) continue;
         if (_triedSrc.contains(k)) continue;
         if (v.epLabel != _cur.epLabel) continue;
-        if (seen.add(k)) out.add(v);
+        if (v.pathLooksPlayable && seen.add(k)) out.add(v);
       }
     }
     return out;
@@ -1333,11 +1414,30 @@ class _PlayerPageState extends State<PlayerPage> {
     // 和「播放器」这个使用场景完全不搭。
     if (isWide(context)) return _wideBody();
 
-    return Column(
-      children: [
-        _videoArea(),
-        // 信息区：只要拿到地址就一直可用
-        Expanded(
+    // 竖屏（短剧）专用修法。
+    //
+    // Column 里非弹性子项拿到的是**无界高度**约束，而视频区原来用
+    // AspectRatio 按宽度定高：横屏片 16:9 时高 ≈ 宽×0.56 没问题，
+    // 但竖屏短剧是 9:16，高 = 宽×1.78。360dp 宽的机器上就是 640dp，
+    // 一屏根本放不下，Expanded 拿到负高度，直接报
+    // BOTTOM OVERFLOWED BY 80 PIXELS，播放控制条和全屏按钮全被挤出屏幕。
+    //
+    // 这里给视频区一个明确的高度上限（可用高度的 62%），交给
+    // ConstrainedBox + Center + AspectRatio：AspectRatio 在受限时会
+    // 自动缩宽以维持比例，于是竖屏视频变成「居中 + 上下黑边」，
+    // 控制条稳稳留在屏幕内。横屏片因为算出来的高度本来就小于上限，
+    // 行为与之前完全一致。
+    return LayoutBuilder(
+      builder: (ctx, cons) {
+        final avail = cons.maxHeight.isFinite
+            ? cons.maxHeight
+            : MediaQuery.sizeOf(ctx).height;
+        final maxVideoH = avail * 0.62;
+        return Column(
+          children: [
+            _videoArea(maxHeight: maxVideoH),
+            // 信息区：只要拿到地址就一直可用
+            Expanded(
           child: Container(
             width: double.infinity,
             color: kBg,
@@ -1386,7 +1486,9 @@ class _PlayerPageState extends State<PlayerPage> {
             ),
           ),
         ),
-      ],
+          ],
+        );
+      },
     );
   }
 
@@ -1542,7 +1644,7 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   /// 播放区域
-  Widget _videoArea() {
+  Widget _videoArea({double? maxHeight}) {
     final c = _ctrl;
 
     // 播放器还没就绪
@@ -1566,13 +1668,15 @@ class _PlayerPageState extends State<PlayerPage> {
       );
     }
 
-    return GestureDetector(
+    final aspect = c.value.aspectRatio == 0 ? 16 / 9 : c.value.aspectRatio;
+
+    final video = GestureDetector(
       onTap: () => setState(() => _showCtrl = !_showCtrl),
       child: Container(
         color: Colors.black,
         width: double.infinity,
         child: AspectRatio(
-          aspectRatio: c.value.aspectRatio == 0 ? 16 / 9 : c.value.aspectRatio,
+          aspectRatio: aspect,
           child: Stack(
             alignment: Alignment.center,
             children: [
@@ -1628,6 +1732,26 @@ class _PlayerPageState extends State<PlayerPage> {
                 ),
             ],
           ),
+        ),
+      ),
+    );
+
+    // 有高度上限时：把视频塞进「限高 + 居中」的盒子里。
+    //
+    // AspectRatio 在外层给了紧约束（BoxConstraints.tightFor(height)）之后，
+    // 会自动反推宽度以维持比例，所以 9:16 的竖屏片会变成
+    // 「两侧留黑边的窄条」而不是「顶到天的巨幅画面」，控制条因此
+    // 永远留在可见区域。横屏片算出来的高度通常小于上限，
+    // 这一层等于没生效，行为和原来一致。
+    if (maxHeight == null) return video;
+    return Container(
+      color: Colors.black,
+      width: double.infinity,
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: Center(
+        child: AspectRatio(
+          aspectRatio: aspect,
+          child: video,
         ),
       ),
     );
