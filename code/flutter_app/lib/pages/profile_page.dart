@@ -11,6 +11,7 @@ library;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import '../core/cache_cleaner.dart';
 import '../core/download.dart';
 import '../core/favorites.dart';
 import '../core/history.dart';
@@ -541,6 +542,11 @@ class ProfilePage extends StatelessWidget {
             onTap: () => _confirmClearHistory(context),
           ),
           Divider(height: 1, color: context.palette.divider),
+          // 缓存清理：封面图 + HLS 临时分片的占用，可一键释放。
+          // 单独抽成 StatefulWidget，因为要异步扫描目录才知道占了多少，
+          // 塞进这个 StatelessWidget 里没法在扫完后刷新那一行文字。
+          const CacheSettingRow(),
+          Divider(height: 1, color: context.palette.divider),
           _settingRow(
             context,
             icon: Icons.info_outline_rounded,
@@ -772,5 +778,105 @@ class ProfilePage extends StatelessWidget {
     final mm = m.toString().padLeft(2, '0');
     final ss = s.toString().padLeft(2, '0');
     return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
+  }
+}
+
+/// 设置页里的「清理缓存」一行
+///
+/// 单独做成 StatefulWidget 的原因：占用体积要异步扫目录才知道，
+/// 扫描完成得刷那一行文字。放进 `_settings()` 这个 StatelessWidget 里
+/// 只能一直显示「计算中」。
+///
+/// 样式手写而没复用 `_settingRow`：那是 ProfilePage 的私有方法，
+/// 跨类调不到。这里保持同样的字号/间距，视觉上看不出差别。
+class CacheSettingRow extends StatefulWidget {
+  const CacheSettingRow({super.key});
+
+  @override
+  State<CacheSettingRow> createState() => _CacheSettingRowState();
+}
+
+class _CacheSettingRowState extends State<CacheSettingRow> {
+  /// null 表示还在扫
+  CacheUsage? _usage;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final u = await CacheCleaner.measure();
+    if (!mounted) return;
+    setState(() => _usage = u);
+  }
+
+  Future<void> _onTap() async {
+    if (_busy) return;
+    final cur = _usage;
+    // 缓存不值得弹确认框：里面全是可再生的封面图和临时分片，
+    // 删了下次播放自动重下。多加一步确认反而显得可疑。
+    if (cur == null || cur.files == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('没有可清理的缓存', style: TextStyle(fontSize: 12)),
+        duration: Duration(seconds: 2),
+      ));
+      return;
+    }
+
+    setState(() => _busy = true);
+    final freed = await CacheCleaner.clear();
+    if (!mounted) return;
+    setState(() => _busy = false);
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(
+        freed.files == 0
+            ? '部分文件正在使用，未能清理'
+            : '已清理 ${freed.files} 个文件，释放 ${freed.human}',
+        style: const TextStyle(fontSize: 12),
+      ),
+      duration: const Duration(seconds: 3),
+    ));
+    await _refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final u = _usage;
+    final String trailing;
+    if (_busy) {
+      trailing = '清理中…';
+    } else if (u == null) {
+      trailing = '计算中…';
+    } else if (u.files == 0) {
+      trailing = '无缓存';
+    } else {
+      trailing = u.human;
+    }
+
+    return ListTile(
+      dense: true,
+      leading: Icon(Icons.cleaning_services_rounded,
+          size: 20, color: context.palette.textDim),
+      title: const Text('清理缓存', style: TextStyle(fontSize: 13.5)),
+      subtitle: Text(
+        '封面图和临时分片，不影响已下载的视频',
+        style: TextStyle(fontSize: 11, color: context.palette.textDim),
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(trailing,
+              style: TextStyle(fontSize: 11.5, color: context.palette.textDim)),
+          const SizedBox(width: 4),
+          Icon(Icons.chevron_right_rounded,
+              size: 18, color: context.palette.textDim),
+        ],
+      ),
+      onTap: _onTap,
+    );
   }
 }

@@ -57,6 +57,9 @@ class _UnplayableException implements Exception {
   String toString() => message;
 }
 
+/// 手势过程中顶部/中央显示的指示器类型
+enum _GestureHud { volume, brightness, seek }
+
 class PlayerPage extends StatefulWidget {
   final DramaVideo video;
   final String dramaName;
@@ -145,6 +148,66 @@ class _PlayerPageState extends State<PlayerPage> {
   /// 轻提示（全屏时用自绘浮层，SnackBar 在横屏沉浸式下会被系统 UI 挡住）
   String? _notice;
   Timer? _noticeTimer;
+
+  // ---------------- 手势 ----------------
+
+  /// 画面亮度 0.15~1.0，用一层黑色遮罩实现。
+  ///
+  /// 为什么不调系统亮度：那要走原生通道，Android 需要 WRITE_SETTINGS 权限
+  /// （用户得去系统设置里手动授权，劝退率高），Windows 端更是另一套 API。
+  /// 遮罩层纯 Dart，三端行为一致、不需要任何权限，对看视频这个场景
+  /// 已经够用（用户要的是「太亮了调暗点」，不是调台灯）。
+  double _brightness = 1.0;
+
+  /// 亮度遮罩层控制器：直接改 opacity 比重建整棵树便宜得多，
+  /// 滑动时每帧 setState 会让整个播放页重建，手感会掉帧。
+  final ValueNotifier<double> _brightnessFx = ValueNotifier<double>(0);
+
+  /// 手势中正在显示哪个指示器（音量/亮度/快进）
+  _GestureHud? _hud;
+
+  /// 快进预览：滑动过程中显示的「目标位置」，松手才真正 seek。
+  ///
+  /// 边滑边 seek 会让解码器疯狂重定位，4K 片源直接卡死；
+  /// 松手才跳转是 B 站/爱奇艺的做法。
+  int? _seekPreview;
+
+  /// 横向拖动开始时的基准位置（秒）
+  int _seekBase = 0;
+
+  /// 横向累计位移（像素）。用累计而不是单帧 delta，
+  /// 因为单帧 delta 在低帧率下会丢精度，快速一划可能只走了几十秒。
+  double _hDragDx = 0;
+
+  /// 纵向累计位移（像素），向上为正
+  double _vDragDy = 0;
+
+  /// 纵向滑动：这次滑的是音量还是亮度（左半屏亮度、右半屏音量）
+  bool _vDragIsVolume = false;
+
+  /// 纵向滑动开始时的起始值（0~1），后续按位移增量累加，
+  /// 不用「当前位置 ± 绝对位移」——那样手指一落就能让值从 0 跳到 1。
+  double _vDragStart = 1.0;
+
+  /// 手势指示器自动隐藏计时器
+  Timer? _hudTimer;
+
+  /// 指示器实时数值（0~1）。滑动时只改这个，不 setState 整页，
+  /// 否则每帧重建播放页，滑动会明显掉帧。
+  final ValueNotifier<double> _hudLevel = ValueNotifier<double>(0);
+
+  /// 指示器文案（音量 45% / 亮度 80% / 01:23 / 45:00）
+  final ValueNotifier<String> _hudText = ValueNotifier<String>('');
+
+  /// 上一次点击的时间，用于手动判定双击。
+  ///
+  /// 不用 GestureDetector 的 onDoubleTap：它一旦注册，onTap 就必须
+  /// 等约 300ms 的双击窗口过去才触发，用户点一下画面要等半拍控制条才出来，
+  /// 手感明显发黏。这里自己计时，单击立刻响应，300ms 内来第二下就升级成双击。
+  DateTime? _lastTapAt;
+
+  /// 长按临时 2 倍速前的原倍速，松手恢复
+  double? _speedBeforeBoost;
 
   /// 本集弹幕（按时间升序）；空列表表示本集确实没有弹幕
   List<DanmakuItem> _danmaku = const [];
@@ -240,6 +303,10 @@ class _PlayerPageState extends State<PlayerPage> {
     _histTimer?.cancel();
     _countdownTimer?.cancel();
     _noticeTimer?.cancel();
+    _hudTimer?.cancel();
+    _brightnessFx.dispose();
+    _hudLevel.dispose();
+    _hudText.dispose();
     _saveHistory();
     _ctrl?.dispose();
     // 退出播放页时结束投屏：不主动 Stop，电视会停在最后一帧，
@@ -426,6 +493,120 @@ class _PlayerPageState extends State<PlayerPage> {
     final secs = delta.inSeconds.abs();
     _showNotice('${delta.isNegative ? '快退' : '快进'} $secs 秒');
     setState(() => _showCtrl = true);
+  }
+
+  // ---------------- 手势：双击 / 滑动 / 长按 ----------------
+
+  /// 双击播放/暂停
+  ///
+  /// 主流播放器（B 站、爱奇艺、YouTube）双击画面都是暂停，
+  /// 单手操作时比去找底部那个小按钮方便得多。横屏全屏时尤其明显——
+  /// 控制条会自动隐藏，想暂停还得先点一下唤出来。
+  void _onDoubleTap() {
+    final c = _ctrl;
+    if (c == null || !c.value.isInitialized) return;
+    if (c.value.isPlaying) {
+      c.pause();
+      _showNotice('已暂停');
+    } else {
+      c.play();
+      _showNotice('继续播放');
+    }
+    setState(() => _showCtrl = true);
+  }
+
+  /// 亮度调节：改遮罩透明度
+  ///
+  /// 遮罩 alpha = 1 - brightness，brightness 越低遮得越黑。
+  /// 下限给 0.15 而不是 0：全黑等于看不见画面，用户会以为卡死了。
+  void _applyBrightness(double v) {
+    final b = v.clamp(0.15, 1.0);
+    _brightness = b;
+    _brightnessFx.value = (1 - b).clamp(0.0, 1.0);
+    _keepHud(_GestureHud.brightness,
+        level: b, text: '亮度 ${(b * 100).round()}%');
+  }
+
+  /// 音量调节：夹在 0~1，并给出百分比提示
+  void _applyVolume(double v) {
+    final c = _ctrl;
+    if (c == null) return;
+    final vol = v.clamp(0.0, 1.0);
+    c.setVolume(vol);
+    _keepHud(_GestureHud.volume,
+        level: vol, text: vol <= 0 ? '静音' : '音量 ${(vol * 100).round()}%');
+  }
+
+  /// 显示指示器并重置自动隐藏计时
+  ///
+  /// [text] 是浮标上那行字。手指连续滑动时每帧都会调到这里，
+  /// 所以只在类型变化时才 setState，数值和文案都走 ValueNotifier
+  /// 单独刷新——否则每帧重建整个播放页，滑动明显掉帧。
+  void _keepHud(_GestureHud kind, {double? level, String? text}) {
+    if (level != null) _hudLevel.value = level.clamp(0.0, 1.0);
+    if (text != null) _hudText.value = text;
+    if (_hud != kind) {
+      setState(() => _hud = kind);
+    }
+    _hudTimer?.cancel();
+    _hudTimer = Timer(const Duration(milliseconds: 900), () {
+      if (!mounted) return;
+      setState(() {
+        _hud = null;
+        _seekPreview = null;
+      });
+    });
+  }
+
+  /// 横向拖动结束：真正跳转
+  ///
+  /// 滑动过程中只更新 `_seekPreview`（界面显示目标时间），
+  /// 松手才 seek。边滑边 seek 会让解码器不停重定位，
+  /// 4K 片源直接卡死；这也是 B 站/爱奇艺的做法。
+  void _commitSeek() {
+    final c = _ctrl;
+    final target = _seekPreview;
+    if (c != null && target != null && c.value.isInitialized) {
+      c.seekTo(Duration(seconds: target));
+      _showNotice('已跳转到 ${_clock(target)}');
+    }
+    setState(() {
+      _seekPreview = null;
+      _hud = null;
+    });
+  }
+
+  /// 长按开始：临时 2 倍速
+  ///
+  /// 记住原倍速，松手恢复。用户可能原本就用 1.25x 看，
+  /// 直接恢复到 1.0x 会显得「长按一下把倍速搞乱了」。
+  void _startBoost() {
+    final c = _ctrl;
+    if (c == null || !c.value.isInitialized) return;
+    if (!c.value.isPlaying) return;
+    _speedBeforeBoost = c.value.playbackSpeed;
+    c.setPlaybackSpeed(2.0);
+    _showNotice('2 倍速播放中，松手恢复');
+  }
+
+  /// 长按结束：恢复原倍速
+  void _endBoost() {
+    final c = _ctrl;
+    final back = _speedBeforeBoost;
+    _speedBeforeBoost = null;
+    if (c == null || back == null || !c.value.isInitialized) return;
+    c.setPlaybackSpeed(back);
+  }
+
+  /// 秒 → mm:ss / h:mm:ss
+  String _clock(int sec) {
+    if (sec < 0) sec = 0;
+    final h = sec ~/ 3600;
+    final m = (sec % 3600) ~/ 60;
+    final s = sec % 60;
+    final mm = m.toString().padLeft(2, '0');
+    final ss = s.toString().padLeft(2, '0');
+    return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
   }
 
   /// 释放旧播放器（换源/重新解析前必须调用，否则会泄漏解码器）
@@ -1180,18 +1361,134 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
+  /// 统一手势层：单击显隐 / 双击暂停 / 左右快进 / 上下调亮度音量 / 长按倍速
+  ///
+  /// 为什么自己算双击而不挂 onDoubleTap：见 `_lastTapAt` 的注释——
+  /// 挂了 onDoubleTap 之后单击要等 300ms 才响应，控制条出来会慢半拍。
+  ///
+  /// 为什么横纵滑动都交给同一个 GestureDetector：它们会进同一个
+  /// 手势竞技场，由首帧位移方向决定谁胜出。拆成两层嵌套反而会让
+  /// 外层抢走内层的手势，出现「横滑偶尔变成调速」这类随机 bug。
+  Widget _gestureLayer({required Widget child, bool enabled = true}) {
+    return GestureDetector(
+      // 不拦截面板上的点击：面板自己在外层，这里只处理画面区域
+      behavior: HitTestBehavior.opaque,
+
+      onTapUp: (d) {
+        final now = DateTime.now();
+        final last = _lastTapAt;
+        _lastTapAt = now;
+        // 300ms 内的第二下 → 双击暂停
+        if (last != null &&
+            now.difference(last) < const Duration(milliseconds: 300)) {
+          _lastTapAt = null;
+          _onDoubleTap();
+          return;
+        }
+        // 单击：立刻响应，不等双击窗口
+        setState(() {
+          _showCtrl = !_showCtrl;
+          if (!_showCtrl) {
+            _showEpisodes = false;
+            _showSources = false;
+          }
+        });
+      },
+
+      onHorizontalDragStart: enabled
+          ? (d) {
+              final c = _ctrl;
+              if (c == null || !c.value.isInitialized) return;
+              _hDragDx = 0;
+              _seekBase = c.value.position.inSeconds;
+              _seekPreview = _seekBase;
+            }
+          : null,
+
+      onHorizontalDragUpdate: enabled
+          ? (d) {
+              final c = _ctrl;
+              if (c == null || !c.value.isInitialized) return;
+              _hDragDx += d.delta.dx;
+              // 每秒对应多少像素：按屏幕宽度折算，宽屏滑一下跨度更大。
+              // 1080p 手机横屏约 2400 逻辑像素，÷90 得到每秒 ~26px，
+              // 划满一屏约 90 秒，和 B 站手感接近。
+              final w = MediaQuery.of(context).size.width;
+              final secPerPx = 90 / (w <= 0 ? 800 : w);
+              final total = c.value.duration.inSeconds;
+              var target = _seekBase + (_hDragDx * secPerPx).round();
+              if (target < 0) target = 0;
+              if (total > 0 && target > total) target = total;
+              _seekPreview = target;
+              // 实时更新指示器的进度条与时间文字，但不 setState 整页
+              _keepHud(
+                _GestureHud.seek,
+                level: total <= 0 ? 0 : target / total,
+                text: '${_clock(target)} / ${_clock(total)}',
+              );
+            }
+          : null,
+
+      onHorizontalDragEnd: enabled ? (_) => _commitSeek() : null,
+
+      onVerticalDragStart: enabled
+          ? (d) {
+              _vDragDy = 0;
+              // 左半屏调亮度、右半屏调音量，和主流播放器一致。
+              // 用按下点的横坐标判断，不是手指之后滑到哪——
+              // 否则从左边滑到右边会中途从亮度切成音量，数值直接跳。
+              final w = MediaQuery.of(context).size.width;
+              _vDragIsVolume = d.globalPosition.dx > w / 2;
+              final c = _ctrl;
+              _vDragStart = _vDragIsVolume
+                  ? (c?.value.volume ?? 1.0)
+                  : _brightness;
+            }
+          : null,
+
+      onVerticalDragUpdate: enabled
+          ? (d) {
+              _vDragDy += d.delta.dy;
+              // 向上滑是增大，所以取负；除以屏高再放大 1.4 倍，
+              // 让「从屏幕底部滑到顶部」大致走完 0~1 的全程。
+              final h = MediaQuery.of(context).size.height;
+              final delta = -_vDragDy / (h <= 0 ? 800 : h) * 1.4;
+              final v = _vDragStart + delta;
+              if (_vDragIsVolume) {
+                _applyVolume(v);
+              } else {
+                _applyBrightness(v);
+              }
+            }
+          : null,
+
+      onVerticalDragEnd: enabled
+          ? (_) {
+              // 数值已经在滑动过程中生效了，这里只收起指示器
+              _hudTimer?.cancel();
+              _hudTimer = Timer(const Duration(milliseconds: 400), () {
+                if (!mounted) return;
+                setState(() => _hud = null);
+              });
+            }
+          : null,
+
+      onLongPressStart: enabled ? (_) => _startBoost() : null,
+      onLongPressEnd: enabled ? (_) => _endBoost() : null,
+      // 长按被系统打断（来电、切后台）也要恢复倍速，
+      // 否则回来就是一直 2 倍速，用户会以为播放器坏了
+      onLongPressCancel: enabled ? _endBoost : null,
+
+      child: child,
+    );
+  }
+
   /// 全屏布局：视频铺满，控制条浮在底部，点画面切换显隐
   Widget _fullscreenBody() {
     final c = _ctrl;
     final inited = c != null && c.value.isInitialized;
-    return GestureDetector(
-      onTap: () => setState(() {
-        _showCtrl = !_showCtrl;
-        if (!_showCtrl) {
-          _showEpisodes = false;
-          _showSources = false;
-        }
-      }),
+    return _gestureLayer(
+      enabled: inited,
       child: ColoredBox(
         color: Colors.black,
         child: Stack(
@@ -1242,6 +1539,11 @@ class _PlayerPageState extends State<PlayerPage> {
                       retryLabel: _canSwitch ? '换个源试试' : '重新解析',
                     ),
             ),
+
+            // 亮度遮罩：压在画面之上、控制条之下。
+            // 若放在控制条之上，按钮会跟着一起变暗，用户滑到很暗时
+            // 连「退出全屏」都找不着了。
+            _brightnessOverlay(),
 
             // 顶部：标题 + 选集/换源 + 退出全屏
             if (_showCtrl)
@@ -1352,12 +1654,102 @@ class _PlayerPageState extends State<PlayerPage> {
             if (_showEpisodes) _sidePanel(title: '选集', child: _episodeGrid()),
             if (_showSources) _sidePanel(title: '换源', child: _sourceList()),
 
+            // 手势指示器（音量/亮度/快进预览）
+            if (_hud != null && !_showSources && !_showEpisodes) _gestureHud(),
+
             // 自动连播倒计时
             if (_pendingNext != null) _autoNextCard(),
 
             // 轻提示
             if (_notice != null) _noticeBar(),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// 亮度遮罩层。
+  ///
+  /// 用 IgnorePointer 包住：这层铺满整个画面，一旦参与命中测试，
+  /// 下面所有手势和按钮都会点不到。
+  Widget _brightnessOverlay() {
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: ValueListenableBuilder<double>(
+          valueListenable: _brightnessFx,
+          builder: (c, v, _) => v <= 0
+              ? const SizedBox.shrink()
+              : ColoredBox(color: Colors.black.withValues(alpha: v)),
+        ),
+      ),
+    );
+  }
+
+  /// 手势指示器：音量 / 亮度 / 快进预览，显示在画面正上方居中
+  ///
+  /// 数值和文字都走 ValueListenable：滑动过程中每帧都在变，
+  /// 用 setState 会让整个播放页（含视频、弹幕、控制条）跟着重建，
+  /// 实机上表现为越滑越卡。这里只重建这个几十像素的浮标。
+  Widget _gestureHud() {
+    final kind = _hud!;
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: ValueListenableBuilder<double>(
+              valueListenable: _hudLevel,
+              builder: (c, level, _) => ValueListenableBuilder<String>(
+                valueListenable: _hudText,
+                builder: (c, text, _) {
+                  final mute = kind == _GestureHud.volume && level <= 0;
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        switch (kind) {
+                          _GestureHud.seek => Icons.fast_forward_rounded,
+                          _GestureHud.volume => mute
+                              ? Icons.volume_off_rounded
+                              : Icons.volume_up_rounded,
+                          _GestureHud.brightness => Icons.brightness_6_rounded,
+                        },
+                        color: Colors.white,
+                        size: 26,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(text,
+                          style: const TextStyle(
+                              fontSize: 13,
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600)),
+                      // 快进时进度条没有意义（用户看的是时间），隐掉
+                      if (kind != _GestureHud.seek) ...[
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: 132,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(2),
+                            child: LinearProgressIndicator(
+                              value: level.clamp(0.0, 1.0),
+                              minHeight: 4,
+                              backgroundColor: Colors.white24,
+                              valueColor:
+                                  const AlwaysStoppedAnimation(kAccent),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -2053,8 +2445,7 @@ class _PlayerPageState extends State<PlayerPage> {
 
     final aspect = c.value.aspectRatio == 0 ? 16 / 9 : c.value.aspectRatio;
 
-    final video = GestureDetector(
-      onTap: () => setState(() => _showCtrl = !_showCtrl),
+    final video = _gestureLayer(
       child: Container(
         color: Colors.black,
         width: double.infinity,
@@ -2082,7 +2473,10 @@ class _PlayerPageState extends State<PlayerPage> {
                       : const SizedBox.shrink(),
                 ),
               if (_danmaku.isEmpty && _dmLoaded) const DanmakuEmptyHint(),
+              // 亮度遮罩：压在画面之上、控制条之下，理由同全屏
+              _brightnessOverlay(),
               if (_showCtrl) _overlay(c),
+              if (_hud != null) _gestureHud(),
               if (_pendingNext != null)
                 Positioned(
                   right: 12,

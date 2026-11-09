@@ -280,20 +280,43 @@ class ZhuijuApi {
 }
 
 /// 把 Dio 的异常转成人话
+///
+/// 界面上的错误提示必须是「用户能据此行动」的一句话。
+/// 原来兜底直接返回 `e.toString()`，用户会看到
+/// `ClientException with SocketException: Failed host lookup: ...`
+/// 这种东西——既看不懂，也不知道下一步该干嘛（重试？换源？检查网络？）。
 String friendlyError(Object e) {
   if (e is ApiException) return e.msg;
   if (e is SocketException) return '网络不可达，请检查网络或切换线路';
+  if (e is TimeoutException) return '请求超时，请重试或切换线路';
   if (e is DioException) {
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
-        return '连接超时';
+        return '连接超时，请检查网络';
+      case DioExceptionType.sendTimeout:
+        return '发送超时，请重试';
       case DioExceptionType.receiveTimeout:
-        return '接收超时';
+        return '接收超时，请重试';
       case DioExceptionType.connectionError:
         return '连接失败，服务器可能不可达';
-      default:
-        return e.message ?? '网络错误';
+      case DioExceptionType.badResponse:
+        final code = e.response?.statusCode ?? 0;
+        if (code == 403) return '源站拒绝访问（403）';
+        if (code == 404) return '接口不存在（404）';
+        if (code >= 500) return '服务器出错（$code），请稍后重试';
+        return '请求失败（$code）';
+      case DioExceptionType.cancel:
+        return '请求已取消';
+      case DioExceptionType.badCertificate:
+        return '证书校验失败，请检查网络环境';
+      case DioExceptionType.transformTimeout:
+        return '数据处理超时，请重试';
+      case DioExceptionType.unknown:
+        return '网络异常，请重试';
     }
   }
-  return e.toString();
+  // 兜底：具体异常写日志（开发时能看到完整堆栈），界面上只给人话。
+  // 把 toString() 直接甩给用户等于没提示，还暴露内部实现细节。
+  debugPrint('[API] 未归类异常: $e');
+  return '出错了，请重试';
 }
