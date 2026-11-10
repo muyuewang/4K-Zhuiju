@@ -14,6 +14,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/tv_focus.dart';
 import 'player_page.dart';
+import '../core/tokens.dart';
 
 class DetailPage extends StatefulWidget {
   final int dramaId;
@@ -247,7 +248,7 @@ class _DetailPageState extends State<DetailPage> {
             widget.title ?? '详情',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 15),
+            style: const TextStyle(fontSize: Ts.subtitle),
           ),
         ),
         body: _loading
@@ -355,7 +356,7 @@ class _DetailPageState extends State<DetailPage> {
             );
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
               content: Text(now ? '已加入我的收藏' : '已取消收藏',
-                  style: const TextStyle(fontSize: 12.5)),
+                  style: const TextStyle(fontSize: Ts.body)),
               duration: const Duration(seconds: 2),
             ));
           },
@@ -380,7 +381,7 @@ class _DetailPageState extends State<DetailPage> {
           Text(
             eps.length > 1 ? '选集' : '播放',
             style: TextStyle(
-              fontSize: tv ? 17 : 14,
+              fontSize: tv ? Ts.subtitle : Ts.bodyLg,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -388,7 +389,7 @@ class _DetailPageState extends State<DetailPage> {
           Text(
             '共 ${eps.length} ${eps.length > 1 ? '集' : '条线路'}',
             style: TextStyle(
-              fontSize: tv ? 13 : 11.5,
+              fontSize: tv ? Ts.body : Ts.bodySm,
               color: context.palette.textDim,
             ),
           ),
@@ -411,7 +412,7 @@ class _DetailPageState extends State<DetailPage> {
                 ),
                 label: Text(
                   _epDesc ? '倒序' : '正序',
-                  style: TextStyle(fontSize: tv ? 14 : 12),
+                  style: TextStyle(fontSize: tv ? Ts.bodyLg : Ts.bodySm),
                 ),
               ),
             ),
@@ -448,7 +449,7 @@ class _DetailPageState extends State<DetailPage> {
                     backgroundColor: kAccent,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(R.card),
                     ),
                   ),
                   icon: Icon(Icons.play_arrow_rounded, size: tv ? 28 : 22),
@@ -457,7 +458,7 @@ class _DetailPageState extends State<DetailPage> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: tv ? 17 : 14,
+                      fontSize: tv ? Ts.subtitle : Ts.bodyLg,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -517,7 +518,7 @@ class _DetailPageState extends State<DetailPage> {
                       const SizedBox(width: 2),
                       Text('详情',
                           style: TextStyle(
-                              fontSize: 14, color: context.palette.textDim)),
+                              fontSize: Ts.bodyLg, color: context.palette.textDim)),
                       const Spacer(),
                       // 宽屏没有 AppBar，收藏按钮挂在标题行右端
                       _favButton(d),
@@ -525,7 +526,7 @@ class _DetailPageState extends State<DetailPage> {
                   ),
                   const SizedBox(height: 6),
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(R.panel),
                     child: AspectRatio(
                       aspectRatio: 2 / 3,
                       child: d.cover.best.isEmpty
@@ -612,7 +613,7 @@ class _DetailPageState extends State<DetailPage> {
       children: [
         Text(
           d.name.isEmpty ? (widget.title ?? '') : d.name,
-          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
+          style: const TextStyle(fontSize: Ts.display, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 9),
         Wrap(
@@ -638,7 +639,7 @@ class _DetailPageState extends State<DetailPage> {
           const SizedBox(height: 12),
           _introText(
             d.intro.isNotEmpty ? d.intro : d.brief,
-            fontSize: 13,
+            fontSize: Ts.body,
             lines: 4,
           ),
         ],
@@ -681,7 +682,7 @@ class _DetailPageState extends State<DetailPage> {
         children: [
           Text(
             d.name.isEmpty ? (widget.title ?? '') : d.name,
-            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
+            style: const TextStyle(fontSize: Ts.title, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 6),
           Wrap(
@@ -706,7 +707,7 @@ class _DetailPageState extends State<DetailPage> {
             const SizedBox(height: 8),
             _introText(
               d.intro.isNotEmpty ? d.intro : d.brief,
-              fontSize: 12.5,
+              fontSize: Ts.body,
               lines: 3,
             ),
           ],
@@ -761,7 +762,7 @@ class _DetailPageState extends State<DetailPage> {
                   children: [
                     Text(
                       _introExpanded ? '收起' : '展开',
-                      style: const TextStyle(fontSize: 12, color: kAccent),
+                      style: const TextStyle(fontSize: Ts.bodySm, color: kAccent),
                     ),
                     Icon(
                       _introExpanded
@@ -784,12 +785,12 @@ class _DetailPageState extends State<DetailPage> {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
           color: highlight ? kAccent.withValues(alpha: 0.16) : context.palette.card,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(R.sm),
         ),
         child: Text(
           s,
           style: TextStyle(
-            fontSize: 11,
+            fontSize: Ts.caption,
             color: highlight ? kAccent : context.palette.textDim,
           ),
         ),
@@ -798,7 +799,7 @@ class _DetailPageState extends State<DetailPage> {
   Widget _kv(BuildContext context, String k, String v) => Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('$k  ', style: TextStyle(fontSize: 12, color: context.palette.textDim)),
+          Text('$k  ', style: TextStyle(fontSize: Ts.bodySm, color: context.palette.textDim)),
           Expanded(
             child: Text(
               v,
@@ -806,7 +807,7 @@ class _DetailPageState extends State<DetailPage> {
               overflow: TextOverflow.ellipsis,
               // 原来写死 Colors.white70：浅色主题下压在浅底上等于白字白底，
               // 导演/主演这两行会直接消失。改用主题正文色。
-              style: TextStyle(fontSize: 12, color: context.palette.onSurface),
+              style: TextStyle(fontSize: Ts.bodySm, color: context.palette.onSurface),
             ),
           ),
         ],
@@ -830,12 +831,12 @@ class _DetailPageState extends State<DetailPage> {
             children: [
               Text('播放源',
                   style: TextStyle(
-                      fontSize: tv ? 16 : 13.5,
+                      fontSize: tv ? Ts.subtitle : Ts.bodyLg,
                       fontWeight: FontWeight.w600)),
               const SizedBox(width: 6),
               Text('${names.length} 个可用',
                   style: TextStyle(
-                      fontSize: tv ? 13 : 11,
+                      fontSize: tv ? Ts.body : Ts.caption,
                       color: context.palette.textDim)),
             ],
           ),
@@ -862,7 +863,7 @@ class _DetailPageState extends State<DetailPage> {
                     child: Text(
                       n,
                       style: TextStyle(
-                        fontSize: tv ? 15 : 12,
+                        fontSize: tv ? Ts.subtitle : Ts.bodySm,
                         color: active ? Colors.white : context.palette.textDim,
                         fontWeight: active ? FontWeight.w600 : FontWeight.w400,
                       ),
@@ -897,7 +898,7 @@ class _DetailPageState extends State<DetailPage> {
           color: watching
               ? kAccent.withValues(alpha: 0.16)
               : context.palette.card,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(R.card),
           border: watching
               ? Border.all(color: kAccent.withValues(alpha: 0.75), width: 1.2)
               : null,
@@ -911,7 +912,7 @@ class _DetailPageState extends State<DetailPage> {
               overflow: TextOverflow.ellipsis,
               // TV 下放大集数文字：3 米外 12pt 基本读不出来
               style: TextStyle(
-                fontSize: tv ? 15 : 12,
+                fontSize: tv ? Ts.subtitle : Ts.bodySm,
                 fontWeight: watching ? FontWeight.w700 : FontWeight.w500,
                 color: watching ? kAccent : context.palette.onSurface,
               ),
@@ -921,11 +922,11 @@ class _DetailPageState extends State<DetailPage> {
                 '看到 ${_mmss(_record?.positionSec ?? 0)}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: tv ? 11 : 9, color: kAccent),
+                style: TextStyle(fontSize: tv ? Ts.caption : Ts.caption, color: kAccent),
               )
             else if (v.isVip)
               Text('VIP',
-                  style: TextStyle(fontSize: tv ? 11 : 9, color: kAccent)),
+                  style: TextStyle(fontSize: tv ? Ts.caption : Ts.caption, color: kAccent)),
           ],
         ),
       ),

@@ -22,6 +22,7 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../theme.dart';
+import '../core/tokens.dart';
 
 /// 常用倍速档位（面板里按从高到低排，和主流 App 一致）
 const List<double> kSpeedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
@@ -299,7 +300,7 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
         Text(
           '${_dur(shown)} / ${_dur(v.duration)}',
           style: const TextStyle(
-            fontSize: 13,
+            fontSize: Ts.body,
             color: Colors.white,
             fontWeight: FontWeight.w500,
             height: 1.1,
@@ -359,7 +360,7 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
         ),
         child: Text(
           (speed - 1.0).abs() < 0.01 ? '倍速' : '${_fmtSpeed(speed)}X',
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          style: const TextStyle(fontSize: Ts.body, fontWeight: FontWeight.w500),
         ),
       );
 
@@ -394,11 +395,11 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
         padding: const EdgeInsets.symmetric(vertical: 4),
         decoration: BoxDecoration(
           color: Colors.black.withValues(alpha: 0.92),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(R.card),
           border: Border.all(color: Colors.white24, width: 0.8),
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(R.card),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -412,7 +413,7 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
                       child: Text(
                         '${_fmtSpeed(s)}X',
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: Ts.body,
                           color:
                               (s - speed).abs() < 0.01 ? kAccent : Colors.white,
                           fontWeight: (s - speed).abs() < 0.01
@@ -439,14 +440,14 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
           color: Colors.black.withValues(alpha: 0.92),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(R.card),
           border: Border.all(color: Colors.white24, width: 0.8),
         ),
         child: Column(
           children: [
             Text(
               '${(volume * 100).round()}',
-              style: const TextStyle(fontSize: 11, color: Colors.white70),
+              style: const TextStyle(fontSize: Ts.caption, color: Colors.white70),
             ),
             Expanded(
               child: RotatedBox(
@@ -536,7 +537,7 @@ class PlayerPlaceholder extends StatelessWidget {
               child: Text(
                 message ?? (loading ? '正在加载…' : '播放器未就绪'),
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+                style: const TextStyle(color: Colors.white70, fontSize: Ts.body),
               ),
             ),
             if (hint != null) ...[
@@ -546,7 +547,7 @@ class PlayerPlaceholder extends StatelessWidget {
                 child: Text(
                   hint!,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white38, fontSize: 11),
+                  style: const TextStyle(color: Colors.white38, fontSize: Ts.caption),
                 ),
               ),
             ],

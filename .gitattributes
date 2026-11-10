@@ -1,0 +1,7 @@
+# Dart 源码统一用 LF。
+# 在 Windows 上用 Python 脚本批量改写文件时，默认会写成 CRLF，
+# 导致整个文件在 diff 里变成「全量重写」（曾出现 9000+ 行假改动）。
+*.dart text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf

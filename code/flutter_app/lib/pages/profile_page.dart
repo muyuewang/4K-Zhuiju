@@ -25,6 +25,7 @@ import 'detail_page.dart';
 import 'download_page.dart';
 import 'favorites_page.dart';
 import 'history_page.dart';
+import '../core/tokens.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -122,7 +123,7 @@ class ProfilePage extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(R.panel),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -136,7 +137,7 @@ class ProfilePage extends StatelessWidget {
             height: 52,
             decoration: BoxDecoration(
               color: kAccent.withValues(alpha: 0.18),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(R.panel),
             ),
             child: const Icon(Icons.person_rounded, color: kAccent, size: 28),
           ),
@@ -148,13 +149,13 @@ class ProfilePage extends StatelessWidget {
               children: [
                 const Text(
                   '本地用户',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  style: TextStyle(fontSize: Ts.subtitle, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   '数据仅保存在本机',
                   style:
-                      TextStyle(fontSize: 11.5, color: context.palette.textDim),
+                      TextStyle(fontSize: Ts.bodySm, color: context.palette.textDim),
                 ),
               ],
             ),
@@ -194,11 +195,11 @@ class ProfilePage extends StatelessWidget {
           Text(
             v,
             style: const TextStyle(
-                fontSize: 15, fontWeight: FontWeight.w700, color: kAccent),
+                fontSize: Ts.subtitle, fontWeight: FontWeight.w700, color: kAccent),
           ),
           const SizedBox(width: 4),
           Text(label,
-              style: TextStyle(fontSize: 11, color: context.palette.textDim)),
+              style: TextStyle(fontSize: Ts.caption, color: context.palette.textDim)),
         ],
       );
 
@@ -290,13 +291,13 @@ class ProfilePage extends StatelessWidget {
     final tv = isTv(context);
     final card = InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(R.panel),
       child: Container(
         padding: EdgeInsets.symmetric(
             horizontal: tv ? 18 : 14, vertical: tv ? 22 : 16),
         decoration: BoxDecoration(
           color: context.palette.card,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(R.panel),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -311,12 +312,12 @@ class ProfilePage extends StatelessWidget {
                         const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                     decoration: BoxDecoration(
                       color: kAccent,
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(R.card),
                     ),
                     child: Text(
                       '$badge',
                       style: TextStyle(
-                          fontSize: tv ? 12 : 10,
+                          fontSize: tv ? Ts.bodySm : Ts.caption,
                           fontWeight: FontWeight.w700,
                           color: context.palette.bg),
                     ),
@@ -324,7 +325,7 @@ class ProfilePage extends StatelessWidget {
                 ],
               ],
             ),
-            SizedBox(height: tv ? 13 : 10),
+            SizedBox(height: tv ? Ts.body : Ts.caption),
             Text(
               title,
               style: TextStyle(
@@ -334,7 +335,7 @@ class ProfilePage extends StatelessWidget {
             Text(
               subtitle,
               style: TextStyle(
-                  fontSize: tv ? 13 : 11, color: context.palette.textDim),
+                  fontSize: tv ? Ts.body : Ts.caption, color: context.palette.textDim),
             ),
           ],
         ),
@@ -361,7 +362,7 @@ class ProfilePage extends StatelessWidget {
               children: [
                 const Text(
                   '继续观看',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  style: TextStyle(fontSize: Ts.bodyLg, fontWeight: FontWeight.w600),
                 ),
                 const Spacer(),
                 if (list.length > previewCount)
@@ -373,7 +374,7 @@ class ProfilePage extends StatelessWidget {
                       minimumSize: const Size(0, 30),
                       padding: const EdgeInsets.symmetric(horizontal: 6),
                     ),
-                    child: const Text('全部', style: TextStyle(fontSize: 12)),
+                    child: const Text('全部', style: TextStyle(fontSize: Ts.bodySm)),
                   ),
               ],
             ),
@@ -400,13 +401,13 @@ class ProfilePage extends StatelessWidget {
           ),
         ),
       ),
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(R.card),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(R.card),
               child: SizedBox(
                 width: 62,
                 height: 84,
@@ -433,7 +434,7 @@ class ProfilePage extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        fontSize: 13.5, fontWeight: FontWeight.w600),
+                        fontSize: Ts.bodyLg, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -443,12 +444,12 @@ class ProfilePage extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style:
-                        TextStyle(fontSize: 11, color: context.palette.textDim),
+                        TextStyle(fontSize: Ts.caption, color: context.palette.textDim),
                   ),
                   const SizedBox(height: 6),
                   // 进度条：一眼看出看到哪了
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(2),
+                    borderRadius: BorderRadius.circular(R.bar),
                     child: LinearProgressIndicator(
                       value: r.progress,
                       minHeight: 3,
@@ -481,7 +482,7 @@ class ProfilePage extends StatelessWidget {
     // 如果中间夹一层 DecoratedBox，水波纹会被盖住并且 debug 版直接抛断言。
     return Material(
       color: context.palette.card,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(R.panel),
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
@@ -501,7 +502,7 @@ class ProfilePage extends StatelessWidget {
                 final p = DownloadManager.instance.rootPath;
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                   content: Text(p.isEmpty ? '尚未创建下载目录' : '保存到：$p',
-                      style: const TextStyle(fontSize: 12)),
+                      style: const TextStyle(fontSize: Ts.bodySm)),
                   duration: const Duration(seconds: 5),
                 ));
               },
@@ -568,7 +569,7 @@ class ProfilePage extends StatelessWidget {
                 Text(
                   '第三方影视客户端，内容来自公开接口，仅用于学习交流。',
                   style:
-                      TextStyle(fontSize: 12, color: context.palette.textDim),
+                      TextStyle(fontSize: Ts.bodySm, color: context.palette.textDim),
                 ),
               ],
             ),
@@ -588,14 +589,14 @@ class ProfilePage extends StatelessWidget {
     return ListTile(
       dense: true,
       leading: Icon(icon, size: 20, color: context.palette.textDim),
-      title: Text(title, style: const TextStyle(fontSize: 13.5)),
+      title: Text(title, style: const TextStyle(fontSize: Ts.bodyLg)),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (trailing != null) ...[
             Text(trailing,
                 style:
-                    TextStyle(fontSize: 11.5, color: context.palette.textDim)),
+                    TextStyle(fontSize: Ts.bodySm, color: context.palette.textDim)),
             const SizedBox(width: 4),
           ],
           Icon(Icons.chevron_right_rounded,
@@ -619,7 +620,7 @@ class ProfilePage extends StatelessWidget {
       // 和设置页卡片色对不上，看起来像另一层皮肤。
       backgroundColor: context.palette.card,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(R.pill)),
       ),
       builder: (sheetCtx) {
         return SafeArea(
@@ -633,7 +634,7 @@ class ProfilePage extends StatelessWidget {
                 child: Text(
                   '主题外观',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: Ts.subtitle,
                     fontWeight: FontWeight.w600,
                     color: sheetCtx.palette.onSurface,
                   ),
@@ -654,7 +655,7 @@ class ProfilePage extends StatelessWidget {
                   title: Text(
                     m.label,
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: Ts.bodyLg,
                       fontWeight: m == cur ? FontWeight.w600 : FontWeight.w400,
                       color: m == cur ? kAccent : sheetCtx.palette.onSurface,
                     ),
@@ -662,7 +663,7 @@ class ProfilePage extends StatelessWidget {
                   subtitle: Text(
                     m.hint,
                     style: TextStyle(
-                        fontSize: 11.5, color: sheetCtx.palette.textDim),
+                        fontSize: Ts.bodySm, color: sheetCtx.palette.textDim),
                   ),
                   trailing: m == cur
                       ? const Icon(Icons.check_rounded,
@@ -692,7 +693,7 @@ class ProfilePage extends StatelessWidget {
       context: context,
       backgroundColor: context.palette.card,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(R.pill)),
       ),
       builder: (sheetCtx) {
         return SafeArea(
@@ -706,7 +707,7 @@ class ProfilePage extends StatelessWidget {
                 child: Text(
                   '遥控器模式',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: Ts.subtitle,
                     fontWeight: FontWeight.w600,
                     color: sheetCtx.palette.onSurface,
                   ),
@@ -727,7 +728,7 @@ class ProfilePage extends StatelessWidget {
                   title: Text(
                     m.label,
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: Ts.bodyLg,
                       fontWeight: m == cur ? FontWeight.w600 : FontWeight.w400,
                       color: m == cur ? kAccent : sheetCtx.palette.onSurface,
                     ),
@@ -739,7 +740,7 @@ class ProfilePage extends StatelessWidget {
                             '${TvMode.instance.detected ? '识别为电视' : '未识别到电视'}）'
                         : m.hint,
                     style: TextStyle(
-                        fontSize: 11.5, color: sheetCtx.palette.textDim),
+                        fontSize: Ts.bodySm, color: sheetCtx.palette.textDim),
                   ),
                   trailing: m == cur
                       ? const Icon(Icons.check_rounded,
@@ -829,7 +830,7 @@ class _CacheSettingRowState extends State<CacheSettingRow> {
     // 删了下次播放自动重下。多加一步确认反而显得可疑。
     if (cur == null || cur.files == 0) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('没有可清理的缓存', style: TextStyle(fontSize: 12)),
+        content: Text('没有可清理的缓存', style: TextStyle(fontSize: Ts.bodySm)),
         duration: Duration(seconds: 2),
       ));
       return;
@@ -845,7 +846,7 @@ class _CacheSettingRowState extends State<CacheSettingRow> {
         freed.files == 0
             ? '部分文件正在使用，未能清理'
             : '已清理 ${freed.files} 个文件，释放 ${freed.human}',
-        style: const TextStyle(fontSize: 12),
+        style: const TextStyle(fontSize: Ts.bodySm),
       ),
       duration: const Duration(seconds: 3),
     ));
@@ -870,16 +871,16 @@ class _CacheSettingRowState extends State<CacheSettingRow> {
       dense: true,
       leading: Icon(Icons.cleaning_services_rounded,
           size: 20, color: context.palette.textDim),
-      title: const Text('清理缓存', style: TextStyle(fontSize: 13.5)),
+      title: const Text('清理缓存', style: TextStyle(fontSize: Ts.bodyLg)),
       subtitle: Text(
         '封面图和临时分片，不影响已下载的视频',
-        style: TextStyle(fontSize: 11, color: context.palette.textDim),
+        style: TextStyle(fontSize: Ts.caption, color: context.palette.textDim),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(trailing,
-              style: TextStyle(fontSize: 11.5, color: context.palette.textDim)),
+              style: TextStyle(fontSize: Ts.bodySm, color: context.palette.textDim)),
           const SizedBox(width: 4),
           Icon(Icons.chevron_right_rounded,
               size: 18, color: context.palette.textDim),

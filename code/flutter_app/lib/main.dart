@@ -17,6 +17,7 @@ import 'pages/profile_page.dart';
 import 'theme.dart';
 import 'widgets/danmaku_overlay.dart';
 import 'widgets/tv_focus.dart';
+import 'core/tokens.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -269,7 +270,7 @@ class _SideRail extends StatelessWidget {
                     width: tv ? 38 : 30,
                     height: tv ? 38 : 30,
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(R.card),
                       gradient: const LinearGradient(
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
@@ -305,7 +306,7 @@ class _SideRail extends StatelessWidget {
               child: Text(
                 'v$kAppVersion',
                 style: TextStyle(
-                    fontSize: 11, color: context.palette.textDim),
+                    fontSize: Ts.caption, color: context.palette.textDim),
               ),
             ),
           ],
@@ -342,7 +343,7 @@ class _RailItemState extends State<_RailItem> {
     final active = widget.active;
     final tv = isTv(context);
     final body = Padding(
-      padding: EdgeInsets.symmetric(horizontal: tv ? 12 : 10, vertical: tv ? 5 : 2),
+      padding: EdgeInsets.symmetric(horizontal: tv ? Ts.bodySm : Ts.caption, vertical: tv ? 5 : 2),
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hover = true),
@@ -351,18 +352,19 @@ class _RailItemState extends State<_RailItem> {
           onTap: widget.onTap,
           behavior: HitTestBehavior.opaque,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
+            // 跟随系统「减少动态效果」设置
+            duration: motionOf(context, Motion.micro),
             // TV 下把导航项做得更高更大：遥控器只按上下，
             // 每项太矮会导致「按一下跳过两项」的错觉，也难瞄准。
             padding: EdgeInsets.symmetric(
-              horizontal: tv ? 14 : 12,
-              vertical: tv ? 16 : 11,
+              horizontal: tv ? Ts.bodyLg : Ts.bodySm,
+              vertical: tv ? Ts.subtitle : Ts.caption,
             ),
             decoration: BoxDecoration(
               color: active
                   ? kAccent.withValues(alpha: 0.16)
                   : (_hover ? context.palette.hover : null),
-              borderRadius: BorderRadius.circular(9),
+              borderRadius: BorderRadius.circular(R.card),
             ),
             child: Row(
               children: [
@@ -371,11 +373,11 @@ class _RailItemState extends State<_RailItem> {
                   size: tv ? 26 : 20,
                   color: active ? kAccent : context.palette.textDim,
                 ),
-                SizedBox(width: tv ? 14 : 11),
+                SizedBox(width: tv ? Ts.bodyLg : Ts.caption),
                 Text(
                   widget.label,
                   style: TextStyle(
-                    fontSize: tv ? 17 : 13.5,
+                    fontSize: tv ? Ts.subtitle : Ts.bodyLg,
                     fontWeight: active ? FontWeight.w600 : FontWeight.w400,
                     color: active ? kAccent : context.palette.onSurface,
                   ),

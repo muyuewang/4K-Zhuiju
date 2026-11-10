@@ -16,6 +16,7 @@ import '../core/layout.dart';
 import '../theme.dart';
 import '../widgets/tv_focus.dart';
 import 'detail_page.dart';
+import '../core/tokens.dart';
 
 class FavoritesPage extends StatelessWidget {
   const FavoritesPage({super.key});
@@ -54,11 +55,11 @@ class FavoritesPage extends StatelessWidget {
                     const SizedBox(height: 12),
                     Text('还没有收藏',
                         style: TextStyle(
-                            fontSize: 13, color: context.palette.textDim)),
+                            fontSize: Ts.body, color: context.palette.textDim)),
                     const SizedBox(height: 6),
                     Text('在剧集详情页点右上角书签即可收藏',
                         style: TextStyle(
-                            fontSize: 11, color: context.palette.textDim)),
+                            fontSize: Ts.caption, color: context.palette.textDim)),
                   ],
                 ),
               ),
@@ -94,7 +95,7 @@ class FavoritesPage extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(R.card),
                   child: f.cover.isEmpty
                       ? Container(
                           color: context.palette.card,
@@ -136,7 +137,7 @@ class FavoritesPage extends StatelessWidget {
                       padding: const EdgeInsets.fromLTRB(6, 12, 6, 5),
                       decoration: const BoxDecoration(
                         borderRadius: BorderRadius.vertical(
-                            bottom: Radius.circular(10)),
+                            bottom: Radius.circular(R.card)),
                         gradient: LinearGradient(
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
@@ -148,7 +149,7 @@ class FavoritesPage extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                            fontSize: 10,
+                            fontSize: Ts.caption,
                             color: Colors.white,
                             fontWeight: FontWeight.w500),
                       ),
@@ -163,7 +164,7 @@ class FavoritesPage extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: tv ? 16 : 12.5,
+              fontSize: tv ? Ts.subtitle : Ts.body,
               fontWeight: FontWeight.w500,
               color: context.palette.onSurface,
             ),
@@ -174,7 +175,7 @@ class FavoritesPage extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                  fontSize: tv ? 13 : 10.5,
+                  fontSize: tv ? Ts.body : Ts.caption,
                   color: context.palette.textDim),
             ),
         ],
@@ -222,10 +223,10 @@ class FavoritesPage extends StatelessWidget {
       context: context,
       builder: (c) => AlertDialog(
         backgroundColor: context.palette.card,
-        title: const Text('清空收藏？', style: TextStyle(fontSize: 15)),
+        title: const Text('清空收藏？', style: TextStyle(fontSize: Ts.subtitle)),
         content: Text('收藏列表会被清空，不影响观看记录和已下载文件。',
             style:
-                TextStyle(fontSize: 12.5, color: context.palette.textDim)),
+                TextStyle(fontSize: Ts.body, color: context.palette.textDim)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(c, false),

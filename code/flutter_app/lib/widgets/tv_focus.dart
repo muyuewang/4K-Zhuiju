@@ -21,6 +21,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/tokens.dart';
 import '../theme.dart';
 
 /// 遥控器「确定」键。不同设备上报的 key 不一样，能见到的都列上：
@@ -89,7 +90,8 @@ class _TvFocusState extends State<TvFocus> {
         Scrollable.ensureVisible(
           ctx,
           alignment: 0.5,
-          duration: const Duration(milliseconds: 180),
+          // 跟随系统「减少动态效果」：零时长即瞬时滚动到位
+          duration: motionOf(ctx, const Duration(milliseconds: 180)),
           curve: Curves.easeOut,
         );
       } catch (_) {}
@@ -163,7 +165,8 @@ class _TvFocusRingState extends State<TvFocusRing> {
         if (_focused != v && mounted) setState(() => _focused = v);
       },
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 110),
+        // 焦点框也是位移动画，开了「减少动态效果」同样应该直接到位
+        duration: motionOf(context, Motion.micro),
         foregroundDecoration: _focused
             ? BoxDecoration(
                 borderRadius: BorderRadius.circular(widget.radius),

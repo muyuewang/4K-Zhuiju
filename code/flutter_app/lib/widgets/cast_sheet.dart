@@ -16,6 +16,7 @@ import '../core/dlna.dart';
 import '../core/layout.dart';
 import '../theme.dart';
 import 'tv_focus.dart';
+import '../core/tokens.dart';
 
 /// 弹出设备选择面板，返回用户选中的设备（取消返回 null）。
 ///
@@ -92,7 +93,7 @@ class _CastSheetState extends State<_CastSheet> {
       constraints: BoxConstraints(maxHeight: maxH),
       decoration: BoxDecoration(
         color: context.palette.card,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(R.pill)),
       ),
       child: SafeArea(
         top: false,
@@ -106,7 +107,7 @@ class _CastSheetState extends State<_CastSheet> {
               height: 4,
               decoration: BoxDecoration(
                 color: context.palette.textDim.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(2),
+                borderRadius: BorderRadius.circular(R.bar),
               ),
             ),
             Padding(
@@ -120,7 +121,7 @@ class _CastSheetState extends State<_CastSheet> {
                     child: Text(
                       '投屏到电视',
                       style: TextStyle(
-                        fontSize: 16,
+                        fontSize: Ts.subtitle,
                         fontWeight: FontWeight.w600,
                         color: context.palette.onSurface,
                       ),
@@ -149,11 +150,11 @@ class _CastSheetState extends State<_CastSheet> {
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                 decoration: BoxDecoration(
                   color: Colors.orange.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(R.card),
                 ),
                 child: Text(
                   _error!,
-                  style: const TextStyle(fontSize: 12, color: Colors.orange),
+                  style: const TextStyle(fontSize: Ts.bodySm, color: Colors.orange),
                 ),
               ),
             Flexible(child: _body()),
@@ -163,7 +164,7 @@ class _CastSheetState extends State<_CastSheet> {
                 '手机与电视需连接同一局域网。若列表为空，请确认路由器未开启'
                 '「AP 隔离」，或改用电视自带的投屏功能。',
                 style: TextStyle(
-                  fontSize: 11,
+                  fontSize: Ts.caption,
                   height: 1.5,
                   color: context.palette.textDim,
                 ),
@@ -192,7 +193,7 @@ class _CastSheetState extends State<_CastSheet> {
                 _scanning ? '正在搜索设备…' : (_error ?? '没找到可投屏的设备'),
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: Ts.body,
                   color: context.palette.textDim,
                 ),
               ),
@@ -210,7 +211,7 @@ class _CastSheetState extends State<_CastSheet> {
         final d = _devices[i];
         final busy = _busy == d.controlUrl;
         final row = InkWell(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(R.card),
           onTap: _busy == null ? () => _pick(d) : null,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
@@ -229,7 +230,7 @@ class _CastSheetState extends State<_CastSheet> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 14,
+                          fontSize: Ts.bodyLg,
                           fontWeight: FontWeight.w600,
                           color: context.palette.onSurface,
                         ),
@@ -241,7 +242,7 @@ class _CastSheetState extends State<_CastSheet> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: 11,
+                            fontSize: Ts.caption,
                             color: context.palette.textDim,
                           ),
                         ),
@@ -287,7 +288,7 @@ class CastBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
       decoration: BoxDecoration(
         color: kAccent.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(R.card),
         border: Border.all(color: kAccent.withValues(alpha: 0.45), width: 0.8),
       ),
       child: Row(
@@ -299,7 +300,7 @@ class CastBar extends StatelessWidget {
               '正在投屏到「$deviceName」',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12.5, color: Colors.white),
+              style: const TextStyle(fontSize: Ts.body, color: Colors.white),
             ),
           ),
           TextButton(
@@ -309,7 +310,7 @@ class CastBar extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8),
               foregroundColor: kAccent,
             ),
-            child: const Text('停止', style: TextStyle(fontSize: 12.5)),
+            child: const Text('停止', style: TextStyle(fontSize: Ts.body)),
           ),
         ],
       ),

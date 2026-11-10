@@ -12,6 +12,7 @@ import '../core/layout.dart';
 import '../theme.dart';
 import '../widgets/tv_focus.dart';
 import 'detail_page.dart';
+import '../core/tokens.dart';
 
 class HistoryPage extends StatelessWidget {
   const HistoryPage({super.key});
@@ -48,10 +49,10 @@ class HistoryPage extends StatelessWidget {
                     Icon(Icons.history_rounded, color: context.palette.textDim, size: 44),
                     const SizedBox(height: 12),
                     Text('还没有观看记录',
-                        style: TextStyle(fontSize: 13, color: context.palette.textDim)),
+                        style: TextStyle(fontSize: Ts.body, color: context.palette.textDim)),
                     const SizedBox(height: 6),
                     Text('看过的剧会自动出现在这里',
-                        style: TextStyle(fontSize: 11, color: context.palette.textDim)),
+                        style: TextStyle(fontSize: Ts.caption, color: context.palette.textDim)),
                   ],
                 ),
               ),
@@ -73,7 +74,7 @@ class HistoryPage extends StatelessWidget {
   Widget _row(BuildContext context, WatchRecord r) {
     final tv = isTv(context);
     final body = InkWell(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(R.panel),
       // 点一条记录就接着上次看：把集数和进度一起带进详情页，
       // 详情页加载完会自动定位到该集并起播。
       // 以前只 push 一个裸的详情页，用户点「继续观看」还要再点一次
@@ -94,7 +95,7 @@ class HistoryPage extends StatelessWidget {
         child: Row(
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(R.card),
               child: SizedBox(
                 width: tv ? 88 : 68,
                 height: tv ? 119 : 92,
@@ -119,14 +120,14 @@ class HistoryPage extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        fontSize: tv ? 17 : 14,
+                        fontSize: tv ? Ts.subtitle : Ts.bodyLg,
                         fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 5),
                   Text(
                     r.epLabel.isEmpty ? '未知集数' : r.epLabel,
                     style: TextStyle(
-                        fontSize: tv ? 14 : 11.5,
+                        fontSize: tv ? Ts.bodyLg : Ts.bodySm,
                         color: context.palette.textDim),
                   ),
                   const SizedBox(height: 8),
@@ -134,7 +135,7 @@ class HistoryPage extends StatelessWidget {
                     children: [
                       Expanded(
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(2),
+                          borderRadius: BorderRadius.circular(R.bar),
                           child: LinearProgressIndicator(
                             value: r.progress,
                             minHeight: 3,
@@ -152,7 +153,7 @@ class HistoryPage extends StatelessWidget {
                             : '${_dur(r.positionSec)} / '
                                 '${r.durationSec > 0 ? _dur(r.durationSec) : "--:--"}',
                         style: TextStyle(
-                            fontSize: 10.5, color: context.palette.textDim),
+                            fontSize: Ts.caption, color: context.palette.textDim),
                       ),
                     ],
                   ),

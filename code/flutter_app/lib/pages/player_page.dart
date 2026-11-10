@@ -44,6 +44,7 @@ import '../widgets/common.dart';
 import '../widgets/danmaku_overlay.dart';
 import '../widgets/player_controls.dart';
 import '../widgets/tv_focus.dart';
+import '../core/tokens.dart';
 
 /// 接口返回了「不是地址」的结果（如独家短剧的专用令牌）
 ///
@@ -1329,7 +1330,7 @@ class _PlayerPageState extends State<PlayerPage> {
           widget.dramaName.isEmpty
               ? _cur.epLabel
               : '${widget.dramaName} · ${_cur.epLabel}',
-          style: const TextStyle(fontSize: 15),
+          style: const TextStyle(fontSize: Ts.subtitle),
         ),
         actions: [
           // 投屏只在 Android 提供：DLNA 走的是局域网 SSDP 多播，
@@ -1514,7 +1515,7 @@ class _PlayerPageState extends State<PlayerPage> {
                                         child: DanmakuOverlay(
                                           ctrl: c,
                                           items: _danmaku,
-                                          fontSize: 15,
+                                          fontSize: Ts.subtitle,
                                         ),
                                       )
                                     : const SizedBox.shrink(),
@@ -1699,7 +1700,7 @@ class _PlayerPageState extends State<PlayerPage> {
             padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.72),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(R.panel),
             ),
             child: ValueListenableBuilder<double>(
               valueListenable: _hudLevel,
@@ -1724,7 +1725,7 @@ class _PlayerPageState extends State<PlayerPage> {
                       const SizedBox(height: 8),
                       Text(text,
                           style: const TextStyle(
-                              fontSize: 13,
+                              fontSize: Ts.body,
                               color: Colors.white,
                               fontWeight: FontWeight.w600)),
                       // 快进时进度条没有意义（用户看的是时间），隐掉
@@ -1733,7 +1734,7 @@ class _PlayerPageState extends State<PlayerPage> {
                         SizedBox(
                           width: 132,
                           child: ClipRRect(
-                            borderRadius: BorderRadius.circular(2),
+                            borderRadius: BorderRadius.circular(R.bar),
                             child: LinearProgressIndicator(
                               value: level.clamp(0.0, 1.0),
                               minHeight: 4,
@@ -1784,7 +1785,7 @@ class _PlayerPageState extends State<PlayerPage> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 14,
+                    fontSize: Ts.bodyLg,
                     color: Colors.white,
                     fontWeight: FontWeight.w500,
                   ),
@@ -1831,7 +1832,7 @@ class _PlayerPageState extends State<PlayerPage> {
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
       icon: Icon(icon, size: 18),
-      label: Text(label, style: const TextStyle(fontSize: 13)),
+      label: Text(label, style: const TextStyle(fontSize: Ts.body)),
     );
   }
 
@@ -1857,7 +1858,7 @@ class _PlayerPageState extends State<PlayerPage> {
                     children: [
                       Text(title,
                           style: const TextStyle(
-                              fontSize: 14,
+                              fontSize: Ts.bodyLg,
                               color: Colors.white,
                               fontWeight: FontWeight.w600)),
                       const Spacer(),
@@ -1903,14 +1904,14 @@ class _PlayerPageState extends State<PlayerPage> {
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: active ? kAccent : Colors.white12,
-              borderRadius: BorderRadius.circular(7),
+              borderRadius: BorderRadius.circular(R.sm),
             ),
             child: Text(
               e.epLabel,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: tv ? 14 : 12,
+                fontSize: tv ? Ts.bodyLg : Ts.bodySm,
                 color: active ? Colors.white : Colors.white70,
                 fontWeight: active ? FontWeight.w700 : FontWeight.w400,
               ),
@@ -1941,10 +1942,10 @@ class _PlayerPageState extends State<PlayerPage> {
           onTap: active ? null : () => _switchToSource(n),
           child: Container(
             padding: EdgeInsets.symmetric(
-                horizontal: 12, vertical: tv ? 14 : 10),
+                horizontal: 12, vertical: tv ? Ts.bodyLg : Ts.caption),
             decoration: BoxDecoration(
               color: active ? kAccent.withValues(alpha: 0.18) : Colors.white10,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(R.card),
               border: active ? Border.all(color: kAccent, width: 1) : null,
             ),
             child: Row(
@@ -1955,7 +1956,7 @@ class _PlayerPageState extends State<PlayerPage> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: tv ? 15 : 13,
+                      fontSize: tv ? Ts.subtitle : Ts.body,
                       color: active ? kAccent : Colors.white,
                       fontWeight: active ? FontWeight.w600 : FontWeight.w400,
                     ),
@@ -1963,13 +1964,13 @@ class _PlayerPageState extends State<PlayerPage> {
                 ),
                 Text('$cnt 集',
                     style: TextStyle(
-                        fontSize: tv ? 12.5 : 11,
+                        fontSize: tv ? Ts.body : Ts.caption,
                         color: Colors.white38)),
                 if (active) ...[
                   const SizedBox(width: 6),
                   Text('播放中',
                       style: TextStyle(
-                          fontSize: tv ? 12.5 : 11, color: kAccent)),
+                          fontSize: tv ? Ts.body : Ts.caption, color: kAccent)),
                 ],
               ],
             ),
@@ -2003,14 +2004,14 @@ class _PlayerPageState extends State<PlayerPage> {
           padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
           decoration: BoxDecoration(
             color: Colors.black.withValues(alpha: 0.86),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(R.card),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 '$_countdown 秒后自动播放 ${n.epLabel}',
-                style: const TextStyle(fontSize: 13, color: Colors.white),
+                style: const TextStyle(fontSize: Ts.body, color: Colors.white),
               ),
               const SizedBox(width: 10),
               TextButton(
@@ -2020,7 +2021,7 @@ class _PlayerPageState extends State<PlayerPage> {
                   minimumSize: const Size(0, 30),
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                 ),
-                child: const Text('取消', style: TextStyle(fontSize: 12.5)),
+                child: const Text('取消', style: TextStyle(fontSize: Ts.body)),
               ),
             ],
           ),
@@ -2040,11 +2041,11 @@ class _PlayerPageState extends State<PlayerPage> {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.78),
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(R.pill),
             ),
             child: Text(
               _notice!,
-              style: const TextStyle(fontSize: 12.5, color: Colors.white),
+              style: const TextStyle(fontSize: Ts.body, color: Colors.white),
             ),
           ),
         ),
@@ -2070,7 +2071,7 @@ class _PlayerPageState extends State<PlayerPage> {
                   children: [
                     Text('选集（共 ${eps.length} 集）',
                         style: const TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w600)),
+                            fontSize: Ts.subtitle, fontWeight: FontWeight.w600)),
                     const Spacer(),
                     IconButton(
                       icon: const Icon(Icons.close_rounded, size: 20),
@@ -2101,12 +2102,12 @@ class _PlayerPageState extends State<PlayerPage> {
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: active ? kAccent : kVideoBg,
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(R.card),
                         ),
                         child: Text(
                           e.epLabel,
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: Ts.bodySm,
                             color: active ? Colors.white : Colors.white70,
                           ),
                         ),
@@ -2132,7 +2133,7 @@ class _PlayerPageState extends State<PlayerPage> {
             CircularProgressIndicator(strokeWidth: 2.4),
             SizedBox(height: 14),
             Text('正在解析播放地址…',
-                style: TextStyle(color: kOnVideoDim, fontSize: 12)),
+                style: TextStyle(color: kOnVideoDim, fontSize: Ts.bodySm)),
           ],
         ),
       );
@@ -2232,7 +2233,7 @@ class _PlayerPageState extends State<PlayerPage> {
         collapsedIconColor: kOnVideoDim,
         title: const Text(
           '技术信息',
-          style: TextStyle(fontSize: 12, color: kOnVideoDim),
+          style: TextStyle(fontSize: Ts.bodySm, color: kOnVideoDim),
         ),
         children: [
           Row(
@@ -2243,7 +2244,7 @@ class _PlayerPageState extends State<PlayerPage> {
                   _realUrl,
                   maxLines: 4,
                   style:
-                      const TextStyle(fontSize: 10.5, color: Colors.white54),
+                      const TextStyle(fontSize: Ts.caption, color: Colors.white54),
                 ),
               ),
               IconButton(
@@ -2315,7 +2316,7 @@ class _PlayerPageState extends State<PlayerPage> {
                                       child: DanmakuOverlay(
                                         ctrl: c,
                                         items: _danmaku,
-                                        fontSize: 15,
+                                        fontSize: Ts.subtitle,
                                       ),
                                     )
                                   : const SizedBox.shrink(),
@@ -2362,7 +2363,7 @@ class _PlayerPageState extends State<PlayerPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 15,
+                        fontSize: Ts.subtitle,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -2372,7 +2373,7 @@ class _PlayerPageState extends State<PlayerPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style:
-                          const TextStyle(fontSize: 11.5, color: kOnVideoDim),
+                          const TextStyle(fontSize: Ts.bodySm, color: kOnVideoDim),
                     ),
                     const SizedBox(height: 10),
                     if (_castDeviceName != null)
@@ -2394,14 +2395,14 @@ class _PlayerPageState extends State<PlayerPage> {
                     Text(
                       _isSeries ? '选集' : '播放源',
                       style: const TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.w600),
+                          fontSize: Ts.body, fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(width: 6),
                     Text(
                       _isSeries
                           ? '共 ${_curEpisodes.length} 集'
                           : '${_sourceNames.length} 个源',
-                      style: const TextStyle(fontSize: 11, color: kOnVideoDim),
+                      style: const TextStyle(fontSize: Ts.caption, color: kOnVideoDim),
                     ),
                   ],
                 ),
@@ -2466,7 +2467,7 @@ class _PlayerPageState extends State<PlayerPage> {
                             items: _danmaku,
                             // 竖屏画面窄，字号必须比全屏小，
                             // 否则一条长弹幕滚过去要占满整行
-                            fontSize: 12,
+                            fontSize: Ts.bodySm,
                             travel: const Duration(milliseconds: 6500),
                           ),
                         )
@@ -2485,14 +2486,14 @@ class _PlayerPageState extends State<PlayerPage> {
                     padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.8),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(R.card),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text('$_countdown 秒后播放 ${_pendingNext!.epLabel}',
                             style: const TextStyle(
-                                fontSize: 11.5, color: Colors.white)),
+                                fontSize: Ts.bodySm, color: Colors.white)),
                         TextButton(
                           onPressed: _cancelAutoNext,
                           style: TextButton.styleFrom(
@@ -2501,7 +2502,7 @@ class _PlayerPageState extends State<PlayerPage> {
                             padding: const EdgeInsets.symmetric(horizontal: 6),
                           ),
                           child: const Text('取消',
-                              style: TextStyle(fontSize: 11.5)),
+                              style: TextStyle(fontSize: Ts.bodySm)),
                         ),
                       ],
                     ),
@@ -2547,7 +2548,7 @@ class _PlayerPageState extends State<PlayerPage> {
         const Spacer(),
         if (_playLoading)
           const Text('加载中…',
-              style: TextStyle(fontSize: 11, color: kOnVideoDim)),
+              style: TextStyle(fontSize: Ts.caption, color: kOnVideoDim)),
       ],
     );
   }
@@ -2680,12 +2681,12 @@ class _PlayerPageState extends State<PlayerPage> {
         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
         decoration: BoxDecoration(
           color: dim ? kVideoCard : kAccent.withValues(alpha: 0.18),
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(R.sm),
         ),
         child: Text(
           s,
           style: TextStyle(
-            fontSize: 11,
+            fontSize: Ts.caption,
             color: dim ? kOnVideoDim : kAccent,
           ),
         ),

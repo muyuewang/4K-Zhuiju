@@ -12,6 +12,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'core/tokens.dart';
+
 /// 品牌主色。深浅共用同一个橙色——它是识别度最高的元素，
 /// 换色会让 App 看起来像另一个产品。
 const Color kAccent = Color(0xFFFF6B3D);
@@ -159,7 +161,7 @@ ThemeData buildTheme(Brightness brightness) {
       centerTitle: false,
       titleTextStyle: TextStyle(
         color: p.onSurface,
-        fontSize: 19,
+        fontSize: Ts.title,
         fontWeight: FontWeight.w600,
       ),
       iconTheme: IconThemeData(color: p.onSurface),
@@ -174,7 +176,7 @@ ThemeData buildTheme(Brightness brightness) {
       filled: true,
       fillColor: p.card,
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(R.panel),
         borderSide: BorderSide.none,
       ),
       hintStyle: TextStyle(color: p.textDim),

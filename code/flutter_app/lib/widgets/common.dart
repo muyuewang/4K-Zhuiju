@@ -9,6 +9,7 @@ import '../core/layout.dart';
 import '../core/models.dart';
 import '../theme.dart';
 import 'tv_focus.dart';
+import '../core/tokens.dart';
 
 /// 剧集卡片（竖版海报）
 ///
@@ -49,7 +50,9 @@ class _DramaCardState extends State<DramaCard> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 130),
+          // 尊重系统「减少动态效果」：开了这个设置的用户不该看到整屏海报
+          // 跟着手指上下浮动。
+          duration: motionOf(context, Motion.micro),
           curve: Curves.easeOut,
           // 上浮 3px + 轻微提亮，幅度刻意做小：整屏几十张卡同时放大
           // 会显得很吵，静止时也更费 GPU。
@@ -59,16 +62,16 @@ class _DramaCardState extends State<DramaCard> {
             children: [
               Expanded(
                 child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 130),
+                  duration: motionOf(context, Motion.micro),
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(R.card),
                     border: Border.all(
                       color: _hover ? kAccent.withValues(alpha: 0.55) : Colors.transparent,
                       width: 1.5,
                     ),
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8.5),
+                    borderRadius: BorderRadius.circular(R.card),
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
@@ -95,7 +98,7 @@ class _DramaCardState extends State<DramaCard> {
                               child: Text(
                                 '${drama.year}',
                                 style: const TextStyle(
-                                  fontSize: 12,
+                                  fontSize: Ts.bodySm,
                                   height: 1.1,
                                   color: Colors.white,
                                   fontWeight: FontWeight.w600,
@@ -123,7 +126,7 @@ class _DramaCardState extends State<DramaCard> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                  fontSize: 10,
+                                  fontSize: Ts.caption,
                                   color: Colors.white,
                                   fontWeight: FontWeight.w500,
                                 ),
@@ -141,7 +144,7 @@ class _DramaCardState extends State<DramaCard> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 12.5,
+                  fontSize: Ts.body,
                   fontWeight: FontWeight.w500,
                   // 原来写死白色系：浅色主题下标题压在浅底上直接消失。
                   // 改成主题正文色；「悬停变亮」在浅色下表现为变实
@@ -156,7 +159,7 @@ class _DramaCardState extends State<DramaCard> {
                   drama.displaySub,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 10.5, color: context.palette.textDim),
+                  style: TextStyle(fontSize: Ts.caption, color: context.palette.textDim),
                 ),
             ],
           ),
@@ -164,13 +167,32 @@ class _DramaCardState extends State<DramaCard> {
       ),
     );
 
+    // 【读屏语义】
+    //
+    // 原来这里什么都没有：TalkBack / VoiceOver 走到海报上只能念出画面里
+    // 的 Text，也就是「兰香如故」四个字——用户不知道这是能点的，
+    // 也不知道它更新到第几集。GestureDetector 虽然会自动补一个 tap 动作，
+    // 但「能点」和「点了会怎样」是两回事。
+    //
+    // excludeSemantics 是必要的：加上 label 后再让子 Text 各自发声，
+    // 读屏会念「兰香如故，按钮，兰香如故，更新至20集」——同一件事说两遍。
+    // 合并成一句反而信息更全。
+    final labeled = Semantics(
+      button: true,
+      excludeSemantics: true,
+      label: drama.remark.isEmpty
+          ? drama.name
+          : '${drama.name}，${drama.remark}',
+      child: body,
+    );
+
     // 非 TV 模式直接返回原组件，不引入任何额外节点
-    if (!isTv(context)) return body;
+    if (!isTv(context)) return labeled;
     return TvFocus(
       autofocus: widget.autofocus,
-      radius: 10,
+      radius: R.card,
       onActivate: widget.onTap,
-      child: body,
+      child: labeled,
     );
   }
 
@@ -229,7 +251,7 @@ class ErrorView extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: TextStyle(color: context.palette.textDim, fontSize: 13),
+              style: TextStyle(color: context.palette.textDim, fontSize: Ts.body),
             ),
             if (onRetry != null) ...[
               const SizedBox(height: 16),
@@ -246,9 +268,33 @@ class ErrorView extends StatelessWidget {
 }
 
 /// 空状态
+///
+/// 空屏不是「没数据」的通知，而是一次**引导机会**。
+/// 原来只有图标 + 一行灰字，用户看完只知道「没有」，然后自己找出路——
+/// 绝大多数情况只能按返回键退回上一页。规范里这条写得很直接：
+/// Do: Show helpful message and action / Don't: Blank empty screens。
+///
+/// 所以这里强制留出 [action] 位置：调用方要么给一个出路（试试别的、
+/// 清掉筛选、去别处看看），要么明确说明为什么可以不给出路。
 class EmptyView extends StatelessWidget {
   final String text;
-  const EmptyView({super.key, required this.text});
+
+  /// 补充说明：解释为什么是空的，比重复「没有」有用
+  final String? hint;
+
+  /// 出路。没有它，空屏就只是一堵墙。
+  final Widget? action;
+
+  final IconData icon;
+
+  const EmptyView({
+    super.key,
+    required this.text,
+    this.hint,
+    this.action,
+    this.icon = Icons.search_off_rounded,
+  });
+
   @override
   Widget build(BuildContext context) => Center(
         child: Padding(
@@ -256,10 +302,28 @@ class EmptyView extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.search_off_rounded, color: context.palette.textDim, size: 44),
-              const SizedBox(height: 12),
-              Text(text,
-                  style: TextStyle(color: context.palette.textDim, fontSize: 13)),
+              Icon(icon, color: context.palette.textDim, size: 44),
+              const SizedBox(height: Sp.md),
+              Text(
+                text,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: context.palette.onSurface,
+                  fontSize: Ts.body,
+                ),
+              ),
+              if (hint != null) ...[
+                const SizedBox(height: Sp.xs),
+                Text(
+                  hint!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: context.palette.textDim, fontSize: Ts.bodySm),
+                ),
+              ],
+              if (action != null) ...[
+                const SizedBox(height: Sp.lg),
+                action!,
+              ],
             ],
           ),
         ),
@@ -407,7 +471,17 @@ class PagedGridState extends State<PagedGrid>
       if (_err != null) {
         return ErrorView(message: _err!, onRetry: _retry);
       }
-      return const EmptyView(text: '暂无内容');
+      // 分类空屏给「刷新」：源站偶尔会短时空返回，用户干等不如自己催一下。
+      // 顺带说明这不是出错——「暂无内容」容易被读成「加载失败」。
+      return EmptyView(
+        text: '这个分类暂时没有内容',
+        hint: '可能是源站刚更新，稍后再看看',
+        icon: Icons.movie_filter_outlined,
+        action: FilledButton.tonal(
+          onPressed: refresh,
+          child: const Text('刷新'),
+        ),
+      );
     }
     // 宽屏把网格夹在舒适宽度内，超宽屏两侧留白比塞满更耐看
     final tv = isTv(context);
@@ -435,7 +509,7 @@ class PagedGridState extends State<PagedGrid>
                     icon: const Icon(Icons.refresh_rounded, size: 16),
                     label: const Text(
                       '加载失败，点击重试',
-                      style: TextStyle(fontSize: 11.5),
+                      style: TextStyle(fontSize: Ts.bodySm),
                     ),
                   ),
                 );

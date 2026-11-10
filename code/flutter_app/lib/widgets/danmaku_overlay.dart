@@ -24,6 +24,7 @@ import 'package:video_player/video_player.dart';
 
 import '../core/danmaku.dart';
 import '../theme.dart';
+import '../core/tokens.dart';
 
 /// 弹幕开关的全局状态（本地持久化，不需要账号）
 ///
@@ -356,7 +357,7 @@ class DanmakuEmptyHint extends StatelessWidget {
           child: Text(
             '本集暂无弹幕',
             style: TextStyle(
-              fontSize: 11,
+              fontSize: Ts.caption,
               color: kOnVideoDim.withValues(alpha: 0.7),
             ),
           ),

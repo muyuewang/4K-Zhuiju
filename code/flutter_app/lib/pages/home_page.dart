@@ -11,6 +11,7 @@ import '../widgets/common.dart';
 import '../widgets/tv_focus.dart';
 import '../theme.dart';
 import 'detail_page.dart';
+import '../core/tokens.dart';
 
 /// typeId1 实测有效值（20-26）
 class Category {
@@ -252,7 +253,7 @@ class _HomePageState extends State<HomePage>
         children: [
           Text(
             '频道',
-            style: TextStyle(fontSize: 15, color: context.palette.textDim),
+            style: TextStyle(fontSize: Ts.subtitle, color: context.palette.textDim),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -306,11 +307,12 @@ class _HomePageState extends State<HomePage>
       onTap: () => _selectCategory(i),
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 130),
+        // 跟随系统「减少动态效果」设置
+        duration: motionOf(context, Motion.micro),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
         decoration: BoxDecoration(
           color: active ? kAccent : context.palette.card,
-          borderRadius: BorderRadius.circular(9),
+          borderRadius: BorderRadius.circular(R.card),
           border: Border.all(
             color: active ? kAccent : context.palette.divider,
             width: 1.2,
@@ -319,7 +321,7 @@ class _HomePageState extends State<HomePage>
         child: Text(
           label,
           style: TextStyle(
-            fontSize: 17,
+            fontSize: Ts.subtitle,
             fontWeight: active ? FontWeight.w700 : FontWeight.w500,
             // 选中时压在橙底上必须用深色前景，用 palette.bg 在浅色
             // 主题下会是浅灰压橙，对比度不足（同 kOnAccent 的注释）
@@ -428,7 +430,7 @@ class _SearchPageState extends State<SearchPage> {
             focusNode: _focus,
             textInputAction: TextInputAction.search,
             onSubmitted: (_) => _doSearch(),
-            style: const TextStyle(fontSize: 14),
+            style: const TextStyle(fontSize: Ts.bodyLg),
             decoration: InputDecoration(
               hintText: '搜索影片、剧名',
               isDense: true,
@@ -462,7 +464,29 @@ class _SearchPageState extends State<SearchPage> {
       return _hotWords();
     }
     if (_result.isEmpty) {
-      return const EmptyView(text: '没有找到相关影片');
+      // 空屏必须给出路。搜不到时用户原来的唯一动作是「返回」，
+      // 等于把「再试一次」的成本全丢给用户自己。这里直接把热词摆出来，
+      // 点一下就是一个新的有效查询。
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: EmptyView(
+          text: '没找到「${_input.text.trim()}」',
+          hint: '换个说法试试，或从下面这些开始',
+          action: Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 9,
+            runSpacing: 9,
+            children: kHotWords
+                .map((w) => ActionChip(
+                      label: Text(w, style: const TextStyle(fontSize: Ts.bodySm)),
+                      backgroundColor: context.palette.card,
+                      side: BorderSide.none,
+                      onPressed: () => _doSearch(w),
+                    ))
+                .toList(),
+          ),
+        ),
+      );
     }
     return ContentClamp(
       child: GridView.builder(
@@ -487,7 +511,7 @@ class _SearchPageState extends State<SearchPage> {
   Widget _hotWords() {
     final tv = isTv(context);
     return ListView(
-      padding: EdgeInsets.all(tv ? 24 : 16),
+      padding: EdgeInsets.all(tv ? Ts.display : Ts.subtitle),
       children: [
         // 搜索历史排在热门之前：用户自己搜过的词，命中率远高于热词。
         // 没有历史时这一段整体不渲染（不留一个空标题）。
@@ -502,7 +526,7 @@ class _SearchPageState extends State<SearchPage> {
                   children: [
                     Text('搜索历史',
                         style: TextStyle(
-                            fontSize: tv ? 16 : 13,
+                            fontSize: tv ? Ts.subtitle : Ts.body,
                             color: context.palette.textDim)),
                     const Spacer(),
                     TvFocusRing(
@@ -515,9 +539,9 @@ class _SearchPageState extends State<SearchPage> {
                           foregroundColor: context.palette.textDim,
                         ),
                         icon: Icon(Icons.delete_outline_rounded,
-                            size: tv ? 17 : 14),
+                            size: tv ? Ts.subtitle : Ts.bodyLg),
                         label: Text('清空',
-                            style: TextStyle(fontSize: tv ? 14 : 11.5)),
+                            style: TextStyle(fontSize: tv ? Ts.bodyLg : Ts.bodySm)),
                       ),
                     ),
                   ],
@@ -538,7 +562,7 @@ class _SearchPageState extends State<SearchPage> {
         ),
         Text('热门搜索',
             style: TextStyle(
-                fontSize: tv ? 16 : 13, color: context.palette.textDim)),
+                fontSize: tv ? Ts.subtitle : Ts.body, color: context.palette.textDim)),
         const SizedBox(height: 12),
         Wrap(
           spacing: 9,
@@ -548,7 +572,7 @@ class _SearchPageState extends State<SearchPage> {
                     radius: 18,
                     child: ActionChip(
                       label: Text(w,
-                          style: TextStyle(fontSize: tv ? 15 : 12)),
+                          style: TextStyle(fontSize: tv ? Ts.subtitle : Ts.bodySm)),
                       backgroundColor: context.palette.card,
                       side: BorderSide.none,
                       // TV 下把热词做成更大的胶囊，遥控器好瞄准
@@ -575,9 +599,9 @@ class _SearchPageState extends State<SearchPage> {
       onTap: () => _doSearch(w),
       behavior: HitTestBehavior.opaque,
       child: Padding(
-        padding: EdgeInsets.fromLTRB(tv ? 14 : 11, tv ? 9 : 6, 4,
+        padding: EdgeInsets.fromLTRB(tv ? Ts.bodyLg : Ts.caption, tv ? 9 : 6, 4,
             tv ? 9 : 6),
-        child: Text(w, style: TextStyle(fontSize: tv ? 15 : 12)),
+        child: Text(w, style: TextStyle(fontSize: tv ? Ts.subtitle : Ts.bodySm)),
       ),
     );
     final delArea = GestureDetector(
@@ -587,14 +611,14 @@ class _SearchPageState extends State<SearchPage> {
         padding: EdgeInsets.symmetric(
             horizontal: tv ? 8 : 5, vertical: tv ? 9 : 6),
         child: Icon(Icons.close_rounded,
-            size: tv ? 16 : 13, color: context.palette.textDim),
+            size: tv ? Ts.subtitle : Ts.body, color: context.palette.textDim),
       ),
     );
 
     final chip = Container(
       decoration: BoxDecoration(
         color: context.palette.card,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(R.pill),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -620,9 +644,9 @@ class _SearchPageState extends State<SearchPage> {
       context: context,
       builder: (c) => AlertDialog(
         backgroundColor: context.palette.card,
-        title: const Text('清空搜索历史？', style: TextStyle(fontSize: 15)),
+        title: const Text('清空搜索历史？', style: TextStyle(fontSize: Ts.subtitle)),
         content: Text('将删除 $count 条搜索记录，此操作不可恢复。',
-            style: TextStyle(fontSize: 12.5, color: context.palette.textDim)),
+            style: TextStyle(fontSize: Ts.body, color: context.palette.textDim)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(c, false),

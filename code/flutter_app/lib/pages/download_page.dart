@@ -10,6 +10,7 @@ import '../core/layout.dart';
 import '../theme.dart';
 import '../widgets/tv_focus.dart';
 import 'local_player_page.dart';
+import '../core/tokens.dart';
 
 class DownloadPage extends StatefulWidget {
   /// 是否嵌入在「我的」页面里展示。
@@ -35,7 +36,7 @@ class _DownloadPageState extends State<DownloadPage> {
               final p = DownloadManager.instance.rootPath;
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                 content: Text(p.isEmpty ? '尚未创建下载目录' : '保存到：$p',
-                    style: const TextStyle(fontSize: 12)),
+                    style: const TextStyle(fontSize: Ts.bodySm)),
                 duration: const Duration(seconds: 5),
               ));
             },
@@ -117,10 +118,10 @@ class _DownloadPageState extends State<DownloadPage> {
                         color: context.palette.textDim, size: 44),
                     const SizedBox(height: 12),
                     Text('暂无下载任务',
-                        style: TextStyle(color: context.palette.textDim, fontSize: 13)),
+                        style: TextStyle(color: context.palette.textDim, fontSize: Ts.body)),
                     const SizedBox(height: 6),
                     Text('在播放页点右上角下载按钮即可加入',
-                        style: TextStyle(color: context.palette.textDim, fontSize: 11)),
+                        style: TextStyle(color: context.palette.textDim, fontSize: Ts.caption)),
                   ],
                 ),
               ),
@@ -158,7 +159,7 @@ class _DownloadPageState extends State<DownloadPage> {
           ? () => _play(t)
           : null,
       child: Padding(
-        padding: EdgeInsets.fromLTRB(16, tv ? 16 : 10, 8, tv ? 16 : 10),
+        padding: EdgeInsets.fromLTRB(16, tv ? Ts.subtitle : Ts.caption, 8, tv ? Ts.subtitle : Ts.caption),
         child: Row(
           children: [
             Container(
@@ -166,7 +167,7 @@ class _DownloadPageState extends State<DownloadPage> {
               height: tv ? 48 : 40,
               decoration: BoxDecoration(
                 color: context.palette.card,
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: BorderRadius.circular(R.card),
               ),
               child: Icon(
                 isDone
@@ -188,7 +189,7 @@ class _DownloadPageState extends State<DownloadPage> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        fontSize: tv ? 16 : 13.5,
+                        fontSize: tv ? Ts.subtitle : Ts.bodyLg,
                         fontWeight: FontWeight.w500),
                   ),
                   const SizedBox(height: 5),
@@ -196,7 +197,7 @@ class _DownloadPageState extends State<DownloadPage> {
                     Text(
                       '已完成 · ${t.ext.toUpperCase()}'
                       '${t.total > 0 ? ' · ${_size(t.total)}' : ''}',
-                      style: TextStyle(fontSize: 11, color: context.palette.textDim),
+                      style: TextStyle(fontSize: Ts.caption, color: context.palette.textDim),
                     )
                   else if (t.state == DownloadState.failed)
                     Text(
@@ -204,11 +205,11 @@ class _DownloadPageState extends State<DownloadPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style:
-                          const TextStyle(fontSize: 11, color: Colors.redAccent),
+                          const TextStyle(fontSize: Ts.caption, color: Colors.redAccent),
                     )
                   else ...[
                     ClipRRect(
-                      borderRadius: BorderRadius.circular(3),
+                      borderRadius: BorderRadius.circular(R.bar),
                       child: LinearProgressIndicator(
                         value: t.progress <= 0 ? null : t.progress,
                         minHeight: 3.5,
@@ -222,7 +223,7 @@ class _DownloadPageState extends State<DownloadPage> {
                       _progressText(t),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 10.5, color: context.palette.textDim),
+                      style: TextStyle(fontSize: Ts.caption, color: context.palette.textDim),
                     ),
                   ],
                 ],
@@ -324,13 +325,13 @@ class _DownloadPageState extends State<DownloadPage> {
         backgroundColor: context.palette.card,
         title: Text(
           withFile ? '删除任务和文件？' : '删除这个任务？',
-          style: const TextStyle(fontSize: 15),
+          style: const TextStyle(fontSize: Ts.subtitle),
         ),
         content: Text(
           withFile
               ? '「${t.title}」已下载的文件会一并删除，此操作不可恢复。'
               : '「${t.title}」尚未下载完成，已缓存的临时分片会被清除。',
-          style: TextStyle(fontSize: 12.5, color: context.palette.textDim),
+          style: TextStyle(fontSize: Ts.body, color: context.palette.textDim),
         ),
         actions: [
           TextButton(

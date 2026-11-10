@@ -25,6 +25,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/danmaku_overlay.dart';
 import '../widgets/player_controls.dart';
+import '../core/tokens.dart';
 
 class LocalPlayerPage extends StatefulWidget {
   final String filePath;
@@ -294,7 +295,7 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: Text(widget.title, style: const TextStyle(fontSize: 15)),
+        title: Text(widget.title, style: const TextStyle(fontSize: Ts.subtitle)),
         actions: [
           IconButton(
             tooltip: '文件信息',
@@ -348,7 +349,7 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
                     return DanmakuOverlay(
                       ctrl: c,
                       items: _danmaku,
-                      fontSize: 15,
+                      fontSize: Ts.subtitle,
                     );
                   },
                 ),
@@ -442,7 +443,7 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
                       return DanmakuOverlay(
                         ctrl: c,
                         items: _danmaku,
-                        fontSize: 12,
+                        fontSize: Ts.bodySm,
                         travel: const Duration(milliseconds: 6500),
                       );
                     },
@@ -504,7 +505,7 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
                                     child: DanmakuOverlay(
                                       ctrl: c,
                                       items: _danmaku,
-                                      fontSize: 15,
+                                      fontSize: Ts.subtitle,
                                     ),
                                   )
                                 : const SizedBox.shrink(),
@@ -560,7 +561,7 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
           children: [
             Text(
               '本地播放',
-              style: TextStyle(fontSize: 11, color: kAccent),
+              style: TextStyle(fontSize: Ts.caption, color: kAccent),
             ),
           ],
         ),
@@ -570,7 +571,7 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
             widget.title,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            style: const TextStyle(fontSize: Ts.bodyLg, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 10),
         ],
