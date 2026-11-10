@@ -73,6 +73,36 @@ class _DramaCardState extends State<DramaCard> {
                       fit: StackFit.expand,
                       children: [
                         _poster(),
+                        // 左上角年份角标（TV 版参考图里的「2022」那种）
+                        //
+                        // 只在 TV 加：手机上卡片宽度只有 100 出头，
+                        // 再压一个角标会把海报主体挤得很脏；电视上卡片
+                        // 236 宽，角标占比小，且 3 米外年份是筛选剧集
+                        // 最常用的线索之一。
+                        if (isTv(context) && drama.year > 0)
+                          Positioned(
+                            left: 0,
+                            top: 0,
+                            child: Container(
+                              padding: const EdgeInsets.fromLTRB(7, 3, 8, 4),
+                              decoration: const BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [Colors.black87, Colors.transparent],
+                                ),
+                              ),
+                              child: Text(
+                                '${drama.year}',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  height: 1.1,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
                         // 底部渐变 + 备注
                         if (drama.remark.isNotEmpty)
                           Positioned(

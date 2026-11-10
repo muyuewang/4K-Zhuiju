@@ -43,7 +43,17 @@ const List<String> kHotWords = [
 ];
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  /// 仅测试用：替换真实接口请求
+  ///
+  /// 为什么留这个口子：PagedGrid 在 initState 就发请求，而 widget 测试
+  /// 结束时只要还有未完成的定时器，`!timersPending` 断言就直接失败。
+  /// Dio 在 fetch 内部会挂一个零时长定时器，用假 HttpClient 桩也拦不干净
+  /// （请求链不止走 dart:io 这一层）。与其在测试里跟 Dio 内部实现缠斗，
+  /// 不如让测试直接注入一个立即返回的 loader——布局测试本来就不该联网。
+  @visibleForTesting
+  final Future<List<Drama>> Function(int tabIndex, int page)? debugLoader;
+
+  const HomePage({super.key, this.debugLoader});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -61,6 +71,14 @@ class _HomePageState extends State<HomePage>
   /// 两个页面会争夺焦点，光标可能跑到看不见的隔壁 Tab。见 PagedGrid。
   int _tabIndex = 0;
 
+  /// TV 下已经访问过的分类下标。
+  ///
+  /// TV 布局用 IndexedStack 而不是 TabBarView（见 _buildTv 的说明），
+  /// 而 IndexedStack 会把 children 全部实例化 —— 7 个分类就等于
+  /// 开机瞬间并发 7 个列表请求。这里只构建用户真正点过的分类，
+  /// 没访问过的位置放空占位，既省流量又不影响保活。
+  final Set<int> _visited = {0};
+
   @override
   void initState() {
     super.initState();
@@ -70,6 +88,17 @@ class _HomePageState extends State<HomePage>
   void _onTabChanged() {
     if (_tab.index == _tabIndex) return;
     setState(() => _tabIndex = _tab.index);
+  }
+
+  /// TV 切换分类：不经过 TabController，直接改下标
+  void _selectCategory(int i) {
+    if (i == _tabIndex) return;
+    setState(() {
+      _tabIndex = i;
+      _visited.add(i);
+    });
+    // TabController 同步一下，避免之后若切回触摸布局时角标对不上
+    if (_tab.index != i) _tab.index = i;
   }
 
   @override
@@ -86,6 +115,10 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<List<Drama>> _loader(int tabIndex, int page) {
+    // 测试注入优先：布局测试不该联网，也不该在树上留定时器
+    final injected = widget.debugLoader;
+    if (injected != null) return injected(tabIndex, page);
+
     final c = kCategories[tabIndex];
     if (c.id.isEmpty) {
       // 推荐 = 搜索接口空关键词（实测返回全量热门）
@@ -107,69 +140,33 @@ class _HomePageState extends State<HomePage>
 
   @override
   Widget build(BuildContext context) {
+    final tv = isTv(context);
+    if (tv) return _buildTv(context);
+
     // 宽屏下左侧导航栏已有品牌区，AppBar 不再重复写「4K追剧」，
     // 把横向空间让给分类 Tab。
     final wide = useSideNav(context);
-    final tv = isTv(context);
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        title: (wide || tv) ? null : const Text('4K追剧'),
-        toolbarHeight: tv ? 64 : (wide ? 54 : null),
+        title: wide ? null : const Text('4K追剧'),
+        toolbarHeight: wide ? 54 : null,
         bottom: TabBar(
           controller: _tab,
           isScrollable: true,
           tabAlignment: TabAlignment.start,
           dividerColor: Colors.transparent,
-          // TV 下把分类 Tab 整体放大：电视上 14pt 在 3 米外基本看不清，
-          // Tab 也太窄，遥控器左右移动时容易一步跳过头。
-          labelPadding: tv
-              ? const EdgeInsets.symmetric(horizontal: 20)
-              : null,
-          labelStyle: tv
-              ? const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)
-              : null,
-          unselectedLabelStyle:
-              tv ? const TextStyle(fontSize: 18) : null,
           tabs: kCategories.map((e) => Tab(text: e.name)).toList(),
         ),
         actions: [
-          // TV 没有「下拉」这个手势：RefreshIndicator 依赖触摸拖拽，
-          // 遥控器根本触发不了。不给一个显式入口，电视上就永远没法刷新
-          // 列表（源站更新了新剧，用户只能重启 App）。
-          if (tv)
-            TvFocusRing(
-              radius: 24,
-              child: IconButton(
-                iconSize: 26,
-                icon: const Icon(Icons.refresh_rounded),
-                tooltip: '刷新',
-                onPressed: _refreshCurrent,
-              ),
+          IconButton(
+            icon: const Icon(Icons.search_rounded),
+            tooltip: '搜索',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SearchPage()),
             ),
-          if (tv)
-            // TV 下放大搜索按钮并补焦点描边，否则遥控器移到右上角
-            // 时看不出选中了没有。
-            TvFocusRing(
-              radius: 24,
-              child: IconButton(
-                iconSize: 28,
-                icon: const Icon(Icons.search_rounded),
-                tooltip: '搜索',
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SearchPage()),
-                ),
-              ),
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.search_rounded),
-              tooltip: '搜索',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SearchPage()),
-              ),
-            ),
-          SizedBox(width: tv ? 12 : 4),
+          ),
+          const SizedBox(width: 4),
         ],
       ),
       body: TabBarView(
@@ -180,11 +177,161 @@ class _HomePageState extends State<HomePage>
             key: key,
             loader: (p) => _loader(i, p),
             onTap: _open,
-            // 只有当前 Tab 的网格才拿初始焦点（TV 下）
             autoFocusFirst: i == _tabIndex,
           );
         }),
       ),
+    );
+  }
+
+  /// TV 首页：顶部横向频道条 + 下方海报墙
+  ///
+  /// 为什么不用 TabBarView：
+  ///   1. 电视上滑动手势几乎没有（遥控器没有「横划」），TabBarView 的
+  ///      翻页能力等于白给，只剩「点 Tab 切换」这一个入口；
+  ///   2. TabBarView 会把相邻页一起留在树上并参与布局，配合 IndexedStack
+  ///      的按需构建反而更省 —— 只实例化用户真正看过的分类。
+  ///
+  /// 布局对照 TV 版参考图：左侧导航在 RootPage 的 _SideRail（已存在），
+  /// 这里负责右侧内容区的「频道胶囊行 + 海报网格」。
+  Widget _buildTv(BuildContext context) {
+    return Scaffold(
+      backgroundColor: context.palette.bg,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _tvChannelBar(context),
+            Expanded(
+              child: IndexedStack(
+                index: _tabIndex,
+                children: List.generate(kCategories.length, (i) {
+                  // 没访问过的分类不构建：IndexedStack 会实例化所有
+                  // children，7 个分类等于开机并发 7 个请求。
+                  if (!_visited.contains(i)) {
+                    return const SizedBox.shrink();
+                  }
+                  final key =
+                      _keys.putIfAbsent(i, () => GlobalKey<PagedGridState>());
+                  return ExcludeFocus(
+                    // 非当前分类必须摘掉焦点子树：IndexedStack 不绘制
+                    // 非当前页，但焦点系统不认「看不见」，遥控器会走进
+                    // 隐藏页的卡片，表现为「按方向键没反应」。
+                    excluding: i != _tabIndex,
+                    child: TickerMode(
+                      enabled: i == _tabIndex,
+                      child: PagedGrid(
+                        key: key,
+                        loader: (p) => _loader(i, p),
+                        onTap: _open,
+                        autoFocusFirst: i == _tabIndex,
+                        padding: const EdgeInsets.fromLTRB(6, 8, 24, 28),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 顶部频道条：频道胶囊 + 右侧搜索/刷新
+  ///
+  /// 只放**真实生效**的筛选维度。参考图里还有一排「排序方式
+  /// （最新/高分/最热/日热度/周热度/月热度）」和「更多筛选」，
+  /// 实测本接口对这些参数全部忽略（见 test/api_probe_test.dart：
+  /// 10 个参数逐个试过，返回的前 5 条 id 与基准完全一致）。
+  /// 摆一排点了没反应的按钮，比不摆更糟，所以这里不做。
+  Widget _tvChannelBar(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+      child: Row(
+        children: [
+          Text(
+            '频道',
+            style: TextStyle(fontSize: 15, color: context.palette.textDim),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (var i = 0; i < kCategories.length; i++) ...[
+                    _tvChannelChip(context, i),
+                    if (i != kCategories.length - 1)
+                      const SizedBox(width: 10),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          TvFocusRing(
+            radius: 26,
+            child: IconButton(
+              iconSize: 26,
+              icon: const Icon(Icons.search_rounded),
+              tooltip: '搜索',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SearchPage()),
+              ),
+            ),
+          ),
+          TvFocusRing(
+            radius: 26,
+            child: IconButton(
+              iconSize: 26,
+              icon: const Icon(Icons.refresh_rounded),
+              tooltip: '刷新',
+              onPressed: _refreshCurrent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 单个频道胶囊
+  ///
+  /// 选中态用实心强调色（对照参考图里高亮的「电视剧」），
+  /// 未选中是描边胶囊。电视上没有鼠标指针，选中与不选中必须有
+  /// 明显的明度差，不能只靠一圈细边区分。
+  Widget _tvChannelChip(BuildContext context, int i) {
+    final active = i == _tabIndex;
+    final label = kCategories[i].name;
+    final body = GestureDetector(
+      onTap: () => _selectCategory(i),
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 130),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
+        decoration: BoxDecoration(
+          color: active ? kAccent : context.palette.card,
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(
+            color: active ? kAccent : context.palette.divider,
+            width: 1.2,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 17,
+            fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+            // 选中时压在橙底上必须用深色前景，用 palette.bg 在浅色
+            // 主题下会是浅灰压橙，对比度不足（同 kOnAccent 的注释）
+            color: active ? kOnAccent : context.palette.onSurface,
+          ),
+        ),
+      ),
+    );
+    return TvFocus(
+      radius: 9,
+      onActivate: () => _selectCategory(i),
+      child: body,
     );
   }
 }

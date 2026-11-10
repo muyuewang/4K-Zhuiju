@@ -219,14 +219,20 @@ class ZhuijuApi {
   }
 
   /// 搜索（searchKeys 传原始中文，不做 URL 编码——已实测）
+  ///
+  /// [extra] 用于透传尚未确认的筛选/排序参数。这些参数是对方服务端
+  /// 下发的，我们这套接口是否认它们必须实测（见 test/api_probe_test.dart），
+  /// 所以先留一个不做校验的入口，避免为每个假设参数都改一次方法签名。
   Future<List<Drama>> search(String keyword,
-      {int page = 1, int pageSize = 20, String? typeId1}) {
+      {int page = 1, int pageSize = 20, String? typeId1,
+      Map<String, String>? extra}) {
     final p = <String, String>{
       'page': '$page',
       'pagesize': '$pageSize',
     };
     if (keyword.isNotEmpty) p['searchKeys'] = keyword;
     if (typeId1 != null && typeId1.isNotEmpty) p['typeId1'] = typeId1;
+    if (extra != null) p.addAll(extra);
     return _list('/api/proto/v5/drama/search', p);
   }
 
