@@ -8,9 +8,9 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v1.6.1-ff7a29?style=flat-square" alt="版本">
+  <img src="https://img.shields.io/badge/版本-v1.7.0-ff7a29?style=flat-square" alt="版本">
   <img src="https://img.shields.io/badge/平台-Android%20%7C%20Windows-3ddc84?style=flat-square" alt="平台">
-  <img src="https://img.shields.io/badge/大小-55.6MB-blue?style=flat-square" alt="大小">
+  <img src="https://img.shields.io/badge/大小-55.7MB-blue?style=flat-square" alt="大小">
   <img src="https://img.shields.io/badge/广告-无-ff4d4f?style=flat-square" alt="无广告">
 </p>
 
@@ -174,22 +174,22 @@
 ## 下载安装
 
 <p>
-<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.6.1/4KZhuiju-v1.6.1-release.apk"><b>⬇ Android 版（APK · 55.6 MB）</b></a>
+<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.7.0/4KZhuiju-v1.7.0-release.apk"><b>⬇ Android 版（APK · 55.7 MB）</b></a>
 　|　
-<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.6.1/4KZhuiju-v1.6.1-windows-x64.zip"><b>⬇ Windows 版（ZIP · 12.1 MB）</b></a>
+<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.7.0/4KZhuiju-v1.7.0-windows-x64.zip"><b>⬇ Windows 版（ZIP · 12.1 MB）</b></a>
 </p>
 
 全部版本见 [Releases](https://github.com/muyuewang/4K-Zhuiju/releases)。
 
 ### Android
 
-1. 下载 `4KZhuiju-v1.6.1-release.apk`（55.6 MB）
+1. 下载 `4KZhuiju-v1.7.0-release.apk`（55.7 MB）
 2. 手机上点开安装，如果提示「未知来源」，在设置里允许一次即可
 3. 系统要求：Android 7.0 及以上
 
 ### Windows
 
-1. 下载 `4KZhuiju-v1.6.1-windows-x64.zip`（12.1 MB，解压后约 30 MB）
+1. 下载 `4KZhuiju-v1.7.0-windows-x64.zip`（12.1 MB，解压后约 30 MB）
 2. 解压到任意文件夹（**不要**只把 exe 拖出来，它旁边还有 dll 和 data 目录）
 3. 双击 `zhuiju.exe`
 4. 系统要求：Windows 10 及以上，64 位
