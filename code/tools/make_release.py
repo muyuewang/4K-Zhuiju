@@ -16,6 +16,7 @@ NAME = "4K追剧 v1.7.1"
 ROOT = r"C:\Users\fengxin\WorkBuddy\vivos7"
 ASSETS = [
     (r"dist\v1.7.1\4KZhuiju-v1.7.1-release.apk", "4KZhuiju-v1.7.1-release.apk"),
+    (r"dist\v1.7.1\4KZhuiju-v1.7.1-windows-x64.zip", "4KZhuiju-v1.7.1-windows-x64.zip"),
 ]
 NOTES = r"dist\v1.7.1\RELEASE_NOTES.md"
 PROXY = "http://127.0.0.1:7897"
