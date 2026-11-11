@@ -1,6 +1,8 @@
 /// 通用组件
 library;
 
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -349,6 +351,21 @@ class PagedGrid extends StatefulWidget {
   /// 表现就是"方向键乱跳"或"按了没反应"。由外层按当前 Tab 决定。
   final bool autoFocusFirst;
 
+  /// 单次请求的硬性期限，超过就当失败。
+  ///
+  /// **这是防「一个请求卡住 → 整个 App 永久转圈」的最后一道闸。**
+  ///
+  /// 底层各源自己也有 connectTimeout / receiveTimeout，但那是**单次**
+  /// 的，且外面还套着 3 次重试：橘汁 `_post` 是 3 次 × (12s 连接 +
+  /// 25s 接收) + 退避，最坏能拖到 80 秒。这段时间里 `_loading` 一直是
+  /// true，用户看到的就是一个永不结束的圈；更糟的是只要有一条路径
+  /// 忘了把 `_loading` 复位（例如重试链在某个分支里吞掉了异常），
+  /// 这个圈就再也不会停，切到别的源也救不回来，只能杀进程。
+  ///
+  /// 所以这里不依赖底层的超时是否配得对：**界面层自己兜底**，
+  /// 到点必然退出加载态并给出可重试的错误。
+  final Duration requestDeadline;
+
   const PagedGrid({
     super.key,
     required this.loader,
@@ -356,6 +373,7 @@ class PagedGrid extends StatefulWidget {
     this.padding = const EdgeInsets.fromLTRB(12, 8, 12, 16),
     this.aspect = 0.56,
     this.autoFocusFirst = false,
+    this.requestDeadline = const Duration(seconds: 20),
   });
 
   @override
@@ -373,7 +391,7 @@ class PagedGridState extends State<PagedGrid>
 
   /// 已出现过的剧集 id。接口翻页偶尔会重复吐同一部剧，
   /// 不去的重复卡片：同一张海报在一屏里出现两次，看着像 bug。
-  final _seen = <int>{};
+  final _seen = <String>{};
 
   final _scroll = ScrollController();
   int _page = 1;
@@ -421,7 +439,14 @@ class PagedGridState extends State<PagedGrid>
       _err = null;
     });
     try {
-      final list = await widget.loader(_page);
+      // 界面层硬限期：底层超时/重试再怎么叠，这里到点必须收敛。
+      // 超时后抛弃这次结果（gen 已变），避免迟到响应把错误态覆盖成空白。
+      final list = await widget.loader(_page).timeout(
+        widget.requestDeadline,
+        onTimeout: () {
+          throw TimeoutException('数据源无响应');
+        },
+      );
       if (!mounted || gen != _gen) return;
       setState(() {
         if (list.length < kPageSize) _end = true;
@@ -437,7 +462,9 @@ class PagedGridState extends State<PagedGrid>
         _loading = false;
         // 之前直接 e.toString()，界面上会显示一长串
         // "DioException [connection error]: ..."，普通用户看不懂。
-        _err = friendlyError(e);
+        _err = e is TimeoutException
+            ? '数据源 ${widget.requestDeadline.inSeconds} 秒无响应，可能已卡住。请稍后重试或切换数据源'
+            : friendlyError(e);
       });
     }
   }

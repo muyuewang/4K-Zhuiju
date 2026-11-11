@@ -32,15 +32,15 @@ class LocalPlayerPage extends StatefulWidget {
   final String title;
 
   /// 已经下载好的文件本身不含剧集信息，弹幕要靠这两个参数单独请求。
-  /// 老版本下载的任务没有记录，取到 0 时静默跳过（不显示弹幕，也不报错）。
-  final int dramaId;
+  /// 老版本下载的任务没有记录，取到空串时静默跳过（不显示弹幕，也不报错）。
+  final String dramaId;
   final int episode;
 
   const LocalPlayerPage({
     super.key,
     required this.filePath,
     required this.title,
-    this.dramaId = 0,
+    this.dramaId = '',
     this.episode = 0,
   });
 
@@ -164,7 +164,7 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
   }
 
   Future<void> _loadDanmaku() async {
-    if (widget.dramaId <= 0 || widget.episode <= 0) {
+    if (widget.dramaId.isEmpty || widget.episode <= 0) {
       if (mounted) setState(() => _dmLoaded = true);
       return;
     }
@@ -360,7 +360,7 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
             // 以为这部剧真的没人发弹幕。
             if (c != null &&
                 c.value.isInitialized &&
-                widget.dramaId > 0 &&
+                widget.dramaId.isNotEmpty &&
                 _dmLoaded &&
                 _danmaku.isEmpty)
               const Positioned(

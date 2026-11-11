@@ -17,18 +17,23 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'models.dart' show idToStr;
+
 /// 一部被收藏的剧
 ///
 /// 只存列表页展示需要的字段，不回存 DramaDetail：详情里的剧集地址带
 /// 时效签名，改了源就失效，存下来只会变成一堆过期数据。
 /// 真正播放还是回详情页重新拉一次。
 class FavoriteItem {
-  final int dramaId;
+  final String dramaId;
   final String name;
   final String cover;
   final int year;
   final String area;
   final String remark;
+
+  /// 该条目所属数据源（`zhuiju` / `kanju`），空串按 zhuiju 处理
+  final String sourceId;
 
   /// 收藏时间（毫秒），用于「最近收藏」排序
   final int addedAt;
@@ -40,6 +45,7 @@ class FavoriteItem {
     this.year = 0,
     this.area = '',
     this.remark = '',
+    this.sourceId = '',
     this.addedAt = 0,
   });
 
@@ -59,14 +65,17 @@ class FavoriteItem {
         'year': year,
         'area': area,
         'remark': remark,
+        'sourceId': sourceId,
         'addedAt': addedAt,
       };
 
   static FavoriteItem? fromJson(Map<String, dynamic> m) {
-    final id = (m['dramaId'] as num?)?.toInt() ?? 0;
+    // 旧版本存的是 int，新版本是 String。idToStr 两种都吃得下，
+    // 且把 int 0 归一成空串——原来判的是「== 0」，现在判 isEmpty。
+    final id = idToStr(m['dramaId']);
     final name = m['name'] as String? ?? '';
     // id 和名字都没有的记录没有任何用处，直接丢弃（防手改坏的 prefs）
-    if (id == 0 || name.isEmpty) return null;
+    if (id.isEmpty || name.isEmpty) return null;
     return FavoriteItem(
       dramaId: id,
       name: name,
@@ -74,6 +83,7 @@ class FavoriteItem {
       year: (m['year'] as num?)?.toInt() ?? 0,
       area: m['area'] as String? ?? '',
       remark: m['remark'] as String? ?? '',
+      sourceId: m['sourceId'] as String? ?? '',
       addedAt: (m['addedAt'] as num?)?.toInt() ?? 0,
     );
   }
@@ -133,17 +143,18 @@ class FavoriteStore {
     return _path;
   }
 
-  bool contains(int dramaId) =>
+  bool contains(String dramaId) =>
       items.value.any((e) => e.dramaId == dramaId);
 
   /// 切换收藏状态，返回切换后是否已收藏（用于提示文案）
   bool toggle({
-    required int dramaId,
+    required String dramaId,
     required String name,
     String cover = '',
     int year = 0,
     String area = '',
     String remark = '',
+    String sourceId = '',
   }) {
     if (contains(dramaId)) {
       remove(dramaId);
@@ -156,19 +167,21 @@ class FavoriteStore {
       year: year,
       area: area,
       remark: remark,
+      sourceId: sourceId,
     );
     return true;
   }
 
   void add({
-    required int dramaId,
+    required String dramaId,
     required String name,
     String cover = '',
     int year = 0,
     String area = '',
     String remark = '',
+    String sourceId = '',
   }) {
-    if (dramaId == 0 || name.isEmpty) return;
+    if (dramaId.isEmpty || name.isEmpty) return;
     // 已存在就只更新元信息（封面/备注可能变了），不动排序时间
     final list = List<FavoriteItem>.from(items.value);
     final i = list.indexWhere((e) => e.dramaId == dramaId);
@@ -179,6 +192,7 @@ class FavoriteStore {
       year: year,
       area: area,
       remark: remark,
+      sourceId: sourceId,
       addedAt: i >= 0
           ? list[i].addedAt
           : DateTime.now().millisecondsSinceEpoch,
@@ -192,7 +206,7 @@ class FavoriteStore {
     _scheduleSave();
   }
 
-  void remove(int dramaId) {
+  void remove(String dramaId) {
     final list = List<FavoriteItem>.from(items.value)
       ..removeWhere((e) => e.dramaId == dramaId);
     if (list.length == items.value.length) return;

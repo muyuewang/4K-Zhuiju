@@ -9,6 +9,9 @@ import '../core/favorites.dart';
 import '../core/history.dart';
 import '../core/layout.dart';
 import '../core/models.dart';
+import '../core/playback_prefs.dart';
+import '../core/source/data_source.dart';
+import '../core/source/registry.dart';
 import '../core/source_picker.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -17,8 +20,16 @@ import 'player_page.dart';
 import '../core/tokens.dart';
 
 class DetailPage extends StatefulWidget {
-  final int dramaId;
+  final String dramaId;
   final String? title;
+
+  /// 本剧所属数据源。
+  ///
+  /// 为什么必须由调用方传：收藏/历史可能横跨两个源，用户切了源之后
+  /// 再去点一条旧收藏，若按「当前源」去查必然 404（id 体系完全不同）。
+  /// 传空串表示「不知道来源」，此时退回当前源 —— 这也是升级前老数据
+  /// 的路径（老收藏没有 sourceId 字段）。
+  final String sourceId;
 
   /// 从「最近观看」进来时带上上次看到的信息，加载完成后自动
   /// 定位到该集并直接起播，不用用户再点一次。
@@ -30,6 +41,7 @@ class DetailPage extends StatefulWidget {
     super.key,
     required this.dramaId,
     this.title,
+    this.sourceId = '',
     this.resumeEpisode = 0,
     this.resumeSource = '',
     this.resumeSec = 0,
@@ -46,6 +58,12 @@ class _DetailPageState extends State<DetailPage> {
   DramaDetail? _detail;
   String? _err;
   bool _loading = true;
+
+  /// 本剧所属的数据源。取一次之后固定下来：
+  /// 详情页加载过程中用户在别处切了源，这一页也应该继续用打开时那个源，
+  /// 否则会拿 A 源的 id 去 B 源查，直接 404。
+  late final DataSource _src =
+      SourceRegistry.instance.byId(widget.sourceId);
 
   /// 当前选中的源显示名
   String? _curSource;
@@ -91,7 +109,7 @@ class _DetailPageState extends State<DetailPage> {
       _err = null;
     });
     try {
-      final d = await ZhuijuApi.instance.detail(widget.dramaId);
+      final d = await _src.detail(widget.dramaId);
       if (!mounted) return;
       setState(() {
         _detail = d;
@@ -160,11 +178,17 @@ class _DetailPageState extends State<DetailPage> {
     _play(target, startAtSec: widget.resumeSec);
   }
 
-  /// 从剧集列表里挑默认源：优先稳定 MP4 源 → 可播且分集粒度细 →
-  /// 可播的单条目 → 集数最多。
+  /// 从剧集列表里挑默认源。
+  ///
+  /// 用本剧所属数据源声明的策略（橘汁按接口顺序、kanju 按用户偏好），
+  /// 不能读 SourceRegistry.now —— 从历史记录跨源打开时那是另一个源。
   /// 判定细节见 core/source_picker.dart（有单测覆盖）。
   String _pickDefaultSource(Map<String, List<DramaVideo>> m) =>
-      pickDefaultSource(m);
+      pickDefaultSource(
+        m,
+        pref: PlaybackPrefs.instance.linePref.value,
+        policy: _src.lineOrderPolicy,
+      );
 
   /// 记录对应的那一集（在当前源里找；找不到返回 null）
   DramaVideo? _resumeTarget(List<DramaVideo> eps) {
@@ -214,6 +238,7 @@ class _DetailPageState extends State<DetailPage> {
         cover: d?.cover.best ?? '',
         // 观看历史用剧集 id 做唯一键，否则同名剧会互相覆盖
         dramaId: d?.id ?? widget.dramaId,
+        sourceId: d?.sourceId ?? widget.sourceId,
         alternates: alts,
         // 全屏选集 / 按源名换源 / 自动连播都需要完整的「源 → 集」映射。
         // 只传 alternates（同集候选）是不够的：那样不知道该集后面还有没有
@@ -262,7 +287,15 @@ class _DetailPageState extends State<DetailPage> {
   Widget _buildBody() {
     final d = _detail!;
     final sources = d.sourcesByCn;
-    final sourceNames = sources.keys.toList();
+    // 按「本剧所属数据源」声明的策略排序：
+    //   - 橘汁：接口顺序就是官方推荐（自建线在前、QQ 垫底），原样保留；
+    //   - kanju：按用户偏好把官方线/直出线分档。
+    // 与 pickDefaultSource 用同一个 policy，面板高亮和默认选中才对得上。
+    final sourceNames = sortedSourceNames(
+      sources,
+      pref: PlaybackPrefs.instance.linePref.value,
+      policy: _src.lineOrderPolicy,
+    );
     final cur = _curSource ?? (sourceNames.isNotEmpty ? sourceNames.first : null);
     final eps = cur == null ? <DramaVideo>[] : (sources[cur] ?? []);
 
@@ -353,6 +386,10 @@ class _DetailPageState extends State<DetailPage> {
               year: d.year,
               area: d.area,
               remark: d.remark,
+              // 记住条目来自哪个源：换源后再点这条收藏，仍能正确打开
+              sourceId: d.sourceId.isNotEmpty
+                  ? d.sourceId
+                  : SourceRegistry.instance.now.id,
             );
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
               content: Text(now ? '已加入我的收藏' : '已取消收藏',

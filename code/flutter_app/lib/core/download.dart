@@ -18,6 +18,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pointycastle/export.dart' show AESEngine, CBCBlockCipher;
 import 'package:pointycastle/api.dart' show KeyParameter, ParametersWithIV;
 
+import 'models.dart' show idToStr;
+
 enum DownloadState { pending, running, paused, done, failed }
 
 /// 内部信号：按普通文件下载时发现实际内容是 HLS，需要改走分片流程
@@ -51,8 +53,8 @@ class DownloadTask {
   /// 弹幕接口 (movieId, movieKey) 和播放地址是两套独立参数，
   /// 下载到本地的文件本身不带任何剧集信息，所以必须在入队时记下来、
   /// 并随索引一起持久化，否则「我的 → 下载管理 → 播放」永远是零弹幕。
-  /// 老索引没有这两个字段，回落到 0，弹幕层会自动跳过请求。
-  int dramaId = 0;
+  /// 老索引没有这两个字段，回落到空串/0，弹幕层会自动跳过请求。
+  String dramaId = '';
   int episode = 0;
 
   DownloadState state = DownloadState.pending;
@@ -156,7 +158,7 @@ class DownloadTask {
     t.total = (j['total'] as num?)?.toInt() ?? 0;
     t.error = j['error'] as String?;
     t.filePath = j['filePath'] as String?;
-    t.dramaId = (j['dramaId'] as num?)?.toInt() ?? 0;
+    t.dramaId = idToStr(j['dramaId']);
     t.episode = (j['episode'] as num?)?.toInt() ?? 0;
     final segs = j['segments'] as List?;
     if (segs != null) {
@@ -478,7 +480,7 @@ class DownloadManager {
     required String url,
     String? preferExt,
     Future<String> Function()? resolver,
-    int dramaId = 0,
+    String dramaId = '',
     int episode = 0,
   }) {
     final key = safeName(title);
@@ -505,7 +507,7 @@ class DownloadManager {
       exist.sourceUrl = url;
       if (resolver != null) exist.resolver = resolver;
       // 续传时补写剧集标识：老索引里可能没有，续传是唯一能补的机会
-      if (dramaId > 0) exist.dramaId = dramaId;
+      if (dramaId.isNotEmpty) exist.dramaId = dramaId;
       if (episode > 0) exist.episode = episode;
       exist.state = DownloadState.pending;
       exist.error = null;

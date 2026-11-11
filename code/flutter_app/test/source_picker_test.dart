@@ -14,6 +14,7 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuiju/core/models.dart';
+import 'package:zhuiju/core/playback_prefs.dart';
 import 'package:zhuiju/core/source_picker.dart';
 
 DramaVideo v({
@@ -22,14 +23,19 @@ DramaVideo v({
   required String source,
   String sourceCn = '',
   String title = '',
+  bool needsResolve = false,
 }) =>
     DramaVideo(
-      id: episode,
+      id: '$episode',
       title: title.isEmpty ? '$episode' : title,
       path: path,
       source: source,
       sourceCn: sourceCn,
       episode: episode,
+      playToken: path.startsWith('resolve://')
+          ? path.substring('resolve://'.length)
+          : '',
+      needsResolve: needsResolve,
     );
 
 /// 独家短剧：整条线路 90 集，path 全是 `<数字>&<集数>` 形态的令牌
@@ -71,6 +77,72 @@ Map<String, List<DramaVideo>> shortDramaSources() => {
       '独家短剧': exclusiveSource(),
       'B蓝光': bLanGuangSource(),
       'BL': blSource(),
+    };
+
+// ==================== kanju 多线路夹具 ====================
+//
+// 下面的数据不是编的，是 2026-11-11 对 kanju.ai 真实调用的结果：
+//
+//   沙海        54 集，14 条线路 = 12 条直出(m3u8) + 2 条官方线(需二次解析)
+//   庆余年 第2季  36 集，28 条线路 = 23 条直出 + 5 条官方线
+//
+// 关键特征（也是这次要修的东西）：
+//   1. **每条线路的条目数完全相等**（每集一条），所以「按条目数排序」
+//      这个判据在 kanju 上完全失效，比较器恒返回 0
+//   2. **接口原始顺序把官方线排最前面**，庆余年S2 前 3 条全是官方线，
+//      且第一条带 selected:true
+//   3. 官方线靠 `resolve://` 占位通过 pathLooksPlayable，看着「可播」，
+//      但实际要多发一次 resolve 请求，部分新片还会 401 要登录
+//
+// 结论：旧逻辑在 kanju 上必然默认选中一条官方线。
+
+/// kanju 官方线：url 是 `resolve://<ticket>`，运行时要再 POST 一次换真地址
+List<DramaVideo> kanjuOfficialLine(String label, String playFrom,
+        {int episodes = 54, bool requiresLogin = false}) =>
+    List.generate(
+      episodes,
+      (i) => v(
+        episode: i + 1,
+        path: 'resolve://av_${playFrom}_ep${i + 1}',
+        source: playFrom,
+        sourceCn: label,
+        needsResolve: true,
+      ),
+    );
+
+/// kanju 直出线路：url 直接就是 m3u8，拿来就播
+List<DramaVideo> kanjuDirectLine(String label, String playFrom,
+        {int episodes = 54}) =>
+    List.generate(
+      episodes,
+      (i) => v(
+        episode: i + 1,
+        path: 'https://cdn.example.com/$playFrom/${i + 1}/index.m3u8',
+        source: playFrom,
+        sourceCn: label,
+      ),
+    );
+
+/// 沙海（54 集）的线路表，**严格按接口原始顺序**：官方线在最前
+Map<String, List<DramaVideo>> kanjuShaHai() => {
+      '高清-官方B': kanjuOfficialLine('高清-官方B', 'bytedance'),
+      '1080P-官方R': kanjuOfficialLine('1080P-官方R', 'rrys'),
+      '无水印资源': kanjuDirectLine('无水印资源', 'wsym3u8'),
+      '红牛资源': kanjuDirectLine('红牛资源', 'hnm3u8'),
+      '极速资源': kanjuDirectLine('极速资源', 'jsm3u8'),
+      '豆瓣资源': kanjuDirectLine('豆瓣资源', 'dbm3u8'),
+    };
+
+/// 庆余年 第2季（36 集）：官方线有 5 条，且原始顺序前三全是官方线
+Map<String, List<DramaVideo>> kanjuQingYuNian() => {
+      '1080P-官方Z': kanjuOfficialLine('1080P-官方Z', 'zzy',
+          episodes: 36, requiresLogin: true),
+      '高清-官方B': kanjuOfficialLine('高清-官方B', 'bytedance',
+          episodes: 36, requiresLogin: true),
+      '1080P-官方R': kanjuOfficialLine('1080P-官方R', 'rrys', episodes: 36),
+      '红牛资源': kanjuDirectLine('红牛资源', 'hnm3u8', episodes: 36),
+      '极速资源': kanjuDirectLine('极速资源', 'jsm3u8', episodes: 36),
+      '豆瓣资源': kanjuDirectLine('豆瓣资源', 'dbm3u8', episodes: 36),
     };
 
 void main() {
@@ -230,6 +302,221 @@ void main() {
     });
     test('普通分集条目不误判', () {
       expect(isWholeSeriesEntry(blSource()[5]), isFalse);
+    });
+  });
+
+  // ==================== kanju 多线路（14~28 条并行） ====================
+  //
+  // 这组是 2026-11-11 的真实回归：接入第二数据源后，
+  // kanju 的线路形态和橘汁完全相反，旧的两档判定直接失效。
+  //
+  // 2026-11-11 下午又翻了一次：接入游客会话后实测官方线 100% 可播
+  // （沙海 16/16、庆余年 27/27），用户反馈普通源很卡，
+  // 于是默认从「直出优先」改成「官方优先」。下面用双偏好对照来锁行为，
+  // 只断言「两种偏好下官方线与直出线的相对顺序互换」，
+  // 不断言具体数值——数值是实现细节，翻转默认值时不该连测试一起改。
+
+  group('lineRankOf：线路等级受偏好驱动', () {
+    final official = v(
+      episode: 1,
+      path: 'resolve://av_xxx',
+      source: 'bytedance',
+      needsResolve: true,
+    );
+    final direct = v(
+      episode: 1,
+      path: 'https://cdn.example.com/a/1/index.m3u8',
+      source: 'hnm3u8',
+    );
+
+    test('官方优先：官方线比直出线靠前', () {
+      expect(
+        lineRankOf(official, pref: LinePreference.officialFirst),
+        lessThan(lineRankOf(direct, pref: LinePreference.officialFirst)),
+      );
+    });
+
+    test('普通优先：直出线比官方线靠前（与上一档正好互换）', () {
+      expect(
+        lineRankOf(direct, pref: LinePreference.directFirst),
+        lessThan(lineRankOf(official, pref: LinePreference.directFirst)),
+      );
+    });
+
+    test('稳定 MP4 源恒定最前，不受偏好影响', () {
+      final qq = v(episode: 1, path: 'http://x/1.mp4', source: 'qq');
+      for (final p in LinePreference.values) {
+        expect(lineRankOf(qq, pref: p), kRankStableMp4);
+      }
+    });
+
+    test('令牌形态恒定判死，不受偏好影响', () {
+      final d = v(episode: 1, path: '7512797350914444313&1', source: 'hgdj');
+      for (final p in LinePreference.values) {
+        expect(lineRankOf(d, pref: p), kRankDead);
+      }
+    });
+
+    test('整条线路取最好的一条：有直链就不因个别条目下沉', () {
+      final mixed = <DramaVideo>[
+        v(episode: 1, path: '7512797350914444313&1', source: 'x'),
+        v(episode: 2, path: 'https://cdn/a/2.m3u8', source: 'x'),
+      ];
+      expect(lineRankOfAll(mixed), kRankSecondary,
+          reason: '默认官方优先时，整条线路里最好的那条是直出线（次选档）');
+    });
+
+    test('空线路判死', () {
+      expect(lineRankOfAll(const []), kRankDead);
+    });
+  });
+
+  group('pickDefaultSource：kanju 默认线路', () {
+    test('官方优先时默认选中官方线（画质最高，实测 100% 可播）', () {
+      final m = kanjuShaHai();
+      final picked = pickDefaultSource(m);
+      expect(m[picked]!.first.needsResolve, isTrue,
+          reason: '官方线已接游客会话，沙海 8 集抽样 16/16 可播；'
+              '用户实测普通源很卡，默认应给官方线');
+      expect(const ['高清-官方B', '1080P-官方R'], contains(picked));
+    });
+
+    test('普通优先时默认选中直出线（老行为，可手动切回）', () {
+      final m = kanjuShaHai();
+      final picked = pickDefaultSource(m, pref: LinePreference.directFirst);
+      expect(m[picked]!.first.needsResolve, isFalse);
+      expect(
+        const ['无水印资源', '红牛资源', '极速资源', '豆瓣资源'],
+        contains(picked),
+      );
+    });
+
+    test('两种偏好各选一条，且不是同一条', () {
+      final m = kanjuQingYuNian();
+      final off = pickDefaultSource(m, pref: LinePreference.officialFirst);
+      final dir = pickDefaultSource(m, pref: LinePreference.directFirst);
+      expect(off, isNot(dir));
+      expect(m[off]!.first.needsResolve, isTrue);
+      expect(m[dir]!.first.needsResolve, isFalse);
+    });
+
+    test('条目数相等时结果稳定，多次调用不抖动', () {
+      final m = kanjuShaHai();
+      for (final p in LinePreference.values) {
+        final first = pickDefaultSource(m, pref: p);
+        for (var i = 0; i < 20; i++) {
+          expect(pickDefaultSource(m, pref: p), first,
+              reason: '比较器必须能区分同条目数的线路，否则每次打开详情页'
+                  '默认选中项都可能变，用户会以为「源乱了」');
+        }
+      }
+    });
+
+    test('同是直出线路时优先给条目多的（能对上更多集）', () {
+      final m = {
+        '短线路': kanjuDirectLine('短线路', 'a', episodes: 10),
+        '长线路': kanjuDirectLine('长线路', 'b', episodes: 54),
+      };
+      expect(pickDefaultSource(m, pref: LinePreference.directFirst), '长线路');
+    });
+
+    test('同等级且同条目数时按接口原始顺序，取第一个', () {
+      final m = {
+        '甲': kanjuDirectLine('甲', 'a', episodes: 36),
+        '乙': kanjuDirectLine('乙', 'b', episodes: 36),
+      };
+      expect(pickDefaultSource(m, pref: LinePreference.directFirst), '甲');
+    });
+  });
+
+  group('sortedSourceNames：kanju 线路面板顺序', () {
+    test('官方优先：官方线排在最前', () {
+      final names = sortedSourceNames(kanjuQingYuNian());
+      final firstDirect = names.indexOf('红牛资源');
+      for (final off in ['1080P-官方Z', '高清-官方B', '1080P-官方R']) {
+        expect(names.indexOf(off), lessThan(firstDirect),
+            reason: '默认官方优先，面板第一屏就该是画质最好的官方线');
+      }
+    });
+
+    test('普通优先：官方线沉到直出线之后（与上面互为镜像）', () {
+      final names = sortedSourceNames(kanjuQingYuNian(),
+          pref: LinePreference.directFirst);
+      final firstDirect = names.indexOf('红牛资源');
+      for (final off in ['1080P-官方Z', '高清-官方B', '1080P-官方R']) {
+        expect(names.indexOf(off), greaterThan(firstDirect));
+      }
+    });
+
+    test('普通优先时排在最前的是直出线路', () {
+      final names = sortedSourceNames(kanjuShaHai(),
+          pref: LinePreference.directFirst);
+      expect(
+        const ['无水印资源', '红牛资源', '极速资源', '豆瓣资源'],
+        contains(names.first),
+      );
+    });
+
+    test('同等级保持接口原始顺序，不抖动', () {
+      for (final p in LinePreference.values) {
+        final a = sortedSourceNames(kanjuShaHai(), pref: p);
+        final b = sortedSourceNames(kanjuShaHai(), pref: p);
+        expect(a, b);
+      }
+    });
+
+    test('橘汁的死线路仍沉到最后（旧行为不被破坏）', () {
+      for (final p in LinePreference.values) {
+        final names = sortedSourceNames(shortDramaSources(), pref: p);
+        expect(names.last, '独家短剧');
+      }
+    });
+  });
+
+  group('switchCandidates：kanju 换源候选顺序', () {
+    test('从官方线换源时，官方优先下先给另一条官方线', () {
+      final m = kanjuQingYuNian();
+      final cur = m['1080P-官方Z']!.first;
+      final cands = switchCandidates(m, cur);
+      expect(cands, isNotEmpty);
+      // 默认官方优先：先消耗完 5 条官方线，再落到直出线
+      expect(cands.first.needsResolve, isTrue);
+    });
+
+    test('普通优先时，从官方线换源先给直出线', () {
+      final m = kanjuQingYuNian();
+      final cur = m['1080P-官方Z']!.first;
+      final cands = switchCandidates(m, cur, pref: LinePreference.directFirst);
+      expect(cands, isNotEmpty);
+      final first = sourceKeyOf(cands.first);
+      expect(const ['红牛资源', '极速资源', '豆瓣资源'], contains(first));
+    });
+
+    test('候选顺序整体按等级单调，两种偏好都成立', () {
+      for (final p in LinePreference.values) {
+        final m = kanjuQingYuNian();
+        final cur = v(
+          episode: 1,
+          path: 'https://cdn.example.com/_/1/index.m3u8',
+          source: '_',
+          sourceCn: '_',
+        );
+        final cands = switchCandidates(m, cur, pref: p);
+        final ranks = cands.map((e) => lineRankOfAll([e], pref: p)).toList();
+        // 非递减：档位一旦下沉，后面不能再回升
+        for (var i = 1; i < ranks.length; i++) {
+          expect(ranks[i], greaterThanOrEqualTo(ranks[i - 1]),
+              reason: '偏好 $p 的候选顺序不是按等级排的：$ranks');
+        }
+      }
+    });
+
+    test('kanju 换源仍按集对齐', () {
+      final m = kanjuShaHai();
+      final cur = m['无水印资源']![7]; // ep 8
+      final cands = switchCandidates(m, cur);
+      final target = cands.firstWhere((e) => sourceKeyOf(e) == '红牛资源');
+      expect(target.episode, 8);
     });
   });
 }

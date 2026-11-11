@@ -36,12 +36,16 @@ import '../core/platform.dart';
 import '../core/history.dart';
 import '../core/models.dart';
 import '../core/screen_awake.dart';
+import '../core/source/data_source.dart';
+import '../core/source/registry.dart';
+import '../core/playback_prefs.dart';
 import '../core/source_picker.dart';
 import '../core/tv.dart';
 import '../theme.dart';
 import '../widgets/cast_sheet.dart';
 import '../widgets/common.dart';
 import '../widgets/danmaku_overlay.dart';
+import '../widgets/episode_nav_bar.dart';
 import '../widgets/player_controls.dart';
 import '../widgets/tv_focus.dart';
 import '../core/tokens.dart';
@@ -66,8 +70,8 @@ class PlayerPage extends StatefulWidget {
   final String dramaName;
   final String cover;
 
-  /// 所属剧集 id，用于写入观看历史（0 表示未知）
-  final int dramaId;
+  /// 所属剧集 id，用于写入观看历史（空串表示未知）
+  final String dramaId;
 
   /// 同集其它可切换的源（detail 页传入），用于播放失败时换源
   final List<DramaVideo> alternates;
@@ -80,12 +84,20 @@ class PlayerPage extends StatefulWidget {
   /// 播放器初始化完成后自动跳到该位置。
   final int startAtSec;
 
+  /// 本剧所属数据源（`zhuiju` / `kanju`），空串按当前源处理。
+  ///
+  /// 取址逻辑完全由数据源负责：橘汁是一次 playUrl，kanju 是两阶段
+  /// resolve。播放器不该知道这些差异，也绝不能用「当前源」去解析
+  /// 一条来自旧源的条目——那会拿着 av_ 长串去调数字 id 的接口。
+  final String sourceId;
+
   const PlayerPage({
     super.key,
     required this.video,
     this.dramaName = '',
     this.cover = '',
-    this.dramaId = 0,
+    this.dramaId = '',
+    this.sourceId = '',
     this.alternates = const [],
     this.sources = const {},
     this.startAtSec = 0,
@@ -97,6 +109,13 @@ class PlayerPage extends StatefulWidget {
 
 class _PlayerPageState extends State<PlayerPage> {
   VideoPlayerController? _ctrl;
+
+  /// 本条线路所属的数据源，进入页面时定死。
+  ///
+  /// 不能在每次取址时读「当前源」：播放中途用户可能在别处切了源，
+  /// 那样换集会拿 A 源的 id 去 B 源解析，必然 404。
+  late final DataSource _src =
+      SourceRegistry.instance.byId(widget.sourceId);
 
   /// 解析阶段错误（接口不通/为空）
   String? _err;
@@ -217,6 +236,12 @@ class _PlayerPageState extends State<PlayerPage> {
   /// 否则加载中就会先闪一下「本集暂无弹幕」）
   bool _dmLoaded = false;
 
+  /// 当前源是否支持弹幕。
+  ///
+  /// 界面上所有弹幕相关的控件（空提示、全屏开关、竖屏开关）都必须
+  /// 先过这一关：kanju 没有弹幕池，挂一个点了没反应的开关比不显示更糟。
+  bool get _dmOn => _src.supportsDanmaku;
+
   /// 已尝试过的源（按「源名」去重，不是按 path）
   ///
   /// 原来按 path 记录，实测有坑：同一集在同一个源下往往有多条线路
@@ -231,15 +256,44 @@ class _PlayerPageState extends State<PlayerPage> {
       v.sourceCn.isNotEmpty ? v.sourceCn : v.source;
 
   /// 当前源的全部剧集（按集数排序）
+  ///
+  /// 按「源名」缓存：同一线路下这 54 集是固定的，变的是 _cur。
+  /// 原来每次访问都 List.from + sort 一遍，而这个 getter 在全文件里
+  /// 被调用 10 次（下一集/上一集/下标/选集网格/竖屏选集/顶部标题…），
+  /// 播放页每帧都可能触发其中几个，kanju 54 集时是实打实的重复开销。
+  String? _epsCacheKey;
+  List<DramaVideo>? _epsCache;
+
   List<DramaVideo> get _curEpisodes {
-    final list = widget.sources[_srcKey(_cur)];
-    if (list == null || list.isEmpty) return <DramaVideo>[_cur];
-    final l = List<DramaVideo>.from(list)
-      ..sort((a, b) => a.episode.compareTo(b.episode));
-    return l;
+    final key = _srcKey(_cur);
+    final cached = _epsCache;
+    if (cached != null && _epsCacheKey == key) return cached;
+
+    final list = widget.sources[key];
+    final result = (list == null || list.isEmpty)
+        ? <DramaVideo>[_cur]
+        : (List<DramaVideo>.from(list)
+          ..sort((a, b) => a.episode.compareTo(b.episode)));
+    _epsCacheKey = key;
+    _epsCache = result;
+    return result;
   }
 
-  List<String> get _sourceNames => widget.sources.keys.toList();
+  /// 线路列表按等级排（直出在前、需二次解析的官方线在后）。
+  ///
+  /// 不能用 `widget.sources.keys.toList()`：kanju 一部剧 14~28 条线路，
+  /// 接口原始顺序把官方线排在前面，面板第一屏全是「要登录」的那几条，
+  /// 用户得往下翻很久才能找到真能播的直出线路。
+  ///
+  /// widget.sources 在页面生命周期内不变，排序结果只算一次。
+  /// 每次 setState 都重排 28 条线路并计算等级，会白掉不少帧。
+  List<String>? _namesCache;
+
+  List<String> get _sourceNames => _namesCache ??= sortedSourceNames(
+        widget.sources,
+        pref: PlaybackPrefs.instance.linePref.value,
+        policy: _src.lineOrderPolicy,
+      );
 
   bool get _isSeries => _curEpisodes.length > 1;
 
@@ -635,30 +689,18 @@ class _PlayerPageState extends State<PlayerPage> {
   /// 只有接口真的挂了（网络异常/返回空）才用直链兜底，保证不至于
   /// 因为接口单点故障而完全不能播。
   Future<String> _resolveUrl(DramaVideo v) async {
+    // 取址策略完全下沉到数据源：橘汁「接口优先、直链兜底」、
+    // kanju「resolve 拿线路 + resolve-line 换地址」都不该出现在页面里。
+    // 这里只负责把结果翻译成一句给用户看的提示。
     final direct = ZhuijuApi.isDirectUrl(v.path) &&
         (v.path.endsWith('.m3u8') || v.path.endsWith('.mp4'));
-
-    try {
-      final info = await ZhuijuApi.instance.playUrl(v.source, v.path);
-      final u = info.playUrl;
-      if (u.isNotEmpty && ZhuijuApi.isDirectUrl(u)) {
-        _tip = direct ? '接口解析(CDN)' : '接口解析';
-        return u;
-      }
-      // 接口返回了非地址（独家短剧令牌）：直链可用就先用直链，
-      // 否则把令牌原样返回，交给调用方抛「专用令牌」的明确错误。
-      if (direct) {
-        _tip = '直链';
-        return v.path;
-      }
-      return u;
-    } catch (e) {
-      if (direct) {
-        _tip = '直链（接口失败）';
-        return v.path;
-      }
-      rethrow;
+    final u = await _src.resolveUrl(v);
+    if (u.isNotEmpty && u != v.path) {
+      _tip = direct ? '接口解析(CDN)' : '接口解析';
+    } else if (u.isNotEmpty) {
+      _tip = '直链';
     }
+    return u;
   }
 
   Future<void> _resolve({DramaVideo? video}) async {
@@ -1013,8 +1055,16 @@ class _PlayerPageState extends State<PlayerPage> {
   Future<void> _loadDanmaku() async {
     final ep = _cur.episode;
     final id = widget.dramaId;
+    // 该源根本没有弹幕池（kanju），不必发请求、也不该显示「暂无弹幕」。
+    // 这个能力位原来只在 DataSource 里定义、没人读，导致切到 kanju 后
+    // 播放页仍会挂一个永远点不出东西的弹幕开关。
+    if (!_src.supportsDanmaku) {
+      if (mounted) setState(() => _dmLoaded = true);
+      return;
+    }
     // 本地播放/未知剧集时没有 id，直接标记完成，避免「暂无弹幕」永远不出现
-    if (id <= 0 || ep <= 0) {
+    // danmaku 接口只认橘汁的数字 id，非数字（kanju 的 av_ 长串）也会被跳过
+    if (id.isEmpty || ep <= 0) {
       if (mounted) setState(() => _dmLoaded = true);
       return;
     }
@@ -1082,6 +1132,11 @@ class _PlayerPageState extends State<PlayerPage> {
     HistoryStore.instance.upsert(WatchRecord(
       dramaId: widget.dramaId,
       dramaName: widget.dramaName,
+      // 记住这条记录属于哪个源：从「最近观看」回跳详情时按它取数据，
+      // 否则切源后旧记录会拿错 id 去打另一个源
+      sourceId: widget.sourceId.isNotEmpty
+          ? widget.sourceId
+          : SourceRegistry.instance.now.id,
       epLabel: _cur.epLabel,
       source: _cur.source,
       path: _cur.path,
@@ -1258,7 +1313,13 @@ class _PlayerPageState extends State<PlayerPage> {
   /// 具体判定（含短剧「一条装全集」的兼容）见 core/source_picker.dart，
   /// 那边有单测覆盖，这里只负责组装。
   List<DramaVideo> get _switchCandidates {
-    final out = switchCandidates(widget.sources, _cur, tried: _triedSrc);
+    final out = switchCandidates(
+      widget.sources,
+      _cur,
+      tried: _triedSrc,
+      pref: PlaybackPrefs.instance.linePref.value,
+      policy: _src.lineOrderPolicy,
+    );
 
     // 兜底：sources 为空（老调用方/本地播放）时退回快照
     if (widget.sources.isEmpty) {
@@ -1355,6 +1416,15 @@ class _PlayerPageState extends State<PlayerPage> {
             tooltip: '下载',
             icon: const Icon(Icons.download_rounded),
             onPressed: _realUrl.isEmpty ? null : _download,
+          ),
+          // 技术信息入口。原来是内容区里一整块常驻面板，用户反馈两件事：
+          // 一是固定黑底不跟主题走（浅色模式下一条突兀的黑带），
+          // 二是太占位置。现在收进标题栏，点开是跟主题色的底部弹窗，
+          // 平时一行都不占。排障信息本来就该是「需要时才看」的东西。
+          IconButton(
+            tooltip: '技术信息',
+            icon: const Icon(Icons.info_outline_rounded),
+            onPressed: _openTechSheet,
           ),
         ],
       ),
@@ -1520,7 +1590,7 @@ class _PlayerPageState extends State<PlayerPage> {
                                       )
                                     : const SizedBox.shrink(),
                               ),
-                            if (_danmaku.isEmpty && _dmLoaded)
+                            if (_dmOn && _danmaku.isEmpty && _dmLoaded)
                               const DanmakuEmptyHint(),
                           ],
                         ),
@@ -1597,7 +1667,8 @@ class _PlayerPageState extends State<PlayerPage> {
                         extraActions: [
                           // 弹幕开关：全屏是最常用的看弹幕场景，
                           // 开关必须在这里就能按到，不用退回竖屏。
-                          const DanmakuToggleButton(),
+                          // 无弹幕池的源（kanju）不显示，否则是个死开关。
+                          if (_dmOn) const DanmakuToggleButton(),
                           // 下一集：枕在沙发上看剧最高频的动作。
                           // 原来全屏只能等播完自动连播，或者退出全屏去选集，
                           // 和主流播放器（B站/爱奇艺的「下一集」）差得很远。
@@ -2170,95 +2241,365 @@ class _PlayerPageState extends State<PlayerPage> {
         return Column(
           children: [
             _videoArea(maxHeight: maxVideoH),
-            // 信息区：只要拿到地址就一直可用
+            // 信息区：只要拿到地址就一直可用。
+            // 分区式布局，见 [_portraitInfo]。
             Expanded(
-          child: Container(
-            width: double.infinity,
-            color: kVideoBg,
-            padding: const EdgeInsets.all(14),
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (_castDeviceName != null)
-                    CastBar(
-                      deviceName: _castDeviceName!,
-                      onStop: _stopCast,
-                    ),
-                  _statusRow(),
-                  const SizedBox(height: 10),
-                  if (_ctrl != null)
-                    PlayerControlBar(
-                      ctrl: _ctrl!,
-                      fullscreen: false,
-                      onToggleFullscreen: _toggleFullscreen,
-                      extraActions: const [DanmakuToggleButton()],
-                    ),
-                  const SizedBox(height: 12),
-                  _actionButtons(),
-                  const SizedBox(height: 14),
-                  // 播放地址等排障信息收进折叠区。
-                  //
-                  // 原来这里直接平铺「播放地址」+ 一整串几百字符的 m3u8
-                  // 带签名 URL，占了小半屏；这是给开发者排障用的，
-                  // 普通用户看到只会觉得「这 App 没做完」。主流播放器
-                  // 都不会把线路地址摊在界面上。默认收起，需要时展开。
-                  _techDetails(),
-                ],
+              child: Container(
+                width: double.infinity,
+                color: context.palette.card,
+                child: _portraitInfo(),
               ),
             ),
-          ),
-        ),
           ],
         );
       },
     );
   }
 
-  /// 折叠的排障信息：播放地址 + 复制
-  Widget _techDetails() {
-    return Theme(
-      // ExpansionTile 的默认分割线/图标颜色来自主题，这里是深色视频区，
-      // 不覆盖的话浅色主题下会出现一条亮线和一个看不清的箭头。
-      data: Theme.of(context).copyWith(
-        dividerColor: Colors.transparent,
-        splashColor: Colors.transparent,
-        highlightColor: Colors.transparent,
-      ),
-      child: ExpansionTile(
-        tilePadding: EdgeInsets.zero,
-        childrenPadding: EdgeInsets.zero,
-        dense: true,
-        iconColor: kOnVideoDim,
-        collapsedIconColor: kOnVideoDim,
-        title: const Text(
-          '技术信息',
-          style: TextStyle(fontSize: Ts.bodySm, color: kOnVideoDim),
-        ),
+  /// 竖屏信息区：分区式布局（参考主流播放页）。
+  ///
+  /// 旧版是黑底上垂直堆一串按钮，线路和选集都要点弹窗才看得到，
+  /// 层次全靠间距硬撑。现在按「剧名 → 功能图标 → 来源 → 选集」分区，
+  /// 线路和选集直接横排可见，并把上一集/下一集做成常显按钮：
+  /// 第一集/最后一集时置灰而不是消失，位置永远固定。
+  ///
+  /// 配色跟随主题：浅色主题下是白色内容区（视频区仍为黑色），
+  /// 控制条和技术信息单独装进深色面板，避免白底白字。
+  Widget _portraitInfo() {
+    final p = context.palette;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 28),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (_castDeviceName != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: CastBar(
+                  deviceName: _castDeviceName!, onStop: _stopCast),
+            ),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: SelectableText(
-                  _realUrl,
-                  maxLines: 4,
-                  style:
-                      const TextStyle(fontSize: Ts.caption, color: Colors.white54),
+                child: Text(
+                  widget.dramaName.isEmpty ? _cur.epLabel : widget.dramaName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: Ts.title,
+                    fontWeight: FontWeight.w700,
+                    color: p.onSurface,
+                    height: Lh.title,
+                  ),
                 ),
               ),
-              IconButton(
-                tooltip: '复制地址',
-                icon: const Icon(Icons.copy_rounded, size: 16),
-                color: kOnVideoDim,
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: _realUrl));
-                  _toast('地址已复制');
-                },
-              ),
+              const SizedBox(width: 8),
+              _portraitBadge(_isSeries ? '共 ${_curEpisodes.length} 集' : '单集'),
             ],
           ),
+          const SizedBox(height: 4),
+          Text(
+            [
+              _cur.epLabel,
+              if (_cur.sourceCn.isNotEmpty) _cur.sourceCn else _cur.source,
+              if (_tip.isNotEmpty) _tip,
+            ].join(' · '),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: Ts.bodySm, color: p.textDim),
+          ),
+          const SizedBox(height: 16),
+          _portraitActions(),
+          // 技术信息已移到标题栏的信息按钮里（见 AppBar 的 actions）。
+          // 它只是排障用，常驻一块面板既占竖直空间、又因为固定黑底
+          // 在浅色主题下突兀地切成一条黑带，是竖屏页里最"碍眼"的一行。
+          const SizedBox(height: 18),
+          _portraitSectionTitle('来源', trailing: '${_sourceNames.length} 个可用'),
+          const SizedBox(height: 10),
+          _portraitSourceChips(),
+          const SizedBox(height: 18),
+          _portraitSectionTitle('选集', right: _portraitEpisodeNav()),
+          const SizedBox(height: 10),
+          _portraitEpisodeChips(),
         ],
+      ),
+    );
+  }
+
+  Widget _portraitBadge(String s) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: context.palette.bg,
+          borderRadius: BorderRadius.circular(R.sm),
+        ),
+        child: Text(s,
+            style: TextStyle(
+                fontSize: Ts.caption, color: context.palette.textDim)),
+      );
+
+  Widget _portraitSectionTitle(
+    String title, {
+    String? trailing,
+    Widget? right,
+  }) {
+    final p = context.palette;
+    return Row(
+      children: [
+        Text(title,
+            style: TextStyle(
+                fontSize: Ts.subtitle,
+                fontWeight: FontWeight.w700,
+                color: p.onSurface)),
+        if (trailing != null) ...[
+          const SizedBox(width: 8),
+          Text(trailing,
+              style: TextStyle(fontSize: Ts.bodySm, color: p.textDim)),
+        ],
+        const Spacer(),
+        if (right != null) right,
+      ],
+    );
+  }
+
+  /// 图标 + 文字竖排，与参考设计的五个功能入口一致。
+  /// 只放我们真实有的能力，不摆「一起看」这类点了没反应的假按钮。
+  Widget _portraitActions() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceAround,
+      children: [
+        _portraitAction(
+            Icons.refresh_rounded, '重新解析', () => _resolve()),
+        if (_canSwitch)
+          _portraitAction(
+              Icons.swap_horiz_rounded, '换源', () => _switchSource()),
+        _portraitAction(Icons.download_rounded, '下载',
+            _realUrl.isEmpty ? null : () => _download()),
+        if (!isDesktop && _realUrl.isNotEmpty)
+          _portraitAction(Icons.cast_rounded, '投屏', () => _openCast()),
+        if (_isSeries)
+          _portraitAction(Icons.grid_view_rounded, '选集',
+              () => _openEpisodeSheet(context)),
+      ],
+    );
+  }
+
+  Widget _portraitAction(IconData icon, String label, VoidCallback? onTap) {
+    final p = context.palette;
+    final c = onTap == null
+        ? p.textDim.withValues(alpha: 0.45)
+        : p.onSurface;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(R.card),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 22, color: c),
+            const SizedBox(height: 5),
+            Text(label, style: TextStyle(fontSize: Ts.caption, color: c)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 线路横排 chip，右上角带集数角标（参考设计的「自建蓝光 30」）。
+  Widget _portraitSourceChips() {
+    final p = context.palette;
+    final cur = _srcKey(_cur);
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _sourceNames.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final n = _sourceNames[i];
+          final active = n == cur;
+          final cnt = widget.sources[n]?.length ?? 0;
+          return GestureDetector(
+            onTap: active ? null : () => _switchToSource(n),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: active ? kAccent.withValues(alpha: 0.12) : p.bg,
+                borderRadius: BorderRadius.circular(R.card),
+                border: active ? Border.all(color: kAccent) : null,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    n,
+                    style: TextStyle(
+                      fontSize: Ts.body,
+                      color: active ? kAccent : p.onSurface,
+                      fontWeight:
+                          active ? FontWeight.w700 : FontWeight.w400,
+                    ),
+                  ),
+                  if (cnt > 0) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: p.divider,
+                        borderRadius: BorderRadius.circular(R.sm),
+                      ),
+                      child: Text('$cnt',
+                          style: TextStyle(
+                              fontSize: Ts.caption, color: p.textDim)),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// 上一集 / 下一集：**两个按钮永远都在**。
+  ///
+  /// 第一集时上一集置灰、最后一集时下一集置灰，单集剧两个都置灰。
+  /// 旧版 `_episodeNav` 在两个方向都为空时整块隐藏，用户反馈
+  /// 「上一集、下一集都显示出来」——位置跳动比按钮不可用更难用。
+  Widget _portraitEpisodeNav() {
+    final prev = _prevEpisode();
+    final next = _nextEpisode();
+    return EpisodeNavBar(
+      onPrev: prev == null ? null : () => _playEpisode(prev),
+      onNext: next == null ? null : () => _playEpisode(next),
+    );
+  }
+
+  /// 选集横排，编号补零成 01 / 02，当前集高亮。
+  Widget _portraitEpisodeChips() {
+    final p = context.palette;
+    final eps = _curEpisodes;
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: eps.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final e = eps[i];
+          final active = e.path == _cur.path;
+          return GestureDetector(
+            onTap: () => _playEpisode(e),
+            child: Container(
+              width: 58,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: active ? kAccent : p.bg,
+                borderRadius: BorderRadius.circular(R.card),
+              ),
+              child: Text(
+                e.episode > 0
+                    ? e.episode.toString().padLeft(2, '0')
+                    : e.epLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: Ts.bodyLg,
+                  color: active ? Colors.white : p.onSurface,
+                  fontWeight:
+                      active ? FontWeight.w700 : FontWeight.w400,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// 技术信息：跟随主题的底部弹窗。
+  ///
+  /// 原来是内容区里一块常驻面板，两个问题（用户实测反馈）：
+  ///   1. 底色写死 `kVideoBg`（纯黑），浅色主题下像一条硬切的黑带；
+  ///   2. 占一整行高度，而它只是排障时才看的东西。
+  ///
+  /// 现在改成标题栏一个图标入口 + 按需弹出的 sheet：
+  ///   - 背景用 `palette.card`、文字用 `palette.onSurface` / `textDim`，
+  ///     深浅色主题都自动适配，不需要再写 `kOnVideoDim` 这种固定色；
+  ///   - 关闭后一行都不占，竖屏的信息区因此能多放内容。
+  void _openTechSheet() {
+    final p = context.palette;
+    final rows = <(String, String)>[
+      ('播放地址', _realUrl.isEmpty ? '（尚未解析出地址）' : _realUrl),
+      ('当前线路', _srcKey(_cur)),
+      ('剧集 / 集数', '${widget.dramaName.isEmpty ? _cur.epLabel : widget.dramaName}'
+          ' · ${_cur.epLabel}'),
+      ('可用来源', '${_sourceNames.length} 个'),
+      ('解析方式', _realUrl.contains('127.0.0.1') ? '本地 HLS 代理' : '直连'),
+    ];
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: p.card,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: ConstrainedBox(
+          // 地址可能很长，限制最大高度并允许内部滚动，
+          // 免得竖屏小屏上一弹就顶到状态栏。
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.7,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('技术信息',
+                    style: TextStyle(
+                      fontSize: Ts.subtitle,
+                      fontWeight: FontWeight.w600,
+                      color: p.onSurface,
+                    )),
+                const SizedBox(height: 4),
+                Text('排障用，正常观看不需要关心',
+                    style: TextStyle(fontSize: Ts.caption, color: p.textDim)),
+                const SizedBox(height: 14),
+                for (final (k, v) in rows) ...[
+                  Text(k,
+                      style: TextStyle(
+                          fontSize: Ts.caption, color: p.textDim)),
+                  const SizedBox(height: 3),
+                  SelectableText(
+                    v,
+                    style: TextStyle(
+                        fontSize: Ts.bodySm, color: p.onSurface),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton.tonalIcon(
+                    onPressed: _realUrl.isEmpty
+                        ? null
+                        : () {
+                            Clipboard.setData(ClipboardData(text: _realUrl));
+                            Navigator.pop(ctx);
+                            _toast('地址已复制');
+                          },
+                    icon: const Icon(Icons.copy_rounded, size: 16),
+                    label: const Text('复制播放地址'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -2321,7 +2662,7 @@ class _PlayerPageState extends State<PlayerPage> {
                                     )
                                   : const SizedBox.shrink(),
                             ),
-                          if (_danmaku.isEmpty && _dmLoaded && inited)
+                          if (_dmOn && _danmaku.isEmpty && _dmLoaded && inited)
                             const DanmakuEmptyHint(),
                         ],
                       ),
@@ -2337,7 +2678,9 @@ class _PlayerPageState extends State<PlayerPage> {
                       ctrl: c,
                       fullscreen: false,
                       onToggleFullscreen: _toggleFullscreen,
-                      extraActions: const [DanmakuToggleButton()],
+                      extraActions: [
+                        if (_dmOn) const DanmakuToggleButton(),
+                      ],
                     ),
                   ),
               ],
@@ -2473,7 +2816,7 @@ class _PlayerPageState extends State<PlayerPage> {
                         )
                       : const SizedBox.shrink(),
                 ),
-              if (_danmaku.isEmpty && _dmLoaded) const DanmakuEmptyHint(),
+              if (_dmOn && _danmaku.isEmpty && _dmLoaded) const DanmakuEmptyHint(),
               // 亮度遮罩：压在画面之上、控制条之下，理由同全屏
               _brightnessOverlay(),
               if (_showCtrl) _overlay(c),
@@ -2521,15 +2864,78 @@ class _PlayerPageState extends State<PlayerPage> {
     // 「两侧留黑边的窄条」而不是「顶到天的巨幅画面」，控制条因此
     // 永远留在可见区域。横屏片算出来的高度通常小于上限，
     // 这一层等于没生效，行为和原来一致。
-    if (maxHeight == null) return video;
-    return Container(
-      color: Colors.black,
-      width: double.infinity,
-      constraints: BoxConstraints(maxHeight: maxHeight),
-      child: Center(
-        child: AspectRatio(
-          aspectRatio: aspect,
-          child: video,
+    //
+    // **容器高度必须取「画面自然高度」和「上限」的较小值**，
+    // 不能直接给 maxHeight：截面截图里视频上方那块大黑边就是这么来的——
+    // 16:9 片在 62% 限高的盒子里只需要 宽度×0.56 的高度，剩下的
+    // 140+ dp 全被 Center 均分成上下黑边，视觉上像「视频被推到了下面」。
+    // 改成按需收缩后，盒子恰好贴合画面，黑边消失，省下的高度让给信息区。
+    final frame = maxHeight == null
+        ? video
+        : LayoutBuilder(
+            builder: (lctx, box) {
+              final w = box.maxWidth.isFinite
+                  ? box.maxWidth
+                  : MediaQuery.sizeOf(lctx).width;
+              final natural = w / aspect;
+              final h = natural < maxHeight ? natural : maxHeight;
+              return Container(
+                color: Colors.black,
+                width: double.infinity,
+                height: h,
+                child: Center(
+                  child: AspectRatio(
+                    aspectRatio: aspect,
+                    child: video,
+                  ),
+                ),
+              );
+            },
+          );
+
+    // 控制条浮在视频区域底部（不是另起一块黑色面板）。
+    // 竖屏常显：视频区只占一屏的 62%，下面紧接信息区，没有「沉浸观看」
+    // 的场景；点一下画面就把进度条藏起来，只会让用户以为控制条没了。
+    // 显隐切换留给全屏（[_fullscreenBody]），那才是需要清爽画面的地方。
+    return Stack(
+      alignment: Alignment.bottomCenter,
+      children: [
+        frame,
+        _floatingControls(c),
+      ],
+    );
+  }
+
+  /// 浮在视频画面底部的控制条。
+  ///
+  /// 主流播放器（橘汁 / B站 / 爱奇艺）都把播放控制压在视频区域内：
+  /// 拖进度、倍速、全屏不用离开画面往下滚。原来它被塞进信息区一个
+  /// 独立黑面板里，和画面分家，是竖屏页最明显的违和点。
+  ///
+  /// 渐变背景而不是纯色块：白字在亮画面上也读得清，又不会硬切掉
+  /// 画面底部一条。外层 GestureDetector 吃掉渐变区的点击，否则
+  /// [_gestureLayer] 会把它当成「点画面」而切换显隐。
+  Widget _floatingControls(VideoPlayerController c) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {},
+      child: Container(
+        width: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.transparent, Colors.black87],
+          ),
+        ),
+        padding: const EdgeInsets.fromLTRB(8, 18, 8, 2),
+        child: PlayerControlBar(
+          ctrl: c,
+          fullscreen: false,
+          onToggleFullscreen: _toggleFullscreen,
+          extraActions: [
+            if (_dmOn) const DanmakuToggleButton(),
+          ],
         ),
       ),
     );

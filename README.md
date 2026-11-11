@@ -8,9 +8,10 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v1.7.1-ff7a29?style=flat-square" alt="版本">
+  <img src="https://img.shields.io/badge/版本-v1.10.0-ff7a29?style=flat-square" alt="版本">
   <img src="https://img.shields.io/badge/平台-Android%20%7C%20Windows-3ddc84?style=flat-square" alt="平台">
-  <img src="https://img.shields.io/badge/大小-55.7MB-blue?style=flat-square" alt="大小">
+  <img src="https://img.shields.io/badge/大小-56.2MB-blue?style=flat-square" alt="大小">
+  <img src="https://img.shields.io/badge/片库-33万%2B-52c41a?style=flat-square" alt="片库">
   <img src="https://img.shields.io/badge/广告-无-ff4d4f?style=flat-square" alt="无广告">
 </p>
 
@@ -171,25 +172,48 @@
 
 <br>
 
+## 片源从哪来
+
+App 里内置 6 个数据源，可以在「我的 → 数据源」里切换和排序。v1.10.0 新增的是两个片子库大、线路直出的源：
+
+| 源 | 片库 | 特点 |
+|:---|---:|:---|
+| 大师兄 · 暴风 | 171,460 条 | 线路直出 m3u8，稳定性最好 |
+| 大师兄 · 量子 | 163,457 条 | 短剧 / 解说 / AI 漫剧资源极多 |
+
+两者互补：同一部剧经常一个站有、一个站没有，或两边线路质量不同，正好用来做「这条线挂了换那条」。
+
+这两个源走的是**标准 JSON 采集接口**（`/api.php/provide/vod/`），不是啃网页 HTML。好处很直接：
+
+- 页面模板改版不会把源搞挂，只要字段名不变就一直能用
+- 详情接口一次返回全部播放地址，不用每集再抓一次播放页，点开更快
+- 只有域名和 UA 是脆弱点，比正则匹配 class 名稳得多
+
+**片库大不等于每部都能看。** 采集站的内容由对方维护，冷门老剧、刚上线的新剧都可能缺。搜不到就是真没有，这不是本地数据库，变不出来。
+
+> 关于「大师兄影视」那个 App：它自己不托管视频，13 条线路本质是在包装公开采集接口，中间还套了一层会失效的 php 中转。所以这里没有复刻它的中转栈，而是直连原始接口——线路更少，但每条都是真的。
+
+<br>
+
 ## 下载安装
 
 <p>
-<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.7.1/4KZhuiju-v1.7.1-release.apk"><b>⬇ Android 版（APK · 55.7 MB）</b></a>
+<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.10.0/4KZhuiju-v1.10.0-release.apk"><b>⬇ Android 版（APK · 56.2 MB）</b></a>
 　|　
-<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.7.1/4KZhuiju-v1.7.1-windows-x64.zip"><b>⬇ Windows 版（ZIP · 12.1 MB）</b></a>
+<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.10.0/4KZhuiju-v1.10.0-windows-x64.zip"><b>⬇ Windows 版（ZIP · 12.2 MB）</b></a>
 </p>
 
 全部版本见 [Releases](https://github.com/muyuewang/4K-Zhuiju/releases)。
 
 ### Android
 
-1. 下载 `4KZhuiju-v1.7.1-release.apk`（55.7 MB）
+1. 下载 `4KZhuiju-v1.10.0-release.apk`（56.2 MB）
 2. 手机上点开安装，如果提示「未知来源」，在设置里允许一次即可
 3. 系统要求：Android 7.0 及以上
 
 ### Windows
 
-1. 下载 `4KZhuiju-v1.7.1-windows-x64.zip`（12.1 MB，解压后约 30 MB）
+1. 下载 `4KZhuiju-v1.10.0-windows-x64.zip`（12.2 MB，解压后约 30 MB）
 2. 解压到任意文件夹（**不要**只把 exe 拖出来，它旁边还有 dll 和 data 目录）
 3. 双击 `zhuiju.exe`
 4. 系统要求：Windows 10 及以上，64 位

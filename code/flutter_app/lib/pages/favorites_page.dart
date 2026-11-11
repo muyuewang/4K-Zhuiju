@@ -85,7 +85,12 @@ class FavoritesPage extends StatelessWidget {
       BuildContext context, FavoriteItem f, bool tv, bool first) {
     final body = GestureDetector(
       onTap: () => Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => DetailPage(dramaId: f.dramaId, title: f.name),
+        // 按收藏条目自己的来源打开：可能在收藏后切过源
+        builder: (_) => DetailPage(
+          dramaId: f.dramaId,
+          title: f.name,
+          sourceId: f.sourceId,
+        ),
       )),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -187,7 +192,12 @@ class FavoritesPage extends StatelessWidget {
       autofocus: first,
       radius: 10,
       onActivate: () => Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => DetailPage(dramaId: f.dramaId, title: f.name),
+        // 按收藏条目自己的来源打开：可能在收藏后切过源
+        builder: (_) => DetailPage(
+          dramaId: f.dramaId,
+          title: f.name,
+          sourceId: f.sourceId,
+        ),
       )),
       child: body,
     );

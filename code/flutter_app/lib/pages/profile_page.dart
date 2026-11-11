@@ -16,6 +16,9 @@ import '../core/download.dart';
 import '../core/favorites.dart';
 import '../core/history.dart';
 import '../core/layout.dart';
+import '../core/playback_prefs.dart';
+import '../core/source/data_source.dart';
+import '../core/source/registry.dart';
 import '../core/theme_settings.dart';
 import '../core/tv.dart';
 import '../core/version.dart';
@@ -349,124 +352,192 @@ class ProfilePage extends StatelessWidget {
 
   // ---------------- 最近观看预览 ----------------
 
-  Widget _recentSection(BuildContext context, {int previewCount = 3}) {
+  /// 横向缩略图卡片尺寸。
+  ///
+  /// **固定高度是关键**：原来一条记录就是一整行（竖版海报 84px +
+  /// 文字 + 进度条），3 条要吃掉 300 多 px，下面的设置项全被挤出屏幕。
+  /// 改成一行横向滚动后，1 条和 8 条占的高度完全一样。
+  static const double _kRecentCardW = 112;
+  static const double _kRecentThumbH = 70;
+  static const double _kRecentStripH = 102;
+
+  Widget _recentSection(BuildContext context, {int previewCount = 6}) {
     return ValueListenableBuilder<List<WatchRecord>>(
       valueListenable: HistoryStore.instance.records,
       builder: (c, list, _) {
         if (list.isEmpty) return const SizedBox.shrink();
         final show = list.take(previewCount).toList();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+        return Material(
+          key: const ValueKey('recentStrip'),
+          color: context.palette.card,
+          borderRadius: BorderRadius.circular(R.panel),
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 0, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
-                  '继续观看',
-                  style: TextStyle(fontSize: Ts.bodyLg, fontWeight: FontWeight.w600),
-                ),
-                const Spacer(),
-                if (list.length > previewCount)
-                  TextButton(
-                    onPressed: () => Navigator.of(context).push(
+                // 标题整行可点：与参考样式一致，进完整历史页
+                Padding(
+                  padding: const EdgeInsets.only(right: 14),
+                  child: InkWell(
+                    onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const HistoryPage()),
                     ),
-                    style: TextButton.styleFrom(
-                      minimumSize: const Size(0, 30),
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                    borderRadius: BorderRadius.circular(R.card),
+                    child: Row(
+                      children: [
+                        Icon(Icons.history_rounded,
+                            size: 16, color: context.palette.textDim),
+                        const SizedBox(width: 6),
+                        const Text(
+                          '继续观看',
+                          style: TextStyle(
+                              fontSize: Ts.bodyLg, fontWeight: FontWeight.w600),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '全部 ${list.length}',
+                          style: TextStyle(
+                              fontSize: Ts.bodySm,
+                              color: context.palette.textDim),
+                        ),
+                        Icon(Icons.chevron_right_rounded,
+                            size: 16, color: context.palette.textDim),
+                      ],
                     ),
-                    child: const Text('全部', style: TextStyle(fontSize: Ts.bodySm)),
                   ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: _kRecentStripH,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.only(right: 14),
+                    itemCount: show.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 10),
+                    itemBuilder: (_, i) => _recentCard(context, show[i]),
+                  ),
+                ),
               ],
             ),
-            const SizedBox(height: 4),
-            for (final r in show) _recentRow(context, r),
-          ],
+          ),
         );
       },
     );
   }
 
-  Widget _recentRow(BuildContext context, WatchRecord r) {
-    return InkWell(
-      // 与「最近观看」页保持一致：点一下就接着上次看，
-      // 不再只是打开一个还得再点一次的详情页。
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => DetailPage(
-            dramaId: r.dramaId,
-            title: r.dramaName,
-            resumeEpisode: r.episode,
-            resumeSource: r.source,
-            resumeSec: r.positionSec,
+  /// 单条记录：横版缩略图 + 进度时间 + 剧名 + 细进度条。
+  ///
+  /// 删除入口保留在右上角小角标里 —— 原来的整行布局有个 X 按钮，
+  /// 换成紧凑卡片后功能不能凭空消失。用 GestureDetector 而不是
+  /// IconButton：后者最小 48x48，会把 112px 宽的卡片撑破。
+  Widget _recentCard(BuildContext context, WatchRecord r) {
+    return SizedBox(
+      width: _kRecentCardW,
+      child: InkWell(
+        // 点一下就接着上次看，不再只是打开一个还得再点一次的详情页。
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => DetailPage(
+              dramaId: r.dramaId,
+              title: r.dramaName,
+              // 按记录自己的来源打开：切源后旧记录仍能正确解析
+              sourceId: r.sourceId,
+              resumeEpisode: r.episode,
+              resumeSource: r.source,
+              resumeSec: r.positionSec,
+            ),
           ),
         ),
-      ),
-      borderRadius: BorderRadius.circular(R.card),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Row(
+        borderRadius: BorderRadius.circular(R.card),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(R.card),
               child: SizedBox(
-                width: 62,
-                height: 84,
-                child: r.cover.isEmpty
-                    ? Container(color: context.palette.card)
-                    : CachedNetworkImage(
-                        imageUrl: r.cover,
-                        fit: BoxFit.cover,
-                        // 62px 宽的小图，按原图解码纯属浪费内存
-                        memCacheWidth: 200,
-                        errorWidget: (_, __, ___) =>
-                            Container(color: context.palette.card),
+                width: double.infinity,
+                height: _kRecentThumbH,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    r.cover.isEmpty
+                        ? Container(color: context.palette.bg)
+                        : CachedNetworkImage(
+                            imageUrl: r.cover,
+                            fit: BoxFit.cover,
+                            // 112px 宽的小图，按原图解码纯属浪费内存
+                            memCacheWidth: 240,
+                            errorWidget: (_, __, ___) =>
+                                Container(color: context.palette.bg),
+                          ),
+                    // 底部渐变压住白色小字，浅色封面上也读得清
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Colors.transparent, Color(0x99000000)],
+                        ),
                       ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    r.dramaName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: Ts.bodyLg, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    r.epLabel.isEmpty
-                        ? '看到 ${_dur(r.positionSec)}'
-                        : '${r.epLabel} · 看到 ${_dur(r.positionSec)}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style:
-                        TextStyle(fontSize: Ts.caption, color: context.palette.textDim),
-                  ),
-                  const SizedBox(height: 6),
-                  // 进度条：一眼看出看到哪了
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(R.bar),
-                    child: LinearProgressIndicator(
-                      value: r.progress,
-                      minHeight: 3,
-                      backgroundColor: context.palette.bg,
-                      valueColor: const AlwaysStoppedAnimation<Color>(kAccent),
                     ),
-                  ),
-                ],
+                    Positioned(
+                      left: 6,
+                      right: 6,
+                      bottom: 5,
+                      child: Text(
+                        r.epLabel.isEmpty
+                            ? _dur(r.positionSec)
+                            : '${r.epLabel} · ${_dur(r.positionSec)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 10, color: Colors.white),
+                      ),
+                    ),
+                    Positioned(
+                      right: 3,
+                      top: 3,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => HistoryStore.instance
+                            .remove(r.dramaId, r.dramaName),
+                        child: Container(
+                          width: 20,
+                          height: 20,
+                          decoration: const BoxDecoration(
+                            color: Color(0x66000000),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.close_rounded,
+                              size: 13, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(width: 8),
-            IconButton(
-              tooltip: '移除记录',
-              icon: const Icon(Icons.close_rounded, size: 16),
-              color: context.palette.textDim,
-              onPressed: () =>
-                  HistoryStore.instance.remove(r.dramaId, r.dramaName),
+            const SizedBox(height: 5),
+            Text(
+              r.dramaName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  fontSize: Ts.bodySm, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 4),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(R.bar),
+              child: LinearProgressIndicator(
+                value: r.progress,
+                minHeight: 2.5,
+                backgroundColor: context.palette.bg,
+                valueColor: const AlwaysStoppedAnimation<Color>(kAccent),
+              ),
             ),
           ],
         ),
@@ -541,6 +612,33 @@ class ProfilePage extends StatelessWidget {
                   ? (TvMode.instance.detected ? '已识别电视' : ov.label)
                   : ov.label,
               onTap: () => _pickTvMode(context),
+            ),
+          ),
+          Divider(height: 1, color: context.palette.divider),
+          // 数据源切换：两个源的片库、线路、画质完全不同，
+          // 有的片只有 A 源有、有的只有 B 源能播，用户需要自己挑。
+          ValueListenableBuilder<DataSource>(
+            valueListenable: SourceRegistry.instance.current,
+            builder: (c, src, _) => _settingRow(
+              context,
+              icon: Icons.dns_rounded,
+              title: '数据源',
+              trailing: src.displayName,
+              onTap: () => _pickSource(context),
+            ),
+          ),
+          Divider(height: 1, color: context.palette.divider),
+          // 线路优先级：kanju 一部剧 14~28 条线路，分官方线与采集线两类，
+          // 画质和稳定性完全相反。用户实测「普通源很卡」，
+          // 所以默认官方优先，但要留一个能退回去的开关（弱网下多一跳反而慢）。
+          ValueListenableBuilder<LinePreference>(
+            valueListenable: PlaybackPrefs.instance.linePref,
+            builder: (c, p, _) => _settingRow(
+              context,
+              icon: Icons.hd_rounded,
+              title: '线路优先级',
+              trailing: p.label,
+              onTap: () => _pickLinePref(context),
             ),
           ),
           Divider(height: 1, color: context.palette.divider),
@@ -749,6 +847,201 @@ class ProfilePage extends StatelessWidget {
                   onTap: () {
                     TvMode.instance.setOverride(m);
                     Navigator.of(sheetCtx).pop();
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// 数据源选择
+  ///
+  /// 为什么不放在首页顶部做成切换按钮：
+  ///   1. 换源是**低频**动作。用户选定一个源后会一直用它，把入口摆在
+  ///      首屏每天都在那儿占位，等于天天提示「你用的可能不是最好的」；
+  ///   2. 换源会改变整个首页的分类结构（橘汁 7 个 typeId、
+  ///      kanju 7 个 content_kind），放在首页顶部一旦误触，
+  ///      整个列表内容和滚动位置全丢，用户会以为 App 出问题了。
+  ///
+  /// 副标题写清各自的特点，用户不必逐个试才知道区别。
+  Future<void> _pickSource(BuildContext context) async {
+    final cur = SourceRegistry.instance.now;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.palette.card,
+      // 源会越加越多（现在是 6 个），弹窗必须能超过默认的 9/16 屏高，
+      // 否则尾部源会被裁掉——且因为外层是 Column(min) 不带滚动，
+      // 用户连滑都滑不到，看起来就像「某个源消失了」。
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(R.pill)),
+      ),
+      builder: (sheetCtx) {
+        return SafeArea(
+          top: false,
+          child: ConstrainedBox(
+            // 留出上方空间，避免弹窗顶到状态栏；同时保证小屏也能滚。
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(sheetCtx).size.height * 0.72,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+                  child: Text(
+                    '数据源',
+                    style: TextStyle(
+                      fontSize: Ts.subtitle,
+                      fontWeight: FontWeight.w600,
+                      color: sheetCtx.palette.onSurface,
+                    ),
+                  ),
+                ),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    padding: EdgeInsets.zero,
+                    children: [
+                      for (final s in SourceRegistry.all)
+                        ListTile(
+                          dense: true,
+                          leading: Icon(
+                            Icons.dns_rounded,
+                            size: 21,
+                            color: identical(s, cur)
+                                ? kAccent
+                                : sheetCtx.palette.textDim,
+                          ),
+                          title: Text(
+                            s.displayName,
+                            style: TextStyle(
+                              fontSize: Ts.bodyLg,
+                              fontWeight: identical(s, cur)
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                              color: identical(s, cur)
+                                  ? kAccent
+                                  : sheetCtx.palette.onSurface,
+                            ),
+                          ),
+                          subtitle: Text(
+                            _sourceHint(s),
+                            style: TextStyle(
+                                fontSize: Ts.bodySm,
+                                color: sheetCtx.palette.textDim),
+                          ),
+                          trailing: identical(s, cur)
+                              ? const Icon(Icons.check_rounded,
+                                  size: 19, color: kAccent)
+                              : null,
+                          onTap: () async {
+                            Navigator.of(sheetCtx).pop();
+                            if (identical(s, cur)) return;
+                            await SourceRegistry.instance.select(s);
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 源的差异由各源自己声明（[DataSource.description]），加源不改这里。
+  ///
+  /// 早期版本是 `if (s is SectionedFeed) … else …` 二选一，结果新接入的
+  /// 片库 4K / 可可影视都不支持弹幕，却被统一标成「分类齐全、支持弹幕」。
+  String _sourceHint(DataSource s) =>
+      s.description.isEmpty ? '分类齐全' : s.description;
+
+  /// 线路优先级选择
+  ///
+  /// 为什么需要这个开关：两类线路的优劣不是绝对的。
+  ///   - 官方线画质最好（1080P/4K），实测 100% 可播，但要多发一次
+  ///     resolve 请求并依赖游客会话；
+  ///   - 普通采集线拿来就播、不依赖会话，但清晰度参差、常常卡顿。
+  ///
+  /// 默认给官方优先（用户实测反馈普通源很卡），但弱网环境下多那一跳
+  /// 反而更慢，得让用户能自己退回去。副标题写清代价，用户不用试。
+  Future<void> _pickLinePref(BuildContext context) async {
+    final cur = PlaybackPrefs.instance.linePref.value;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.palette.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(R.pill)),
+      ),
+      builder: (sheetCtx) {
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+                child: Text(
+                  '线路优先级',
+                  style: TextStyle(
+                    fontSize: Ts.subtitle,
+                    fontWeight: FontWeight.w600,
+                    color: sheetCtx.palette.onSurface,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                child: Text(
+                  '仅影响多线路数据源的默认选项，随时可改',
+                  style: TextStyle(
+                      fontSize: Ts.bodySm, color: sheetCtx.palette.textDim),
+                ),
+              ),
+              for (final p in LinePreference.values)
+                ListTile(
+                  dense: true,
+                  leading: Icon(
+                    p == LinePreference.officialFirst
+                        ? Icons.hd_rounded
+                        : Icons.bolt_rounded,
+                    size: 21,
+                    color: p == cur ? kAccent : sheetCtx.palette.textDim,
+                  ),
+                  title: Text(
+                    p.label,
+                    style: TextStyle(
+                      fontSize: Ts.bodyLg,
+                      fontWeight:
+                          p == cur ? FontWeight.w600 : FontWeight.w400,
+                      color: p == cur ? kAccent : sheetCtx.palette.onSurface,
+                    ),
+                  ),
+                  subtitle: Text(
+                    p.hint,
+                    style: TextStyle(
+                        fontSize: Ts.bodySm, color: sheetCtx.palette.textDim),
+                  ),
+                  trailing: p == cur
+                      ? const Icon(Icons.check_rounded,
+                          size: 19, color: kAccent)
+                      : null,
+                  onTap: () async {
+                    Navigator.of(sheetCtx).pop();
+                    if (p == cur) return;
+                    await PlaybackPrefs.instance.setLinePref(p);
+                    // 偏好改了，详情页已缓存的线路顺序作废。
+                    // 这里不主动刷新页面：用户从「我的」返回时，
+                    // 详情页本就会重新取 sourcesByCn 并重排。
                   },
                 ),
               const SizedBox(height: 8),

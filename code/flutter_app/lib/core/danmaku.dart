@@ -77,16 +77,20 @@ class DanmakuApi {
   /// 失败一律返回空列表而不是抛异常：弹幕是锦上添花的功能，
   /// 拉不到不能连累正常播放，也不能在播放页弹错误提示。
   Future<List<DanmakuItem>> fetch({
-    required int dramaId,
+    required String dramaId,
     required int episode,
     String host = 'http://juziapp.hzhcbkj.cn',
   }) async {
-    if (dramaId <= 0 || episode <= 0) return const [];
+    // 弹幕池是按「橘汁的数字 movieId」索引的。
+    // kanju 的 id 是 `av_xxx` 长串，换成数字必然拿不到，直接跳过，
+    // 免得发一个注定 404 的请求出去。
+    final mid = int.tryParse(dramaId);
+    if (mid == null || mid <= 0 || episode <= 0) return const [];
 
-    final key = '$host|$dramaId|$episode';
+    final key = '$host|$mid|$episode';
     final cached = _cache[key];
     if (cached != null) {
-      debugPrint('[DM] cache hit $dramaId/$episode (${cached.length})');
+      debugPrint('[DM] cache hit $mid/$episode (${cached.length})');
       return cached;
     }
 
@@ -96,7 +100,7 @@ class DanmakuApi {
         // 一次拉全量：danmuEnd 给足够大的值，避免按 10 分钟分段请求。
         // 实测一集 41 分钟的弹幕总量也就几十条，全量拉取完全可接受。
         queryParameters: {
-          'movieId': '$dramaId',
+          'movieId': '$mid',
           'movieKey': '$episode',
           'danmuStart': '0',
           'danmuEnd': '999999',
@@ -109,13 +113,13 @@ class DanmakuApi {
 
       final raw = resp.data ?? '';
       if (resp.statusCode != 200 || raw.isEmpty) {
-        debugPrint('[DM] http ${resp.statusCode} drama=$dramaId ep=$episode');
+        debugPrint('[DM] http ${resp.statusCode} drama=$mid ep=$episode');
         return const [];
       }
 
       final list = _parse(raw);
       _cache[key] = list;
-      debugPrint('[DM] loaded $dramaId/$episode -> ${list.length} 条');
+      debugPrint('[DM] loaded $mid/$episode -> ${list.length} 条');
       return list;
     } catch (e) {
       debugPrint('[DM] fetch failed drama=$dramaId ep=$episode: $e');

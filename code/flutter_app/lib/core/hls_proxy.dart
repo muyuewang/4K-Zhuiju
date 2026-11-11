@@ -41,6 +41,26 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
+/// 判断一个 URL 是不是 HLS 清单。
+///
+/// **不能只看 `Uri.path.endsWith('.m3u8')`**：橘汁直播的取址接口返回的是
+///
+///   `http://110.42.52.180:6688/zb/cctv.php?token=..&id=cctv1&zy.m3u8`
+///
+/// 这里的 path 是 `/zb/cctv.php`，`.m3u8` 落在 **query** 里（而且是个
+/// 无值的键 `zy.m3u8`）。旧判断只认 path，于是这类地址被当成「不是 m3u8」
+/// 原样放行，代理完全不接管；而它们的清单里分片又是相对地址，桌面端的
+/// Media Foundation 自己拼会失败——表现就是直播全部「无法播放」。
+///
+/// 这里放宽到「path 或整个 URL 里出现 .m3u8」，mp4 直链不会误判
+/// （mp4 路径里不含 m3u8）。
+bool looksLikeM3u8(String url) {
+  final u = Uri.tryParse(url);
+  if (u == null) return false;
+  if (u.path.toLowerCase().endsWith('.m3u8')) return true;
+  return url.toLowerCase().contains('.m3u8');
+}
+
 /// 一个播放会话：清单地址 + 已展开的分片表。
 class _Session {
   _Session(this.playlistUrl);
@@ -79,8 +99,7 @@ class HlsProxy {
   /// 退回后行为等同改造前——BL 这类绝对地址的源照样能播。
   Future<String> wrap(String url) async {
     if (!url.startsWith('http')) return url;
-    final path = Uri.tryParse(url)?.path.toLowerCase() ?? '';
-    if (!path.endsWith('.m3u8')) return url;
+    if (!looksLikeM3u8(url)) return url;
 
     try {
       final port = await _ensureStarted();

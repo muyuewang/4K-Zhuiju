@@ -7,27 +7,36 @@ import '../core/api.dart';
 import '../core/layout.dart';
 import '../core/models.dart';
 import '../core/search_history.dart';
+import '../core/source/data_source.dart';
+import '../core/source/registry.dart';
+import '../core/source/zhuiju_source.dart';
 import '../widgets/common.dart';
+import '../widgets/feed_view.dart';
 import '../widgets/tv_focus.dart';
 import '../theme.dart';
 import 'detail_page.dart';
 import '../core/tokens.dart';
 
-/// typeId1 实测有效值（20-26）
+/// 分类项。
+///
+/// 保留这个类只是为了兼容既有测试（tv_home_layout_test 会遍历 kCategories
+/// 检查每种分类的布局）。运行时不再用它 —— 真正的分类来自当前数据源，
+/// 见 [SourceRegistry.now].categories，因为不同源的分类体系完全不同：
+/// 橘汁是 typeId1 = 20/21/22…，kanju 是 content_kind = movie/series…
 class Category {
   final String id;
   final String name;
   const Category(this.id, this.name);
 }
 
-const List<Category> kCategories = [
-  Category('', '推荐'),
-  Category('20', '电影'),
-  Category('21', '电视剧'),
-  Category('22', '综艺'),
-  Category('23', '动漫'),
-  Category('24', '短剧'),
-  Category('26', '其他'),
+/// 橘汁频道快照，仅测试与兼容用。
+///
+/// 直接从 [kZhuijuCategories] 派生，不再手抄一份：v1.9.0 补「直播 /
+/// Netflix / 漫剧」时这份快照忘了同步，`tv_home_layout_test` 遍历旧列表
+/// 去断言「其他」这个已经不存在的频道，整套测试直接红。改成派生后，
+/// 以后加减频道测试自动跟上。
+final List<Category> kCategories = [
+  for (final c in kZhuijuCategories) Category(c.id, c.name),
 ];
 
 /// 热门搜索词（写死的兜底）
@@ -62,10 +71,31 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage>
     with SingleTickerProviderStateMixin {
-  late final TabController _tab =
-      TabController(length: kCategories.length, vsync: this);
+  /// 当前数据源的分类。换源后条数会变（橘汁 7 个、kanju 7 个但内容不同），
+  /// 所以 TabController 也必须跟着重建，不能是 late final。
+  List<SourceCategory> get _cats => SourceRegistry.instance.now.categories;
+
+  late TabController _tab = TabController(length: _cats.length, vsync: this);
 
   final Map<int, GlobalKey<PagedGridState>> _keys = {};
+
+  /// 榜单视图的 key。「推荐」Tab 在支持榜单的源上不走 PagedGrid，
+  /// 而是走 FeedView（多分区编排流），刷新要单独找它的 State。
+  final Map<int, GlobalKey<FeedViewState>> _feedKeys = {};
+
+  /// 当前源是否支持榜单流（kanju 有、橘汁没有）
+  bool get _hasFeed => SourceRegistry.instance.now is SectionedFeed;
+
+  /// 第 [i] 个 Tab 是否该走榜单视图。
+  ///
+  /// 只有「推荐」（分类 id 为空）走榜单——其余分类是真正的
+  /// content_kind 筛选，服务端给的是扁平列表，用榜单区反而更绕。
+  bool _isFeedTab(int i) {
+    if (!_hasFeed) return false;
+    final cats = _cats;
+    if (i >= cats.length) return false;
+    return cats[i].id.isEmpty;
+  }
 
   /// 当前 Tab 下标。TV 下要靠它决定「哪个网格的第一张卡拿初始焦点」：
   /// TabBarView 会把相邻页一起留在树上，若每个网格都 autofocus，
@@ -83,6 +113,28 @@ class _HomePageState extends State<HomePage>
   @override
   void initState() {
     super.initState();
+    _tab.addListener(_onTabChanged);
+    SourceRegistry.instance.current.addListener(_onSourceChanged);
+  }
+
+  /// 切源后必须做三件事，少一件就会串源：
+  ///   1. 重建 TabController（分类条数/名字都可能变）
+  ///   2. 把所有网格的 key 换掉，强制丢弃上一源的列表与页码
+  ///   3. 下标归零，避免停在超出新分类范围的 Tab 上
+  void _onSourceChanged() {
+    if (!mounted) return;
+    _tab.removeListener(_onTabChanged);
+    _tab.dispose();
+
+    setState(() {
+      _tabIndex = 0;
+      _visited
+        ..clear()
+        ..add(0);
+      _keys.clear();
+      _feedKeys.clear();
+      _tab = TabController(length: _cats.length, vsync: this);
+    });
     _tab.addListener(_onTabChanged);
   }
 
@@ -106,12 +158,19 @@ class _HomePageState extends State<HomePage>
   void dispose() {
     _tab.removeListener(_onTabChanged);
     _tab.dispose();
+    SourceRegistry.instance.current.removeListener(_onSourceChanged);
     super.dispose();
   }
 
   void _open(Drama d) {
+    // 按条目自己的来源打开详情：用户可能刚切了源，但列表里这张卡
+    // 还是旧源的结果，用「当前源」去查必然 404。
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => DetailPage(dramaId: d.id, title: d.name),
+      builder: (_) => DetailPage(
+        dramaId: d.id,
+        title: d.name,
+        sourceId: d.sourceId.isEmpty ? SourceRegistry.instance.now.id : d.sourceId,
+      ),
     ));
   }
 
@@ -120,23 +179,55 @@ class _HomePageState extends State<HomePage>
     final injected = widget.debugLoader;
     if (injected != null) return injected(tabIndex, page);
 
-    final c = kCategories[tabIndex];
+    final cats = _cats;
+    if (tabIndex >= cats.length) return Future.value(const <Drama>[]);
+    final c = cats[tabIndex];
+    final src = SourceRegistry.instance.now;
     if (c.id.isEmpty) {
-      // 推荐 = 搜索接口空关键词（实测返回全量热门）
-      return ZhuijuApi.instance.search('', page: page);
+      // 推荐 = 空关键词，两个源的语义一致（给我热门）
+      return src.search('', page: page);
     }
-    return ZhuijuApi.instance.category(c.id, page: page);
+    return src.category(c.id, page: page);
   }
 
   /// 刷新当前 Tab（TV 的刷新按钮用）
   ///
-  /// 复用 PagedGrid 的 refresh()：清空列表、页码归 1、作废在飞的旧请求。
   /// 只刷当前 Tab —— 把 7 个分类全部重新请求一遍既慢又浪费流量。
+  /// 榜单 Tab 与网格 Tab 是两种 State，要分别找。
   void _refreshCurrent() {
+    if (_isFeedTab(_tabIndex)) {
+      _feedKeys[_tabIndex]?.currentState?.refresh();
+      return;
+    }
     final key = _keys[_tabIndex];
     final state = key?.currentState;
     if (state == null) return;
     state.refresh();
+  }
+
+  /// 构建第 [i] 个 Tab 的内容：榜单或分页网格
+  ///
+  /// 两个视图都实现 refresh()，但类型不同，所以调用方各拿各的 key。
+  /// [padding] 只对网格生效——榜单要贴边横向滚动，左右留白由
+  /// FeedView 内部给每一行单独加，塞进外层 padding 会把滚动截断。
+  Widget _tabBody(int i, {required EdgeInsets padding}) {
+    if (_isFeedTab(i)) {
+      final key = _feedKeys.putIfAbsent(i, () => GlobalKey<FeedViewState>());
+      return FeedView(
+        key: key,
+        loader: feedLoaderOf(SourceRegistry.instance.now),
+        onTap: _open,
+        autoFocusFirst: i == _tabIndex,
+      );
+    }
+    final key = _keys.putIfAbsent(i, () => GlobalKey<PagedGridState>());
+    return PagedGrid(
+      key: key,
+      loader: (p) => _loader(i, p),
+      onTap: _open,
+      autoFocusFirst: i == _tabIndex,
+      padding: padding,
+    );
   }
 
   @override
@@ -157,7 +248,7 @@ class _HomePageState extends State<HomePage>
           isScrollable: true,
           tabAlignment: TabAlignment.start,
           dividerColor: Colors.transparent,
-          tabs: kCategories.map((e) => Tab(text: e.name)).toList(),
+          tabs: _cats.map((e) => Tab(text: e.name)).toList(),
         ),
         actions: [
           IconButton(
@@ -172,13 +263,12 @@ class _HomePageState extends State<HomePage>
       ),
       body: TabBarView(
         controller: _tab,
-        children: List.generate(kCategories.length, (i) {
-          final key = _keys.putIfAbsent(i, () => GlobalKey<PagedGridState>());
-          return PagedGrid(
-            key: key,
-            loader: (p) => _loader(i, p),
-            onTap: _open,
-            autoFocusFirst: i == _tabIndex,
+        children: List.generate(_cats.length, (i) {
+          // 榜单 Tab 的左右留白交给 FeedView 自己控制（它要贴边滚动），
+          // 网格 Tab 沿用原来的内边距。
+          return _tabBody(
+            i,
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
           );
         }),
       ),
@@ -206,14 +296,12 @@ class _HomePageState extends State<HomePage>
             Expanded(
               child: IndexedStack(
                 index: _tabIndex,
-                children: List.generate(kCategories.length, (i) {
+                children: List.generate(_cats.length, (i) {
                   // 没访问过的分类不构建：IndexedStack 会实例化所有
                   // children，7 个分类等于开机并发 7 个请求。
                   if (!_visited.contains(i)) {
                     return const SizedBox.shrink();
                   }
-                  final key =
-                      _keys.putIfAbsent(i, () => GlobalKey<PagedGridState>());
                   return ExcludeFocus(
                     // 非当前分类必须摘掉焦点子树：IndexedStack 不绘制
                     // 非当前页，但焦点系统不认「看不见」，遥控器会走进
@@ -221,11 +309,8 @@ class _HomePageState extends State<HomePage>
                     excluding: i != _tabIndex,
                     child: TickerMode(
                       enabled: i == _tabIndex,
-                      child: PagedGrid(
-                        key: key,
-                        loader: (p) => _loader(i, p),
-                        onTap: _open,
-                        autoFocusFirst: i == _tabIndex,
+                      child: _tabBody(
+                        i,
                         padding: const EdgeInsets.fromLTRB(6, 8, 24, 28),
                       ),
                     ),
@@ -261,9 +346,9 @@ class _HomePageState extends State<HomePage>
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  for (var i = 0; i < kCategories.length; i++) ...[
+                  for (var i = 0; i < _cats.length; i++) ...[
                     _tvChannelChip(context, i),
-                    if (i != kCategories.length - 1)
+                    if (i != _cats.length - 1)
                       const SizedBox(width: 10),
                   ],
                 ],
@@ -302,7 +387,7 @@ class _HomePageState extends State<HomePage>
   /// 明显的明度差，不能只靠一圈细边区分。
   Widget _tvChannelChip(BuildContext context, int i) {
     final active = i == _tabIndex;
-    final label = kCategories[i].name;
+    final label = _cats[i].name;
     final body = GestureDetector(
       onTap: () => _selectCategory(i),
       behavior: HitTestBehavior.opaque,
@@ -391,7 +476,9 @@ class _SearchPageState extends State<SearchPage> {
       _err = null;
     });
     try {
-      final r = await ZhuijuApi.instance.search(q);
+      // 走当前数据源：两个源的搜索接口、签名、返回结构完全不同，
+      // 页面不该知道这些差异，也不该在切源后还打老源的接口。
+      final r = await SourceRegistry.instance.now.search(q);
       if (!mounted || seq != _seq) return;
       setState(() {
         _result = r;
@@ -498,7 +585,14 @@ class _SearchPageState extends State<SearchPage> {
           return DramaCard(
             drama: d,
             onTap: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => DetailPage(dramaId: d.id, title: d.name),
+              builder: (_) => DetailPage(
+                dramaId: d.id,
+                title: d.name,
+                // 搜索结果有来源标记就按标记走，避免搜索中途切源后打错源
+                sourceId: d.sourceId.isEmpty
+                    ? SourceRegistry.instance.now.id
+                    : d.sourceId,
+              ),
             )),
             // 搜索结果列表没有 Tab 并存问题，第一张可直接拿焦点
             autofocus: i == 0,

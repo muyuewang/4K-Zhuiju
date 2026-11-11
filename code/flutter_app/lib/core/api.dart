@@ -43,8 +43,10 @@ class ZhuijuApi {
   static const String vApp = '3070';
 
   late final Dio _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 12),
-    receiveTimeout: const Duration(seconds: 25),
+    // 收紧原因见 [_post] 的 deadline 注释：单请求最坏耗时会被重试放大，
+    // 12s+25s 叠 3 次能拖到 111s，期间连接全被占着。
+    connectTimeout: const Duration(seconds: 8),
+    receiveTimeout: const Duration(seconds: 15),
     responseType: ResponseType.bytes,
     validateStatus: (_) => true,
   ));
@@ -126,15 +128,28 @@ class ZhuijuApi {
   /// 业务错误（code != 200）不重试——那是服务端明确拒绝，重试没意义。
   Future<Uint8List> _post(String path, Map<String, String> params) async {
     const maxAttempt = 3;
+    // 整条重试链的总期限。
+    //
+    // 为什么需要它：界面层的 `.timeout()`（PagedGrid / FeedView 的
+    // requestDeadline）只让**界面**不再等，并不会取消底层这次请求。
+    // 单个请求 8s 连接 + 15s 接收，叠 3 次能拖到 69s 以上；这期间它
+    // 一直占着 Dio 的连接池。用户连点几次换集 / 反复返回首页重刷，
+    // 挂起的请求越积越多，连接池被占满，之后的请求只能排队 ——
+    // 表现就是「换集出不来 → 列表永久转圈 → 杀掉重开就好」。
+    // 有了总期限，超时后立刻把异常抛回，让连接尽早释放。
+    final deadline = DateTime.now().add(const Duration(seconds: 18));
     Object? lastErr;
 
     for (var attempt = 0; attempt < maxAttempt; attempt++) {
       if (attempt > 0) {
+        if (DateTime.now().isAfter(deadline)) break;
         // 0.4s → 1.2s，短退避即可；用户还在等页面出来
         await Future<void>.delayed(Duration(milliseconds: 400 * attempt * 3));
       }
       try {
-        return await _postOnce(path, params);
+        final remain = deadline.difference(DateTime.now());
+        if (remain <= Duration.zero) break;
+        return await _postOnce(path, params).timeout(remain);
       } on ApiException {
         rethrow; // 业务错误，重试无用
       } catch (e) {
@@ -143,7 +158,8 @@ class ZhuijuApi {
         debugPrint('[API] $path attempt ${attempt + 1}/$maxAttempt failed: $e');
       }
     }
-    throw lastErr!;
+    throw lastErr ??
+        TimeoutException('接口重试超时', const Duration(seconds: 18));
   }
 
   /// 只有连接层问题值得重试；超时/断开/无网络都算
@@ -263,8 +279,14 @@ class ZhuijuApi {
       });
 
   // ---------------- 详情 ----------------
-  Future<DramaDetail> detail(int id) async {
-    final body = await _post('/api/proto/v5/drama/getDetail', {'id': '$id'});
+  /// [id] 统一用字符串入参：上层只认「数据源给的 id」，不关心它是
+  /// protobuf 的 int 还是 kanju 的 `av_` 长串。橘汁这边转回 int。
+  Future<DramaDetail> detail(String id) async {
+    final n = int.tryParse(id);
+    if (n == null) {
+      throw ApiException(-1, '无效的剧集 id：$id');
+    }
+    final body = await _post('/api/proto/v5/drama/getDetail', {'id': '$n'});
     if (body.isEmpty) throw ApiException(200, '详情为空');
     return DramaDetail.fromBytes(body);
   }

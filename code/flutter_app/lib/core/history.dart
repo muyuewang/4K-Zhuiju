@@ -16,11 +16,16 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'models.dart' show idToStr;
+
 /// 一条观看记录
 class WatchRecord {
   /// 剧集 id（详情页唯一键），用于「继续观看」回跳详情页
-  final int dramaId;
+  final String dramaId;
   final String dramaName;
+
+  /// 该条目所属数据源（`zhuiju` / `kanju`），空串按 zhuiju 处理
+  final String sourceId;
 
   /// 当前看到第几集（展示用，如「第3集」）
   final String epLabel;
@@ -49,6 +54,7 @@ class WatchRecord {
     this.path = '',
     this.episode = 0,
     this.cover = '',
+    this.sourceId = '',
     this.positionSec = 0,
     this.durationSec = 0,
     this.updatedAt = 0,
@@ -71,15 +77,16 @@ class WatchRecord {
         'path': path,
         'episode': episode,
         'cover': cover,
+        'sourceId': sourceId,
         'positionSec': positionSec,
         'durationSec': durationSec,
         'updatedAt': updatedAt,
       };
 
   static WatchRecord? fromJson(Map<String, dynamic> m) {
-    final id = (m['dramaId'] as num?)?.toInt() ?? 0;
+    final id = idToStr(m['dramaId']);
     final name = m['dramaName'] as String? ?? '';
-    if (id == 0 && name.isEmpty) return null;
+    if (id.isEmpty && name.isEmpty) return null;
     return WatchRecord(
       dramaId: id,
       dramaName: name,
@@ -88,6 +95,7 @@ class WatchRecord {
       path: m['path'] as String? ?? '',
       episode: (m['episode'] as num?)?.toInt() ?? 0,
       cover: m['cover'] as String? ?? '',
+      sourceId: m['sourceId'] as String? ?? '',
       positionSec: (m['positionSec'] as num?)?.toInt() ?? 0,
       durationSec: (m['durationSec'] as num?)?.toInt() ?? 0,
       updatedAt: (m['updatedAt'] as num?)?.toInt() ?? 0,
@@ -103,6 +111,7 @@ class WatchRecord {
         path: path,
         episode: episode,
         cover: cover,
+        sourceId: sourceId,
         positionSec: positionSec ?? this.positionSec,
         durationSec: durationSec ?? this.durationSec,
         updatedAt: updatedAt ?? this.updatedAt,
@@ -174,8 +183,8 @@ class HistoryStore {
     final item = r.copyWith(updatedAt: now);
     final list = List<WatchRecord>.from(records.value);
     final i = list.indexWhere((e) =>
-        (r.dramaId != 0 && e.dramaId == r.dramaId) ||
-        (r.dramaId == 0 && e.dramaName == r.dramaName));
+        (r.dramaId.isNotEmpty && e.dramaId == r.dramaId) ||
+        (r.dramaId.isEmpty && e.dramaName == r.dramaName));
     if (i >= 0) {
       list.removeAt(i);
     }
@@ -187,15 +196,15 @@ class HistoryStore {
 
   /// 只更新进度（播放过程中调用，节流后写盘）
   void updateProgress({
-    required int dramaId,
+    required String dramaId,
     required String dramaName,
     required int positionSec,
     required int durationSec,
   }) {
     final list = List<WatchRecord>.from(records.value);
     final i = list.indexWhere((e) =>
-        (dramaId != 0 && e.dramaId == dramaId) ||
-        (dramaId == 0 && e.dramaName == dramaName));
+        (dramaId.isNotEmpty && e.dramaId == dramaId) ||
+        (dramaId.isEmpty && e.dramaName == dramaName));
     if (i < 0) return;
     // 进度几乎没变就别动，避免每帧都重建列表
     final old = list[i];
@@ -213,11 +222,11 @@ class HistoryStore {
     _scheduleSave();
   }
 
-  void remove(int dramaId, String dramaName) {
+  void remove(String dramaId, String dramaName) {
     final list = List<WatchRecord>.from(records.value)
       ..removeWhere((e) =>
-          (dramaId != 0 && e.dramaId == dramaId) ||
-          (dramaId == 0 && e.dramaName == dramaName));
+          (dramaId.isNotEmpty && e.dramaId == dramaId) ||
+          (dramaId.isEmpty && e.dramaName == dramaName));
     records.value = list;
     _scheduleSave();
   }

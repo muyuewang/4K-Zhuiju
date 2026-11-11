@@ -84,6 +84,8 @@ class HistoryPage extends StatelessWidget {
           builder: (_) => DetailPage(
             dramaId: r.dramaId,
             title: r.dramaName,
+            // 按记录自己的来源打开：切源后旧记录仍能正确解析
+            sourceId: r.sourceId,
             resumeEpisode: r.episode,
             resumeSource: r.source,
             resumeSec: r.positionSec,

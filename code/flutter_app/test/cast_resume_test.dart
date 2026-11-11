@@ -73,7 +73,7 @@ void main() {
   group('续播数据契约', () {
     test('观看记录序列化往返保住集数、源和进度', () {
       final r = WatchRecord(
-        dramaId: 12345,
+        dramaId: '12345',
         dramaName: '测试剧',
         epLabel: '第7集',
         source: 'bfzym3u8',
@@ -96,12 +96,12 @@ void main() {
     });
 
     test('详情页默认不自动续播，带集数才续播', () {
-      const plain = DetailPage(dramaId: 1, title: '片名');
+      const plain = DetailPage(dramaId: '1', title: '片名');
       expect(plain.wantsResume, isFalse);
       expect(plain.resumeSec, 0);
 
       const resume = DetailPage(
-        dramaId: 1,
+        dramaId: '1',
         title: '片名',
         resumeEpisode: 7,
         resumeSource: 'bfzym3u8',
@@ -115,7 +115,7 @@ void main() {
     test('播放页默认从头播，续播页带起始秒数', () {
       // DramaVideo 必填项，构造一条最小可用数据即可
       final v = DramaVideo(
-        id: 1,
+        id: '1',
         title: '第7集',
         path: 'https://example.com/7/index.m3u8',
         source: 'bfzym3u8',

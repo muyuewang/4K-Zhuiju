@@ -8,7 +8,9 @@ import 'core/download.dart';
 import 'core/favorites.dart';
 import 'core/history.dart';
 import 'core/layout.dart';
+import 'core/playback_prefs.dart';
 import 'core/search_history.dart';
+import 'core/source/registry.dart';
 import 'core/theme_settings.dart';
 import 'core/tv.dart';
 import 'core/version.dart';
@@ -51,6 +53,23 @@ void main() {
 }
 
 Future<void> _restoreInBackground() async {
+  // 数据源放最前面：它决定首页有几个 Tab、每个 Tab 拉哪个接口。
+  // 晚于首页构建也没关系（切源时会重建 Tab），但越早读到越好——
+  // 否则选了 kanju 的用户开机总要先闪一下橘汁的分类条。
+  // 它只读一个 SharedPreferences 字符串，比下载索引便宜得多。
+  try {
+    await SourceRegistry.instance.restore();
+  } catch (e) {
+    debugPrint('[BOOT] data source restore failed: $e');
+  }
+  // 线路偏好紧跟数据源：它决定详情页默认高亮哪条线路。
+  // 只读一个字符串，很便宜，但必须早于第一次进详情页，
+  // 否则用户会先看到「官方优先」的默认值再跳变一次。
+  try {
+    await PlaybackPrefs.instance.restore();
+  } catch (e) {
+    debugPrint('[BOOT] playback prefs restore failed: $e');
+  }
   // 顺序执行而不是并发：两者都要读外部存储，并发只会互相抢 IO，
   // 而且下载索引更大，先把它读出来，界面（首页/我的）就能先有内容。
   try {
