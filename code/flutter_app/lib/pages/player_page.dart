@@ -133,8 +133,19 @@ class _PlayerPageState extends State<PlayerPage> {
   String _tip = '';
   bool _showCtrl = true;
 
-  /// 全屏（横屏沉浸式）
+  /// 全屏
   bool _fullscreen = false;
+
+  /// 全屏方向：true = 竖屏全屏，false = 横屏全屏
+  ///
+  /// 为什么要两档：竖屏短剧是 9:16，锁横屏后画面只占中间窄窄一条，
+  /// 两侧全黑，实际可视面积反而比竖屏更小——用户的原话是
+  /// 「横屏比例都缩小了、观影体验不好」。B 站等主流 App 都有
+  /// 「竖屏全屏」这一档，专给竖屏内容用。
+  ///
+  /// 进入全屏时会按视频自身宽高比自动选一个合适的初值（见
+  /// [_pickFullscreenPortrait]），用户也可以手动切。
+  bool _fullscreenPortrait = false;
 
   late DramaVideo _cur = widget.video;
 
@@ -144,6 +155,18 @@ class _PlayerPageState extends State<PlayerPage> {
   /// 全屏右侧面板：选集 / 换源（互斥）
   bool _showEpisodes = false;
   bool _showSources = false;
+
+  /// 选集面板的批量下载模式
+  ///
+  /// 一部剧几十集，想存到本地得一集一集点下载，还要来回切集去解析地址——
+  /// 用户反馈「一个个点太麻烦」。开启后选集格子变成复选框，勾完一次性
+  /// 全部入队，地址在后台逐集解析（见 [_batchDownload]）。
+  ///
+  /// 只影响选集网格的点击语义，不影响 [_showEpisodes] 本身的显隐。
+  bool _selectMode = false;
+
+  /// 已勾选的集（用 path 做键：epLabel 可能重复，path 是唯一的）
+  final Set<String> _selected = <String>{};
 
   /// 当前投屏的设备名（null 表示没在投屏）。
   /// 用 Dlna.instance.session 也能查，但它是普通字段不触发重建，
@@ -1149,8 +1172,20 @@ class _PlayerPageState extends State<PlayerPage> {
 
   // ---------------- 全屏 ----------------
 
-  Future<void> _toggleFullscreen() async {
+  /// 进入/退出全屏。
+  ///
+  /// [portrait] 只在**进入**时有用：null 表示按视频比例自动挑
+  /// （竖屏片就竖屏全屏，横屏片就横屏全屏）。退出时忽略它。
+  ///
+  /// 为什么要自动挑：用户点全屏的意图是「把这部片放大看」，
+  /// 而不是「把手机转过来」。竖屏短剧锁成横屏，画面只会变得更小。
+  Future<void> _toggleFullscreen({bool? portrait}) async {
     final next = !_fullscreen;
+
+    if (next) {
+      _fullscreenPortrait = portrait ?? _pickFullscreenPortrait();
+    }
+
     setState(() {
       _fullscreen = next;
       _showCtrl = true;
@@ -1159,9 +1194,32 @@ class _PlayerPageState extends State<PlayerPage> {
         _showSources = false;
       }
     });
-    // 桌面端锁横屏/隐藏系统栏都是无效调用（窗口不会变），
+    // 桌面端锁方向/隐藏系统栏都是无效调用（窗口不会变），
     // 统一交给 platform 层分流，桌面直接 no-op，避免「点了没反应」的错觉。
-    await setFullscreen(next);
+    await setFullscreen(next, portrait: _fullscreenPortrait);
+  }
+
+  /// 按当前视频宽高比判断该进哪种全屏。
+  ///
+  /// 阈值取 1.0（正方形）而不是 9:16：
+  /// 4:3 这类老片、以及带黑边的片源都还应该横屏全屏，
+  /// 只有真正「高比宽长」的竖屏内容才走竖屏全屏。
+  bool _pickFullscreenPortrait() {
+    final c = _ctrl;
+    if (c == null || !c.value.isInitialized) return false;
+    final a = c.value.aspectRatio;
+    return a > 0 && a < 1.0;
+  }
+
+  /// 全屏中切换方向（竖屏 ↔ 横屏），保持全屏状态不变
+  Future<void> _switchFullscreenOrientation() async {
+    if (!_fullscreen) return;
+    final next = !_fullscreenPortrait;
+    setState(() {
+      _fullscreenPortrait = next;
+      _showCtrl = true;
+    });
+    await setFullscreen(true, portrait: next);
   }
 
   Future<void> _restoreOrientation() async {
@@ -1260,6 +1318,10 @@ class _PlayerPageState extends State<PlayerPage> {
         // 把剧集标识带进下载索引：本地播放页靠它拉弹幕
         dramaId: widget.dramaId,
         episode: _cur.episode,
+        // 同剧共用一个目录：downloads/<剧名>/第01集.mp4
+        // 剧名为空时（本地播放等场景）传空串，行为退回原来的平铺方式。
+        group: widget.dramaName,
+        fileBase: _cur.epLabel,
         resolver: () async {
           // 与播放共用同一套解析规则（接口优先、直链兜底），
           // 否则会出现「能播但下载下到的是原站地址/令牌」的割裂。
@@ -1300,6 +1362,117 @@ class _PlayerPageState extends State<PlayerPage> {
       if (t.id == id) return t;
     }
     return null;
+  }
+
+  /// 批量下载已勾选的集数。
+  ///
+  /// 和单集下载的区别不只是「循环调用」：
+  ///
+  /// 1. **地址必须逐集解析**。每集 path 各是一条独立地址，不能复用当前
+  ///    播放的那条——否则整批下下来都是同一集的内容。这里把 `_resolveUrl`
+  ///    包成 resolver 交给下载器，任务自己按需取址。
+  /// 2. **不能在这里同步跑解析**。几十集串行解析要几分钟，界面会像卡死。
+  ///    所以只做「入队」，真正的解析由下载器在各自的 _run 里触发。
+  /// 3. **要能中途取消**。用户勾错一集想停时，简单粗暴地杀掉全部任务比
+  ///    「一集都停不了」要好。这里在进度条上给「停止全部」。
+  Future<void> _batchDownload() async {
+    final eps = _curEpisodes
+        .where((e) => _selected.contains(e.path))
+        .toList(growable: false);
+    if (eps.isEmpty) {
+      _toast('先勾选要下载的集数');
+      return;
+    }
+
+    final r = await _enqueueDownloads(eps);
+
+    if (!mounted) return;
+    setState(() {
+      _selectMode = false;
+      _selected.clear();
+    });
+    _toastBatchResult(r);
+  }
+
+  /// 把若干集逐个入队。
+  ///
+  /// 抽成独立方法是因为有**两个入口**要复用：宽屏侧栏的多选、竖屏底部弹层
+  /// 的多选。两处各自维护自己的一份勾选状态（弹层是独立 route，够不到页面
+  /// 的 setState），但「怎么入队」必须完全一致——不然从弹层下载的和从侧栏
+  /// 下载的会走进不同目录。
+  Future<({int queued, int skipped})> _enqueueDownloads(
+      List<DramaVideo> eps) async {
+    var queued = 0;
+    var skipped = 0;
+    for (final e in eps) {
+      final title = '${widget.dramaName}_${e.epLabel}';
+      final exist = _findTask(title);
+      if (exist != null &&
+          exist.state == DownloadState.done &&
+          (exist.filePath?.isNotEmpty ?? false)) {
+        skipped++;
+        continue;
+      }
+      try {
+        DownloadManager.instance.start(
+          title: title,
+          // 先给个占位地址：真实地址由 resolver 在任务启动时解析。
+          // 下载器读首字节嗅探真实类型，空地址会在 resolver 里被替换。
+          url: e.path,
+          dramaId: widget.dramaId,
+          episode: e.episode,
+          group: widget.dramaName,
+          fileBase: e.epLabel,
+          resolver: () async {
+            final u = await _resolveUrl(e);
+            if (u.isEmpty || !ZhuijuApi.isDirectUrl(u)) {
+              throw Exception('该线路未返回可下载地址');
+            }
+            return u;
+          },
+        );
+        queued++;
+      } catch (err) {
+        debugPrint('[batch-dl] ${e.epLabel} 入队失败：$err');
+      }
+    }
+    return (queued: queued, skipped: skipped);
+  }
+
+  void _toastBatchResult(({int queued, int skipped}) r) {
+    final parts = <String>[];
+    if (r.queued > 0) parts.add('已加入 ${r.queued} 集');
+    if (r.skipped > 0) parts.add('${r.skipped} 集已下载过');
+    _toast(parts.isEmpty
+        ? '没有可加入的集数'
+        : '${parts.join('，')}，可在「我的 → 下载管理」查看');
+  }
+
+  void _toggleSelectMode() {
+    setState(() {
+      _selectMode = !_selectMode;
+      if (!_selectMode) _selected.clear();
+    });
+  }
+
+  void _toggleEpisodeSelected(DramaVideo e) {
+    setState(() {
+      if (!_selected.remove(e.path)) _selected.add(e.path);
+    });
+  }
+
+  /// 全选 / 全不选
+  void _toggleSelectAll() {
+    setState(() {
+      final all = _curEpisodes.map((e) => e.path).toList(growable: false);
+      if (_selected.length == all.length) {
+        _selected.clear();
+      } else {
+        _selected
+          ..clear()
+          ..addAll(all);
+      }
+    });
   }
 
   /// 当前这一集在不同源下的候选（每个源取一条，已排除当前源与试过的源）
@@ -1398,7 +1571,24 @@ class _PlayerPageState extends State<PlayerPage> {
         //
         // 全屏模式那套顶部栏一直是显式 Colors.white，所以没出问题；
         // 窗口模式这处漏了。background 与 foreground 必须成对声明。
+        //
+        // 【但只写 foregroundColor 不够，图标仍然是近黑的】
+        //
+        // AppBar 内部解析图标颜色时，取值顺序是
+        //   widget.iconTheme ?? appBarTheme.iconTheme ?? defaults.iconTheme(color: foregroundColor)
+        // 也就是说**主题里若有 iconTheme，foregroundColor 会被直接跳过**。
+        // 本项目 theme.dart 恰好钉了 `appBarTheme.iconTheme = onSurface`，
+        // 于是右侧投屏/选集/下载/技术信息四个图标始终拿 #14161A，
+        // 压在这条黑底栏上等于隐形。标题当时能看见，是因为另外写了
+        // TextStyle(color: white)；返回箭头则是 IconButton 自己另走一条路径。
+        //
+        // 实测（test/appbar_icon_probe_test.dart）：
+        //   仅 foregroundColor        → leading=ff14161a actions=ff14161a
+        //   再加 iconTheme/actionsIconTheme → 两者都是 ffffffff
+        // 所以必须把 iconTheme 与 actionsIconTheme 一并显式声明。
         foregroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Colors.white),
+        actionsIconTheme: const IconThemeData(color: Colors.white),
         // 显式接管 leading：默认 BackButton 的 tooltip 是英文 "Back"
         // （项目没配 localizationsDelegates，Material 用英文兜底）。
         // 既然要改，就把中文 tooltip 一并补上。
@@ -1902,6 +2092,19 @@ class _PlayerPageState extends State<PlayerPage> {
                     _showCtrl = true;
                   }),
                 ),
+              // 竖屏/横屏全屏切换。只在移动端出现：桌面窗口全屏没有
+              // 方向概念，摆个按钮点下去什么也不会变，反而让人困惑。
+              //
+              // 图标表达「切过去会变成什么」，而不是「当前是什么」：
+              // 现在是横屏时显示「手机竖屏」图标，提示点了会变竖屏。
+              if (isMobile)
+                _topAction(
+                  icon: _fullscreenPortrait
+                      ? Icons.stay_current_landscape_rounded
+                      : Icons.stay_current_portrait_rounded,
+                  label: _fullscreenPortrait ? '横屏' : '竖屏',
+                  onTap: _switchFullscreenOrientation,
+                ),
             ],
           ),
         ),
@@ -1953,6 +2156,21 @@ class _PlayerPageState extends State<PlayerPage> {
                               color: Colors.white,
                               fontWeight: FontWeight.w600)),
                       const Spacer(),
+                      // 批量入口只挂在选集面板上。换源面板没有「多选」语义，
+                      // 摆个批量按钮上去只会让人误以为能批量换源。
+                      if (_showEpisodes)
+                        TextButton(
+                          onPressed: _toggleSelectMode,
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(0, 32),
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            foregroundColor: _selectMode ? kAccent : Colors.white70,
+                          ),
+                          child: Text(
+                            _selectMode ? '取消' : '批量',
+                            style: const TextStyle(fontSize: Ts.bodySm),
+                          ),
+                        ),
                       IconButton(
                         iconSize: 18,
                         color: Colors.white70,
@@ -1960,15 +2178,98 @@ class _PlayerPageState extends State<PlayerPage> {
                         onPressed: () => setState(() {
                           _showEpisodes = false;
                           _showSources = false;
+                          _selectMode = false;
+                          _selected.clear();
                         }),
                       ),
                     ],
                   ),
                 ),
                 Expanded(child: child),
+                // 批量下载操作条。只在选集面板 + 批量模式时出现：
+                // 换源面板没有「多选」的概念，摆上去反而干扰。
+                if (_showEpisodes && _selectMode) _batchBar(),
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// 选集面板底部的批量下载操作条。
+  ///
+  /// 单独做成一条而不是塞进标题栏：标题栏右侧已经挤了「批量」和「关闭」，
+  /// 再塞「全选 / 已选 N 集 / 下载」会把这排放到溢出。底部一条横向铺开，
+  /// 拇指够得着，也不遮住选集网格。
+  Widget _batchBar() {
+    final total = _curEpisodes.length;
+    final n = _selected.length;
+    final allPicked = total > 0 && n == total;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        border: Border(
+          top: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            // 全选/全不选：一季几十集时，「全选再取消两三集」比「一集集勾」
+            // 快得多，所以这个按钮是批量流程的主力入口。
+            TextButton(
+              onPressed: total == 0 ? null : _toggleSelectAll,
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 34),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                foregroundColor: Colors.white,
+              ),
+              child: Text(
+                allPicked ? '全不选' : '全选',
+                style: const TextStyle(fontSize: Ts.bodySm),
+              ),
+            ),
+            const SizedBox(width: 2),
+            Expanded(
+              child: Text(
+                total == 0 ? '暂无可下载集数' : '已选 $n / $total 集',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: Ts.bodySm,
+                  // 一集没选时把提示压暗，别让人以为按钮坏了
+                  color: n == 0 ? Colors.white38 : Colors.white70,
+                ),
+              ),
+            ),
+            FilledButton(
+              // 0 集时置灰而不是弹 toast：批量栏一直摆在屏幕上，
+              // 按下去没反应比按钮变灰更让人困惑。
+              onPressed: n == 0 ? null : _batchDownload,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(0, 34),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                backgroundColor: kAccent,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.white12,
+                disabledForegroundColor: Colors.white38,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.download_rounded, size: 16),
+                  const SizedBox(width: 5),
+                  Text('下载${n > 0 ? ' $n 集' : ''}',
+                      style: const TextStyle(fontSize: Ts.bodySm)),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1989,30 +2290,66 @@ class _PlayerPageState extends State<PlayerPage> {
       itemBuilder: (c, i) {
         final e = eps[i];
         final active = e.path == _cur.path;
+        final picked = _selected.contains(e.path);
+
+        // 批量模式下点击语义完全变掉：不再是「播这一集」而是「勾这一集」。
+        // 混着来会很危险——用户想勾选，结果一跳转就把选择面板关了。
         final body = GestureDetector(
-          onTap: () => _playEpisode(e),
+          onTap: _selectMode
+              ? () => _toggleEpisodeSelected(e)
+              : () => _playEpisode(e),
+          // 批量模式用长按也能勾选，手不用精确点在格子上
+          onLongPress: _selectMode ? null : () {
+            setState(() {
+              _selectMode = true;
+              _selected
+                ..clear()
+                ..add(e.path);
+            });
+          },
           child: Container(
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: active ? kAccent : Colors.white12,
+              // 勾中的格子用主色描边 + 淡底，和「正在播放」的实心橙区分开：
+              // 两个都填满的话，用户分不清哪个是正在播、哪个只是被勾了。
+              color: picked
+                  ? kAccent.withValues(alpha: 0.22)
+                  : (active ? kAccent : Colors.white12),
               borderRadius: BorderRadius.circular(R.sm),
+              border: picked ? Border.all(color: kAccent, width: 1.4) : null,
             ),
-            child: Text(
-              e.epLabel,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: tv ? Ts.bodyLg : Ts.bodySm,
-                color: active ? Colors.white : Colors.white70,
-                fontWeight: active ? FontWeight.w700 : FontWeight.w400,
-              ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Text(
+                  e.epLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: tv ? Ts.bodyLg : Ts.bodySm,
+                    color: (active || picked) ? Colors.white : Colors.white70,
+                    fontWeight: (active || picked)
+                        ? FontWeight.w700
+                        : FontWeight.w400,
+                  ),
+                ),
+                if (picked)
+                  const Positioned(
+                    top: 2,
+                    right: 3,
+                    child: Icon(Icons.check_circle_rounded,
+                        size: 12, color: kAccent),
+                  ),
+              ],
             ),
           ),
         );
         if (!tv) return body;
         return TvFocus(
           radius: 7,
-          onActivate: () => _playEpisode(e),
+          onActivate: _selectMode
+              ? () => _toggleEpisodeSelected(e)
+              : () => _playEpisode(e),
           child: body,
         );
       },
@@ -2145,8 +2482,15 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   /// 竖屏选集：底部弹层，复用同一份剧集数据
+  ///
+  /// 弹层里也支持多选下载。勾选状态用 StatefulBuilder 的局部变量维护：
+  /// 弹层是独立 route，勾选时的 setState 够不到页面状态，如果硬塞进页面
+  /// 字段，就得在每次开合时手动清理，还容易和侧栏那份 `_selected` 串味。
   void _openEpisodeSheet(BuildContext context) {
     final eps = _curEpisodes;
+    var selectMode = false;
+    final picked = <String>{};
+
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: kVideoCard,
@@ -2156,70 +2500,244 @@ class _PlayerPageState extends State<PlayerPage> {
       // 对比度极低，整个弹层看起来只有格子在、字全没了。
       builder: (ctx) => Theme(
         data: kVideoTheme,
-        child: SafeArea(
-          child: SizedBox(
-            height: MediaQuery.of(ctx).size.height * 0.55,
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 14, 8, 6),
-                  child: Row(
-                    children: [
-                      Text('选集（共 ${eps.length} 集）',
-                          style: const TextStyle(
-                              fontSize: Ts.subtitle,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white)),
-                      const Spacer(),
-                      IconButton(
-                        icon: const Icon(Icons.close_rounded, size: 20),
-                        color: Colors.white70,
-                        onPressed: () => Navigator.pop(ctx),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: GridView.builder(
-                    padding: const EdgeInsets.fromLTRB(14, 4, 14, 16),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 4,
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
-                      childAspectRatio: 2.1,
-                    ),
-                    itemCount: eps.length,
-                    itemBuilder: (c, i) {
-                      final e = eps[i];
-                      final active = e.path == _cur.path;
-                      return GestureDetector(
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          _playEpisode(e);
-                        },
-                        child: Container(
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: active ? kAccent : kVideoBg,
-                            borderRadius: BorderRadius.circular(R.card),
-                          ),
-                          child: Text(
-                            e.epLabel,
-                            style: TextStyle(
-                              fontSize: Ts.bodySm,
-                              color: active ? Colors.white : Colors.white70,
+        child: StatefulBuilder(
+          builder: (ctx, setSheet) {
+            void toggleMode() => setSheet(() {
+                  selectMode = !selectMode;
+                  if (!selectMode) picked.clear();
+                });
+
+            void toggleOne(DramaVideo e) => setSheet(() {
+                  if (!picked.remove(e.path)) picked.add(e.path);
+                });
+
+            void toggleAll() => setSheet(() {
+                  if (picked.length == eps.length) {
+                    picked.clear();
+                  } else {
+                    picked
+                      ..clear()
+                      ..addAll(eps.map((e) => e.path));
+                  }
+                });
+
+            return SafeArea(
+              child: SizedBox(
+                height: MediaQuery.of(ctx).size.height * 0.55,
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 8, 6),
+                      child: Row(
+                        children: [
+                          Text(
+                              selectMode
+                                  ? '已选 ${picked.length} / ${eps.length} 集'
+                                  : '选集（共 ${eps.length} 集）',
+                              style: const TextStyle(
+                                  fontSize: Ts.subtitle,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white)),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: toggleMode,
+                            style: TextButton.styleFrom(
+                              minimumSize: const Size(0, 32),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 8),
+                              foregroundColor:
+                                  selectMode ? kAccent : Colors.white70,
                             ),
+                            child: Text(selectMode ? '取消' : '批量',
+                                style: const TextStyle(fontSize: Ts.bodySm)),
                           ),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded, size: 20),
+                            color: Colors.white70,
+                            onPressed: () => Navigator.pop(ctx),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: GridView.builder(
+                        padding: const EdgeInsets.fromLTRB(14, 4, 14, 16),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 4,
+                          crossAxisSpacing: 8,
+                          mainAxisSpacing: 8,
+                          childAspectRatio: 2.1,
                         ),
-                      );
-                    },
-                  ),
+                        itemCount: eps.length,
+                        itemBuilder: (c, i) {
+                          final e = eps[i];
+                          final active = e.path == _cur.path;
+                          final on = picked.contains(e.path);
+                          return GestureDetector(
+                            // 多选模式下点格子只勾选、不跳转。混着来会很危险：
+                            // 用户想连勾几集，第一次点就把弹层关掉了。
+                            onTap: selectMode
+                                ? () => toggleOne(e)
+                                : () {
+                                    Navigator.pop(ctx);
+                                    _playEpisode(e);
+                                  },
+                            onLongPress: selectMode
+                                ? null
+                                : () => setSheet(() {
+                                      selectMode = true;
+                                      picked
+                                        ..clear()
+                                        ..add(e.path);
+                                    }),
+                            child: Container(
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: on
+                                    ? kAccent.withValues(alpha: 0.22)
+                                    : (active ? kAccent : kVideoBg),
+                                borderRadius: BorderRadius.circular(R.card),
+                                border: on
+                                    ? Border.all(color: kAccent, width: 1.4)
+                                    : null,
+                              ),
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Text(
+                                    e.epLabel,
+                                    style: TextStyle(
+                                      fontSize: Ts.bodySm,
+                                      color: (active || on)
+                                          ? Colors.white
+                                          : Colors.white70,
+                                      fontWeight: (active || on)
+                                          ? FontWeight.w700
+                                          : FontWeight.w400,
+                                    ),
+                                  ),
+                                  if (on)
+                                    const Positioned(
+                                      top: 2,
+                                      right: 3,
+                                      child: Icon(
+                                          Icons.check_circle_rounded,
+                                          size: 12,
+                                          color: kAccent),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    if (selectMode)
+                      _sheetBatchBar(
+                        total: eps.length,
+                        count: picked.length,
+                        onToggleAll: toggleAll,
+                        onClose: () => setSheet(() {
+                          selectMode = false;
+                          picked.clear();
+                        }),
+                        onDownload: () async {
+                          final list = eps
+                              .where((e) => picked.contains(e.path))
+                              .toList(growable: false);
+                          if (list.isEmpty) return;
+                          final nav = Navigator.of(ctx);
+                          final r = await _enqueueDownloads(list);
+                          nav.pop();
+                          if (!mounted) return;
+                          _toastBatchResult(r);
+                        },
+                      ),
+                  ],
                 ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// 竖屏弹层的批量操作条（与侧栏 `_batchBar` 视觉一致，去掉「取消」以外
+  /// 的差异；弹层的关闭语义是「退出多选」，不是「关掉弹层」）
+  Widget _sheetBatchBar({
+    required int total,
+    required int count,
+    required VoidCallback onToggleAll,
+    required VoidCallback onClose,
+    required VoidCallback onDownload,
+  }) {
+    final allPicked = total > 0 && count == total;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        border: Border(
+          top: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+        ),
+      ),
+      child: Row(
+        children: [
+          TextButton(
+            onPressed: total == 0 ? null : onToggleAll,
+            style: TextButton.styleFrom(
+              minimumSize: const Size(0, 34),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              foregroundColor: Colors.white,
+            ),
+            child: Text(allPicked ? '全不选' : '全选',
+                style: const TextStyle(fontSize: Ts.bodySm)),
+          ),
+          const SizedBox(width: 2),
+          Expanded(
+            child: Text(
+              count == 0 ? '点击格子勾选' : '已选 $count / $total 集',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: Ts.bodySm,
+                color: count == 0 ? Colors.white38 : Colors.white70,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: onClose,
+            style: TextButton.styleFrom(
+              minimumSize: const Size(0, 34),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              foregroundColor: Colors.white70,
+            ),
+            child: const Text('取消', style: TextStyle(fontSize: Ts.bodySm)),
+          ),
+          const SizedBox(width: 4),
+          FilledButton(
+            onPressed: count == 0 ? null : onDownload,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 34),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              backgroundColor: kAccent,
+              foregroundColor: Colors.white,
+              disabledBackgroundColor: Colors.white12,
+              disabledForegroundColor: Colors.white38,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.download_rounded, size: 16),
+                const SizedBox(width: 5),
+                Text('下载${count > 0 ? ' $count 集' : ''}',
+                    style: const TextStyle(fontSize: Ts.bodySm)),
               ],
             ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -2267,6 +2785,12 @@ class _PlayerPageState extends State<PlayerPage> {
         final avail = cons.maxHeight.isFinite
             ? cons.maxHeight
             : MediaQuery.sizeOf(ctx).height;
+        // 这个预算只给**画面**用，不含控制条。
+        //
+        // 控制条在竖屏下已改为独立一行（见 [_videoArea]），它自己会再占
+        // 约 90dp。这里刻意不把它从预算里扣掉：画面是主角，缩小画面来
+        // 换信息区的高度是本末倒置；信息区本来就是可滚动的，
+        // 少这 90dp 只是多滚一下，而画面缩小是持续可见的损失。
         final maxVideoH = avail * 0.62;
         return Column(
           children: [
@@ -2931,28 +3455,32 @@ class _PlayerPageState extends State<PlayerPage> {
             },
           );
 
-    // 控制条浮在视频区域底部（不是另起一块黑色面板）。
-    // 竖屏常显：视频区只占一屏的 62%，下面紧接信息区，没有「沉浸观看」
-    // 的场景；点一下画面就把进度条藏起来，只会让用户以为控制条没了。
-    // 显隐切换留给全屏（[_fullscreenBody]），那才是需要清爽画面的地方。
+    // 控制条浮在画面底部，受 [_showCtrl] 控制显隐 —— 宽屏和竖屏一致。
+    //
+    // 中途试过「竖屏独立占一行、不遮画面」，方向是错的：竖屏画面只有
+    // 一条 16:9，单独占一行等于把 90dp 永久让给控制条，画面反而更小；
+    // 而且用户还得往下滚才能看到进度。参照 B 站的做法——控制条做小、
+    // 压在画面底部，点一下画面整条收起，画面就完整让出来了。
     return Stack(
       alignment: Alignment.bottomCenter,
       children: [
         frame,
-        _floatingControls(c),
+        if (_showCtrl) _floatingControls(c),
       ],
     );
   }
 
-  /// 浮在视频画面底部的控制条。
+  /// 浮在画面底部的控制条（宽屏 / 竖屏共用）。
   ///
-  /// 主流播放器（橘汁 / B站 / 爱奇艺）都把播放控制压在视频区域内：
-  /// 拖进度、倍速、全屏不用离开画面往下滚。原来它被塞进信息区一个
-  /// 独立黑面板里，和画面分家，是竖屏页最明显的违和点。
+  /// 参照 B 站的形态：**压在画面底部、做得小、点一下整条收起**。
   ///
-  /// 渐变背景而不是纯色块：白字在亮画面上也读得清，又不会硬切掉
-  /// 画面底部一条。外层 GestureDetector 吃掉渐变区的点击，否则
-  /// [_gestureLayer] 会把它当成「点画面」而切换显隐。
+  /// 中途试过「竖屏改成独立占一行、不遮画面」，方向是错的：竖屏画面只有
+  /// 一条 16:9，单独占一行等于永久让出 90dp，画面反而更小，看进度还得往下滚。
+  /// 真正的解法是把它做小 + 支持显隐（见 [_videoArea] 里的 `_showCtrl`）。
+  ///
+  /// 渐变而不是纯色块：白字压在亮画面上也读得清，又不会硬切掉画面底部一条。
+  /// 外层 GestureDetector 吃掉点击，否则 [_gestureLayer] 会当成「点画面」
+  /// 而把整条控制条收起——刚点下去就消失。
   Widget _floatingControls(VideoPlayerController c) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -2966,7 +3494,10 @@ class _PlayerPageState extends State<PlayerPage> {
             colors: [Colors.transparent, Colors.black87],
           ),
         ),
-        padding: const EdgeInsets.fromLTRB(8, 18, 8, 2),
+        // 上沿 12dp 留给渐变过渡（让白字和画面自然衔接），下沿 2dp 收口。
+        // 控制条自身已压到 40dp，整条浮层约 54dp —— 原来「进度条一行 +
+        // 按钮一行 + 18dp 过渡」接近 120dp，压在画面上等于挖掉一条。
+        padding: const EdgeInsets.fromLTRB(8, 12, 8, 2),
         child: PlayerControlBar(
           ctrl: c,
           fullscreen: false,

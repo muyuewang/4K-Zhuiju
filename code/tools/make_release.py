@@ -10,15 +10,15 @@ import subprocess
 import tempfile
 
 REPO = "muyuewang/4K-Zhuiju"
-TAG = "v1.10.1"
-NAME = "4K追剧 v1.10.1"
+TAG = "v1.10.2"
+NAME = "4K追剧 v1.10.2"
 
 ROOT = r"C:\Users\fengxin\WorkBuddy\vivos7"
 ASSETS = [
-    (r"dist\v1.10.1\4KZhuiju-v1.10.1-release.apk", "4KZhuiju-v1.10.1-release.apk"),
-    (r"dist\v1.10.1\4KZhuiju-v1.10.1-windows-x64.zip", "4KZhuiju-v1.10.1-windows-x64.zip"),
+    (r"dist\v1.10.2\4KZhuiju-v1.10.2-release.apk", "4KZhuiju-v1.10.2-release.apk"),
+    (r"dist\v1.10.2\4KZhuiju-v1.10.2-windows-x64.zip", "4KZhuiju-v1.10.2-windows-x64.zip"),
 ]
-NOTES = r"dist\v1.10.1\RELEASE_NOTES.md"
+NOTES = r"dist\v1.10.2\RELEASE_NOTES.md"
 PROXY = "http://127.0.0.1:7897"
 API = "https://api.github.com"
 

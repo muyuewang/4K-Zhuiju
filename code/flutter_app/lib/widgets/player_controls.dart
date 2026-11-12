@@ -92,6 +92,14 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
   static const double _speedPanelH = 7 * _rowH + 8;
   static const double _volPanelH = 148;
 
+  /// 单行控制条的高度。
+  ///
+  /// 原先是「进度条 + 42dp 按钮行」，连内外边距约 100dp；压成一行后
+  /// 只有 40dp，压在画面上不再挡内容。下限不能低于 36：IconButton 的
+  /// 点击热区再小就点不准（Material 建议 48 是理想值，这里是「看得见
+  /// 画面」与「点得中」之间的折中，靠 padding 撑到实际热区）。
+  static const double _barH = 40;
+
   /// 换源换了 controller：收起浮层、清掉拖动残留。
   /// 不这么做的话，新 controller 会继承上一个源的「拖动中」状态，
   /// 进度条一直停在旧位置不动，直到用户再拖一次才恢复。
@@ -218,15 +226,63 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
               ],
             );
           },
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _progress(c, total, max, value),
-              SizedBox(
-                height: 42,
-                child: _bar(v, c, shown),
-              ),
-            ],
+          // 【单行】播放/暂停 · 进度 · 时间 · 倍速 · 音量 · 全屏
+          //
+          // 原先是「进度条一行 + 按钮一行」，整体约 100dp。压在画面底部时
+          // 等于把视频挖掉一条，用户反馈「太占地方、挡住画面」。
+          // B 站是全部排在一行里，高度只有 40dp 左右，观感差别很大。
+          //
+          // 窄屏（手机竖屏 ~360dp）放不下这么多按钮：算下来固定部分要 240dp，
+          // 进度条只剩 100dp，拖动会很难受。所以按可用宽度分级——
+          // 窄屏只留「播放/暂停 · 进度 · 时间 · 全屏」，倍速和音量收进全屏，
+          // B 站竖屏也是这个取舍（它的倍速只在全屏里给）。
+          child: SizedBox(
+            height: _barH,
+            child: LayoutBuilder(
+              builder: (ctx, cons) {
+                final roomy = cons.maxWidth >= 400;
+                return Row(
+                  children: [
+                    _iconBtn(
+                      icon: v.isPlaying
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      size: 26,
+                      onTap: () => v.isPlaying ? c.pause() : c.play(),
+                    ),
+                    Expanded(child: _progress(c, total, max, value)),
+                    // 时间放在进度条右侧（B 站的位置）：左边留给滑块起点，
+                    // 手指从最左按下拖动的行程不被文字挤短。
+                    Padding(
+                      padding: const EdgeInsets.only(left: 6, right: 2),
+                      child: Text(
+                        '${_dur(shown)} / ${_dur(v.duration)}',
+                        style: const TextStyle(
+                          fontSize: Ts.caption,
+                          color: Colors.white,
+                          fontWeight: FontWeight.w500,
+                          height: 1.1,
+                        ),
+                      ),
+                    ),
+                    if (roomy) ...[
+                      _speedBtn(_speedOf(v)),
+                      _volumeBtn(_volOf(v)),
+                      ...widget.extraActions,
+                    ],
+                    if (widget.onToggleFullscreen != null)
+                      _iconBtn(
+                        icon: widget.fullscreen
+                            ? Icons.fullscreen_exit_rounded
+                            : Icons.fullscreen_rounded,
+                        size: 24,
+                        tooltip: widget.fullscreen ? '退出全屏' : '全屏',
+                        onTap: widget.onToggleFullscreen!,
+                      ),
+                  ],
+                );
+              },
+            ),
           ),
         );
       },
@@ -253,10 +309,15 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
           enabledThumbRadius: _scrubbing ? 7 : 5,
         ),
         overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+        // 把滑块压到行高中间那一小条：默认 Slider 会按 overlay 半径
+        // 自动留出上下各 14dp 的空白，塞进 40dp 的单行里会顶掉轨迹、
+        // 甚至撑破布局。这里只留 2dp 呼吸位，热区由外层 Expanded 保证。
+        trackShape: const RectangularSliderTrackShape(),
       ),
       child: Slider(
         value: value,
         max: max,
+        padding: const EdgeInsets.symmetric(vertical: 2),
         // onChangeStart 里必须同时把 _scrubbing 置位。
         // 只记 _scrubMs 的话，按下那一帧 _scrubbing 还是 false，
         // value 又回落到 v.position（旧位置），滑块会先弹回旧位置
@@ -285,44 +346,7 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
     );
   }
 
-  // ---------------- 底部一行 ----------------
-
-  Widget _bar(VideoPlayerValue v, VideoPlayerController c, Duration shown) {
-    return Row(
-      children: [
-        const SizedBox(width: 2),
-        _iconBtn(
-          icon: v.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-          size: 30,
-          onTap: () => v.isPlaying ? c.pause() : c.play(),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          '${_dur(shown)} / ${_dur(v.duration)}',
-          style: const TextStyle(
-            fontSize: Ts.body,
-            color: Colors.white,
-            fontWeight: FontWeight.w500,
-            height: 1.1,
-          ),
-        ),
-        const Spacer(),
-        _speedBtn(_speedOf(v)),
-        _volumeBtn(_volOf(v)),
-        ...widget.extraActions,
-        if (widget.onToggleFullscreen != null)
-          _iconBtn(
-            icon: widget.fullscreen
-                ? Icons.fullscreen_exit_rounded
-                : Icons.fullscreen_rounded,
-            size: 24,
-            tooltip: widget.fullscreen ? '退出全屏' : '全屏',
-            onTap: widget.onToggleFullscreen!,
-          ),
-        const SizedBox(width: 2),
-      ],
-    );
-  }
+  // ---------------- 单个按钮 ----------------
 
   Widget _iconBtn({
     required IconData icon,

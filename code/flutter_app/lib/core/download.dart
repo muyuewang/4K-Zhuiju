@@ -57,6 +57,25 @@ class DownloadTask {
   String dramaId = '';
   int episode = 0;
 
+  /// 剧名分组（同剧的集数共用一个目录）
+  ///
+  /// 下载文件原来全部平铺在 `downloads/` 下，文件名是 `剧名_第01集.mp4` 这种。
+  /// 一部 40 集的剧下完就是 40 个文件混在一堆里，再下第二部就彻底分不清了。
+  /// 现在按剧名建子目录：
+  ///
+  /// ```
+  /// downloads/兰香如故/第01集.mp4
+  /// downloads/兰香如故/第02集.mp4
+  /// ```
+  ///
+  /// 老索引没有这个字段，恢复后是空串，[DownloadTask.filePath] 仍然指回
+  /// 原来的平铺位置——**不做迁移**：用户的文件已经在磁盘上了，
+  /// 为了整齐而搬动几十个文件、还要处理重名和权限失败，风险远大于收益。
+  String group = '';
+
+  /// 文件名（不含扩展名）。为空时由 [DownloadManager] 从 title 推导。
+  String fileBase = '';
+
   DownloadState state = DownloadState.pending;
   double progress = 0; // 0..1
   int received = 0;
@@ -135,6 +154,8 @@ class DownloadTask {
         'filePath': filePath,
         'dramaId': dramaId,
         'episode': episode,
+        'group': group,
+        'fileBase': fileBase,
         'segments': segments,
         'doneSegments': doneSegments.toList(),
         'aesKey': aesKey == null ? null : base64Encode(aesKey!),
@@ -160,6 +181,8 @@ class DownloadTask {
     t.filePath = j['filePath'] as String?;
     t.dramaId = idToStr(j['dramaId']);
     t.episode = (j['episode'] as num?)?.toInt() ?? 0;
+    t.group = j['group'] as String? ?? '';
+    t.fileBase = j['fileBase'] as String? ?? '';
     final segs = j['segments'] as List?;
     if (segs != null) {
       t.segments = segs.map((e) => e.toString()).toList();
@@ -176,6 +199,57 @@ class DownloadTask {
     if (t.state == DownloadState.running) t.state = DownloadState.paused;
     return t;
   }
+}
+
+/// 一个剧集分组：同一部剧的所有下载任务
+class DownloadGroup {
+  final String name;
+  final List<DownloadTask> items;
+  const DownloadGroup(this.name, this.items);
+
+  int get doneCount =>
+      items.where((t) => t.state == DownloadState.done).length;
+  int get runningCount =>
+      items.where((t) => t.state == DownloadState.running).length;
+  int get totalBytes => items.fold<int>(0, (s, t) => s + t.total);
+}
+
+/// 从标题里剥出剧名（`兰香如故_第01集` → `兰香如故`）
+///
+/// 升级前的任务没有 [DownloadTask.group] 字段，只能从标题反推。
+/// 标题里没有分隔符时整条标题就是剧名（单集下载的老任务就是这样）。
+String groupOfTitle(String title) {
+  final i = title.lastIndexOf('_');
+  return i > 0 ? title.substring(0, i) : title;
+}
+
+/// 取任务的剧名分组键
+String groupKeyOf(DownloadTask t) =>
+    t.group.isNotEmpty ? t.group : groupOfTitle(t.title);
+
+/// 组内条目该显示的短标题（`兰香如故_第01集` → `第01集`）
+///
+/// 组头已经写着剧名，条目再重复一遍会把长剧名挤成省略号，
+/// 反而看不出是第几集。
+String shortTitleOf(DownloadTask t) {
+  final g = groupKeyOf(t);
+  final prefix = '${g}_';
+  if (t.title.startsWith(prefix) && t.title.length > prefix.length) {
+    return t.title.substring(prefix.length);
+  }
+  return t.title;
+}
+
+/// 按剧集分组，保持任务原有顺序（下载页希望「最近下的」排在前面的
+/// 相对次序不变，只是把同剧的聚到一起）
+List<DownloadGroup> groupTasks(List<DownloadTask> list) {
+  final out = <String, List<DownloadTask>>{};
+  for (final t in list) {
+    (out[groupKeyOf(t)] ??= <DownloadTask>[]).add(t);
+  }
+  return out.entries
+      .map((e) => DownloadGroup(e.key, e.value))
+      .toList(growable: false);
 }
 
 class DownloadManager {
@@ -311,9 +385,13 @@ class DownloadManager {
 
   /// 收编下载目录里「清单里没有」的成品文件。
   /// 覆盖两种情况：升级前的老任务、清单文件被清理过。
+  ///
+  /// **必须递归子目录**。文件按剧名分目录后（`downloads/兰香如故/第01集.mp4`），
+  /// 只扫顶层的话，索引一旦损坏/被清理，子目录里的成品就永远收编不回来：
+  /// 界面显示「暂无下载任务」，磁盘上却躺着几个 G，用户既看不见也删不掉。
   Future<void> _adoptOrphanFiles(Directory dir) async {
     try {
-      await for (final e in dir.list()) {
+      await for (final e in dir.list(recursive: true, followLinks: false)) {
         if (e is! File) continue;
         final name = e.path.split(Platform.pathSeparator).last;
         if (name.startsWith('.') || name.endsWith('.part')) continue;
@@ -322,22 +400,37 @@ class DownloadManager {
         final ext = name.substring(dot + 1).toLowerCase();
         if (ext != 'mp4' && ext != 'ts') continue;
         final title = name.substring(0, dot);
+
+        // 判断这个文件是不是落在剧名子目录里。是的话，group 就是子目录名，
+        // fileBase 是文件名——这样收编回来的任务能和正常下载的任务
+        // 在下载页里聚成同一组，而不是孤零零一条。
+        String group = '';
+        final parent = e.parent;
+        if (parent.path != dir.path) {
+          group = parent.path.split(Platform.pathSeparator).last;
+        }
+
         // 去重必须按「文件路径」而不是 id：
         // 老版本及索引恢复出来的任务 id 是纯标题（兰香如故_第1集），
         // 与这里想用的 兰香如故_第1集.mp4 不相等，只比 id 会把
         // 同一个物理文件登记成第二条记录，列表里出现重复行。
         if (_hasPath(e.path)) continue;
+
+        // 分目录后文件名叫「第01集.mp4」，不带剧名前缀，跨剧会撞名。
+        // 所以子目录里的文件用「组名_文件名」当 id 与标题，与入队时的
+        // 命名规则（title = 剧名_集名）保持一致。
+        final fullTitle = group.isEmpty ? title : '${group}_$title';
         // 同一集可能同时存在 .mp4 与 .ts（不同源下载过），
         // 若只按 title 做 id，后一个会被跳过、在列表里彻底消失，
         // 既看不见也删不掉，白白占着几个 G。冲突时退回「标题.扩展名」。
-        var id = title;
-        if (_tasks.containsKey(id)) id = '$title.$ext';
+        var id = fullTitle;
+        if (_tasks.containsKey(id)) id = '$fullTitle.$ext';
         if (_tasks.containsKey(id)) continue;
         final size = await e.length();
         if (size <= 0) continue;
         final t = DownloadTask(
           id: id,
-          title: '$title (${ext.toUpperCase()})',
+          title: '$fullTitle (${ext.toUpperCase()})',
           sourceUrl: '',
           ext: ext,
           isHls: ext == 'ts',
@@ -347,8 +440,10 @@ class DownloadManager {
         t.filePath = e.path;
         t.received = size;
         t.total = size;
+        t.group = group;
+        t.fileBase = title;
         _tasks[id] = t;
-        debugPrint('[DL] adopted orphan file: $name ($size) id=$id');
+        debugPrint('[DL] adopted orphan file: $name ($size) id=$id group=$group');
       }
     } catch (e) {
       debugPrint('[DL] adopt orphans failed: $e');
@@ -475,6 +570,11 @@ class DownloadManager {
   /// 启动下载；若同名任务已存在则复用
   ///
   /// [resolver] 用于在地址过期（403）时重新解析出一个新地址。
+  ///
+  /// [group] / [fileBase] 控制文件落到哪个子目录、叫什么名字：
+  /// 同一部剧的所有集数传同一个 [group]（剧名），就会归到
+  /// `downloads/<剧名>/` 下，文件名用 [fileBase]（如「第01集」）。
+  /// 不传则保持老行为：平铺在 downloads 根目录、以内部 id 命名。
   DownloadTask start({
     required String title,
     required String url,
@@ -482,6 +582,8 @@ class DownloadManager {
     Future<String> Function()? resolver,
     String dramaId = '',
     int episode = 0,
+    String group = '',
+    String fileBase = '',
   }) {
     final key = safeName(title);
     final exist = _tasks[key];
@@ -509,6 +611,13 @@ class DownloadManager {
       // 续传时补写剧集标识：老索引里可能没有，续传是唯一能补的机会
       if (dramaId.isNotEmpty) exist.dramaId = dramaId;
       if (episode > 0) exist.episode = episode;
+      // 分组信息同理，只在原本为空时补：已经在根目录下了一半的老任务，
+      // 中途改 group 会让它的成品被写到新子目录，而分片还留在根目录，
+      // 续传逻辑按 id 找分片能对上，但用户会看到「文件跑到别的文件夹里」。
+      if (exist.group.isEmpty && group.isNotEmpty) exist.group = group;
+      if (exist.fileBase.isEmpty && fileBase.isNotEmpty) {
+        exist.fileBase = fileBase;
+      }
       exist.state = DownloadState.pending;
       exist.error = null;
       _emit(persist: true);
@@ -526,7 +635,9 @@ class DownloadManager {
       resolver: resolver,
     )
       ..dramaId = dramaId
-      ..episode = episode;
+      ..episode = episode
+      ..group = group
+      ..fileBase = fileBase;
     _tasks[key] = task;
     _emit(persist: true);
     _run(task);
@@ -746,11 +857,40 @@ class DownloadManager {
   String _short(String u) =>
       u.length <= 70 ? u : '${u.substring(0, 70)}...(${u.length})';
 
+  /// 任务成品文件所在的目录（同剧共用一个子目录）
+  ///
+  /// 取名规则：`downloads/<剧名>/`。
+  ///
+  /// **老任务不迁移**：`group` 为空（老索引）时直接用根目录，
+  /// 成品文件仍然在原来的平铺位置。理由见 [DownloadTask.group] 的注释——
+  /// 为了目录整齐去搬动用户已有的几十个文件，收益远小于风险。
+  Future<Directory> _outDir(DownloadTask task) async {
+    final root = await _dir();
+    if (task.group.isEmpty) return root;
+    final sub = Directory('${root.path}/${safeName(task.group)}');
+    if (!await sub.exists()) await sub.create(recursive: true);
+    return sub;
+  }
+
+  /// 成品文件名（不含扩展名）
+  ///
+  /// 有 [DownloadTask.fileBase] 就用它（新任务会写成「第01集」这种短名）；
+  /// 为空则回落到 [DownloadTask.id]（老任务的行为，保持原文件名不变）。
+  String _baseName(DownloadTask task) =>
+      task.fileBase.isNotEmpty ? task.fileBase : task.id;
+
+  /// 临时文件统一放在**根目录**，不进剧名子目录：
+  /// 一是避免下到一半失败时在用户可见目录里留下半成品，
+  /// 二是 `.part` / `.parts` 走的是 id 命名，本来就不需要分组。
+  File _partFile(Directory root, DownloadTask task) =>
+      File('${root.path}/${task.id}.part');
+
   // ---------------- 普通文件 ----------------
   Future<void> _downloadFile(DownloadTask task, CancelToken cancel) async {
-    final dir = await _dir();
-    final part = File('${dir.path}/${task.id}.part');
-    final target = File('${dir.path}/${task.id}.${task.ext}');
+    final root = await _dir();
+    final dir = await _outDir(task);
+    final part = _partFile(root, task);
+    final target = File('${dir.path}/${_baseName(task)}.${task.ext}');
 
     var start = 0;
     if (await part.exists()) start = await part.length();
@@ -1080,7 +1220,10 @@ class DownloadManager {
       throw StateError('有 ${missing.length} 个分片缺失（首个：${missing.first}），可继续下载补齐');
     }
 
-    final target = File('${dir.path}/${task.id}.ts');
+    // 成品落到剧名子目录，分片目录仍在根下（见 _partFile 的注释）。
+    // 参数里的 dir 是根目录，这里再解析一次输出目录。
+    final outDir = await _outDir(task);
+    final target = File('${outDir.path}/${_baseName(task)}.ts');
     // 流式拼接：逐片按块拷贝到同一个 sink。
     // 原来的 `sink.add(await f.readAsBytes())` 会把每个分片整体读进内存，
     // 2GB 级的剧集在低端机/模拟器上极易 OOM 崩溃；

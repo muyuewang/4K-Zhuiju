@@ -298,7 +298,14 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
         // 同 player_page：黑底必须配白前景。
         // 只写 backgroundColor 时，图标/标题仍取主题 onSurface，
         // 浅色主题下是近黑色 → 返回箭头隐形，只剩 tooltip 可见。
+        //
+        // 而且只写 foregroundColor **不管用**：AppBar 解析图标颜色时
+        // 优先取 appBarTheme.iconTheme（本项目钉的是 onSurface），
+        // foregroundColor 会被跳过。必须把 iconTheme / actionsIconTheme
+        // 一并显式声明，右侧「文件信息」等图标才会变白。
         foregroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Colors.white),
+        actionsIconTheme: const IconThemeData(color: Colors.white),
         leading: IconButton(
           tooltip: '返回',
           icon: const Icon(Icons.arrow_back_rounded),

@@ -26,9 +26,20 @@ bool get isMobile => Platform.isAndroid || Platform.isIOS;
 
 /// 进入/退出全屏（自动分流到平台正确实现）
 ///
-/// 移动端：锁横屏 + 隐藏系统栏。
+/// 移动端：锁屏幕方向 + 隐藏系统栏。
 /// 桌面端：真正把窗口切全屏（去掉标题栏、铺满显示器）。
-Future<void> setFullscreen(bool on) async {
+///
+/// [portrait] 决定移动端全屏锁哪个方向：
+/// - false（默认）→ 横屏全屏，适合 16:9 影视剧；
+/// - true → 竖屏全屏，适合 9:16 竖屏短剧。
+///
+/// 为什么必须区分：竖屏短剧锁横屏后，9:16 的画面在横屏里只能占中间
+/// 窄窄一条，两侧全黑，实际可视面积比竖屏还小——这正是用户反馈
+/// 「横屏比例都缩小了、观影体验不好」的原因。B 站等主流 App 都有
+/// 「竖屏全屏」这一档，就是为这类内容准备的。
+///
+/// 桌面端忽略 [portrait]：窗口全屏没有方向概念，恒定铺满显示器。
+Future<void> setFullscreen(bool on, {bool portrait = false}) async {
   if (isDesktop) {
     if (supportsWindowFullscreen) {
       await setDesktopFullscreen(on);
@@ -36,10 +47,14 @@ Future<void> setFullscreen(bool on) async {
     return;
   }
   if (on) {
-    await SystemChrome.setPreferredOrientations(const [
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
+    await SystemChrome.setPreferredOrientations(
+      portrait
+          ? const [DeviceOrientation.portraitUp]
+          : const [
+              DeviceOrientation.landscapeLeft,
+              DeviceOrientation.landscapeRight,
+            ],
+    );
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   } else {
     await restorePortrait();
