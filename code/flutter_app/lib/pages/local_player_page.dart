@@ -295,7 +295,17 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
-        title: Text(widget.title, style: const TextStyle(fontSize: Ts.subtitle)),
+        // 同 player_page：黑底必须配白前景。
+        // 只写 backgroundColor 时，图标/标题仍取主题 onSurface，
+        // 浅色主题下是近黑色 → 返回箭头隐形，只剩 tooltip 可见。
+        foregroundColor: Colors.white,
+        leading: IconButton(
+          tooltip: '返回',
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
+        title: Text(widget.title,
+            style: const TextStyle(fontSize: Ts.subtitle, color: Colors.white)),
         actions: [
           IconButton(
             tooltip: '文件信息',
@@ -470,8 +480,14 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
             width: double.infinity,
             color: kVideoBg,
             padding: const EdgeInsets.all(14),
-            child: SingleChildScrollView(
-              child: _controlPanel(c),
+            // 这块底色写死纯黑、不随主题走，所以前景色也必须在
+            // 恒深色作用域里取，否则浅色主题下按钮文字会变成近黑色
+            // 压在黑底上（同在线播放页右栏的问题）。
+            child: Theme(
+              data: kVideoTheme,
+              child: SingleChildScrollView(
+                child: _controlPanel(c),
+              ),
             ),
           ),
         ),
@@ -546,7 +562,11 @@ class _LocalPlayerPageState extends State<LocalPlayerPage> {
           width: 320,
           color: kVideoBg,
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-          child: SingleChildScrollView(child: _controlPanel(c, compact: true)),
+          // 同窄屏：纯黑底必须配恒深色主题，否则浅色主题下按钮文字隐形
+          child: Theme(
+            data: kVideoTheme,
+            child: SingleChildScrollView(child: _controlPanel(c, compact: true)),
+          ),
         ),
       ],
     );

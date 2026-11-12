@@ -69,8 +69,26 @@ class _Session {
   /// 分片绝对地址，下标即代理地址里的序号。
   List<String> segments = <String>[];
 
+  /// 地址 → 下标。**必须去重**：多级清单下子清单每次请求都要重新解析
+  /// 一遍，不去重的话 segments 会随播放无限增长（片库那份 2679 条清单
+  /// 点一次涨一次，几分钟就能吃掉几十兆）。
+  final Map<String, int> _index = <String, int>{};
+
   /// 访问计数，仅用于排障日志（判断 MF 有没有真的来拉分片）。
   int segHits = 0;
+
+  /// 已解析的清单层数。正常点播 2 层（master → variant），
+  /// 留到 32 只为拦住异常源构造无限嵌套，正常播放碰不到。
+  int playlistDepth = 0;
+
+  int addSegment(String url) {
+    final hit = _index[url];
+    if (hit != null) return hit;
+    final i = segments.length;
+    segments.add(url);
+    _index[url] = i;
+    return i;
+  }
 }
 
 class HlsProxy {
@@ -179,13 +197,31 @@ class HlsProxy {
           await res.close();
           return;
         }
-        session.segHits++;
-        // 只打前几条和每 50 条，避免 2400 条分片把日志刷爆
-        if (session.segHits <= 5 || session.segHits % 50 == 0) {
-          debugPrint('[HLS] seg #$n requested '
-              '(hit=${session.segHits}, total=${session.segments.length})');
+        final target = session.segments[n];
+        // 条目自己也是清单（master → variant 这种多级结构）时必须
+        // **继续展开**，不能当分片转发。否则子清单原样回给播放器，
+        // 里面全是相对地址，播放器会以 `127.0.0.1:port/...` 为基址去
+        // 拼分片，请求必然 404 —— 表现就是「点了播放一直转圈」。
+        // 片库 4K 的 master 只有 101 字节、1 个条目，就是这个形态。
+        if (looksLikeM3u8(target)) {
+          session.playlistDepth++;
+          if (session.playlistDepth > 32) {
+            debugPrint('[HLS] playlist nesting too deep, give up');
+            res.statusCode = HttpStatus.badGateway;
+            await res.close();
+            return;
+          }
+          debugPrint('[HLS] expand nested playlist #${session.playlistDepth}');
+          await _playlist(session, token, res, playlistUrl: target);
+        } else {
+          session.segHits++;
+          // 只打前几条和每 50 条，避免 2400 条分片把日志刷爆
+          if (session.segHits <= 5 || session.segHits % 50 == 0) {
+            debugPrint('[HLS] seg #$n requested '
+                '(hit=${session.segHits}, total=${session.segments.length})');
+          }
+          await _relay(target, req, res);
         }
-        await _relay(session.segments[n], req, res);
       } else {
         await _playlist(session, token, res);
       }
@@ -199,9 +235,17 @@ class HlsProxy {
   }
 
   /// 拉清单 -> 规范化（分片改写成代理地址）-> 返回
+  ///
+  /// [playlistUrl] 不传就用会话主地址。子清单（master → variant）展开时
+  /// 传目标地址进来，这样才能按子清单自己的 URL 做相对地址补全。
   Future<void> _playlist(
-      _Session session, String token, HttpResponse res) async {
-    final bytes = await _fetch(session.playlistUrl);
+    _Session session,
+    String token,
+    HttpResponse res, {
+    String? playlistUrl,
+  }) async {
+    final src = playlistUrl ?? session.playlistUrl;
+    final bytes = await _fetch(src);
     if (bytes == null) {
       res.statusCode = HttpStatus.badGateway;
       await res.close();
@@ -209,17 +253,17 @@ class HlsProxy {
     }
     final text = _decode(bytes);
     if (text == null || !text.contains('#EXTM3U')) {
-      debugPrint('[HLS] not a playlist: ${session.playlistUrl}');
+      debugPrint('[HLS] not a playlist: $src');
       res.statusCode = HttpStatus.badGateway;
       await res.close();
       return;
     }
 
     final limit = _intEnv('ZJ_MAX_SEG');
-    final base = Uri.parse(session.playlistUrl);
+    final base = Uri.parse(src);
     final out = <String>[];
-    final segs = <String>[];
     var truncated = false;
+    var added = 0;
 
     for (final raw in const LineSplitter().convert(text)) {
       final line = raw.trim();
@@ -229,7 +273,7 @@ class HlsProxy {
         if (line.startsWith('#EXT')) out.add(line);
         continue;
       }
-      if (limit > 0 && segs.length >= limit) {
+      if (limit > 0 && added >= limit) {
         truncated = true;
         break;
       }
@@ -244,19 +288,19 @@ class HlsProxy {
       final name = abs.pathSegments.isEmpty
           ? 'seg.ts'
           : abs.pathSegments.last;
+      final idx = session.addSegment(abs.toString());
+      added++;
       out.add('http://127.0.0.1:${_server!.port}/hls/$token/seg/'
-          '${segs.length}/$name');
-      segs.add(abs.toString());
+          '$idx/$name');
     }
     if (truncated) {
       // 截断后必须补 ENDLIST，否则 MF 认为这是直播流，一直等新分片
       out.add('#EXT-X-ENDLIST');
     }
-    session.segments = segs;
 
     final body = utf8.encode('${out.join('\n')}\n');
     debugPrint('[HLS] playlist ${bytes.length}B -> ${body.length}B '
-        'segments=${segs.length}');
+        'entries=$added total=${session.segments.length}');
     res.headers.contentType =
         ContentType('application', 'vnd.apple.mpegurl');
     res.contentLength = body.length;

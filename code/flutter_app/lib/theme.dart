@@ -199,3 +199,19 @@ ThemeData buildTheme(Brightness brightness) {
     extensions: <ThemeExtension<dynamic>>[p],
   );
 }
+
+/// 恒深色作用域：给「底色写死是黑」的局部区域用
+///
+/// 播放页宽屏右栏、本地播放页的控制面板，底色都是 [kVideoBg]（纯黑），
+/// **不随主题变**。但这些容器里的 Text / OutlinedButton 默认去取
+/// `Theme.of(context)`：浅色主题下 onSurface 是 #14161A，压在纯黑上
+/// 对比度只有 1.06:1 —— 剧名、集数、线路标签全都成了「隐形文字」，
+/// 只有鼠标悬停时弹出的 tooltip 还看得见。
+///
+/// 逐个 Text 补 `color: Colors.white` 只能治当下这几个控件，
+/// 以后往这块区域添任何控件都会重新踩坑。所以整块区域套一层深色主题，
+/// 让「黑底」和「浅色前景」这对搭配在语义上绑死。
+///
+/// 用 static final 缓存：ThemeData 构造不便宜，而播放页每帧都在重建，
+/// 每次新建一份会把滚动/播放时的帧耗时推高。
+final ThemeData kVideoTheme = buildTheme(Brightness.dark);

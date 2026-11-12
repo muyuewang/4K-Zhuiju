@@ -1387,11 +1387,31 @@ class _PlayerPageState extends State<PlayerPage> {
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
+        // 【必须显式钉白，不能只写 backgroundColor】
+        //
+        // 播放页永远是黑底（视频画面就该压在黑上，不跟主题走），
+        // 但 AppBar 的前景（图标、标题）默认取主题的 onSurface。
+        // 浅色主题下 onSurface 是 0xFF14161A（近黑）——
+        // 合起来就是「黑底黑图标」：返回箭头等于隐形，
+        // 整个标题栏只剩鼠标悬停时弹出来的 tooltip 能看见。
+        // 用户反馈「不留意还真找不到」，说的就是这个。
+        //
+        // 全屏模式那套顶部栏一直是显式 Colors.white，所以没出问题；
+        // 窗口模式这处漏了。background 与 foreground 必须成对声明。
+        foregroundColor: Colors.white,
+        // 显式接管 leading：默认 BackButton 的 tooltip 是英文 "Back"
+        // （项目没配 localizationsDelegates，Material 用英文兜底）。
+        // 既然要改，就把中文 tooltip 一并补上。
+        leading: IconButton(
+          tooltip: '返回',
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
         title: Text(
           widget.dramaName.isEmpty
               ? _cur.epLabel
               : '${widget.dramaName} · ${_cur.epLabel}',
-          style: const TextStyle(fontSize: Ts.subtitle),
+          style: const TextStyle(fontSize: Ts.subtitle, color: Colors.white),
         ),
         actions: [
           // 投屏只在 Android 提供：DLNA 走的是局域网 SSDP 多播，
@@ -2131,63 +2151,73 @@ class _PlayerPageState extends State<PlayerPage> {
       context: context,
       backgroundColor: kVideoCard,
       isScrollControlled: true,
-      builder: (ctx) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.of(ctx).size.height * 0.55,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 8, 6),
-                child: Row(
-                  children: [
-                    Text('选集（共 ${eps.length} 集）',
-                        style: const TextStyle(
-                            fontSize: Ts.subtitle, fontWeight: FontWeight.w600)),
-                    const Spacer(),
-                    IconButton(
-                      icon: const Icon(Icons.close_rounded, size: 20),
-                      onPressed: () => Navigator.pop(ctx),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: GridView.builder(
-                  padding: const EdgeInsets.fromLTRB(14, 4, 14, 16),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 4,
-                    crossAxisSpacing: 8,
-                    mainAxisSpacing: 8,
-                    childAspectRatio: 2.1,
+      // 弹层底色是 kVideoCard（#181A21，恒深色），但标题和关闭图标
+      // 默认取主题前景 —— 浅色主题下是 #14161A，压在这块深灰上
+      // 对比度极低，整个弹层看起来只有格子在、字全没了。
+      builder: (ctx) => Theme(
+        data: kVideoTheme,
+        child: SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.55,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 8, 6),
+                  child: Row(
+                    children: [
+                      Text('选集（共 ${eps.length} 集）',
+                          style: const TextStyle(
+                              fontSize: Ts.subtitle,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white)),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        color: Colors.white70,
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
                   ),
-                  itemCount: eps.length,
-                  itemBuilder: (c, i) {
-                    final e = eps[i];
-                    final active = e.path == _cur.path;
-                    return GestureDetector(
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        _playEpisode(e);
-                      },
-                      child: Container(
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: active ? kAccent : kVideoBg,
-                          borderRadius: BorderRadius.circular(R.card),
-                        ),
-                        child: Text(
-                          e.epLabel,
-                          style: TextStyle(
-                            fontSize: Ts.bodySm,
-                            color: active ? Colors.white : Colors.white70,
+                ),
+                Expanded(
+                  child: GridView.builder(
+                    padding: const EdgeInsets.fromLTRB(14, 4, 14, 16),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 4,
+                      crossAxisSpacing: 8,
+                      mainAxisSpacing: 8,
+                      childAspectRatio: 2.1,
+                    ),
+                    itemCount: eps.length,
+                    itemBuilder: (c, i) {
+                      final e = eps[i];
+                      final active = e.path == _cur.path;
+                      return GestureDetector(
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _playEpisode(e);
+                        },
+                        child: Container(
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: active ? kAccent : kVideoBg,
+                            borderRadius: BorderRadius.circular(R.card),
+                          ),
+                          child: Text(
+                            e.epLabel,
+                            style: TextStyle(
+                              fontSize: Ts.bodySm,
+                              color: active ? Colors.white : Colors.white70,
+                            ),
                           ),
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -2688,74 +2718,82 @@ class _PlayerPageState extends State<PlayerPage> {
           ),
         ),
         // 右栏
+        //
+        // 整栏外面套一层 [kVideoTheme]：这里的底色写死是纯黑，不随主题走，
+        // 但里面的标题 / 按钮 / 分隔线默认还是去取当前主题。浅色主题下
+        // 就变成「黑底 + #14161A 近黑字」，剧名和集数肉眼几乎看不见。
+        // 套深色主题后，前景色由主题统一给到浅色，后续新增控件也不会再漏。
         Container(
           width: 340,
           color: kVideoBg,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.dramaName.isEmpty
-                          ? _cur.epLabel
-                          : widget.dramaName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: Ts.subtitle,
-                        fontWeight: FontWeight.w600,
+          child: Theme(
+            data: kVideoTheme,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.dramaName.isEmpty
+                            ? _cur.epLabel
+                            : widget.dramaName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: Ts.subtitle,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '${_cur.epLabel} · ${_srcKey(_cur)}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style:
-                          const TextStyle(fontSize: Ts.bodySm, color: kOnVideoDim),
-                    ),
-                    const SizedBox(height: 10),
-                    if (_castDeviceName != null)
-                      CastBar(
-                        deviceName: _castDeviceName!,
-                        onStop: _stopCast,
+                      const SizedBox(height: 3),
+                      Text(
+                        '${_cur.epLabel} · ${_srcKey(_cur)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            const TextStyle(fontSize: Ts.bodySm, color: kOnVideoDim),
                       ),
-                    _statusRow(),
-                    const SizedBox(height: 10),
-                    _actionButtons(),
-                  ],
+                      const SizedBox(height: 10),
+                      if (_castDeviceName != null)
+                        CastBar(
+                          deviceName: _castDeviceName!,
+                          onStop: _stopCast,
+                        ),
+                      _statusRow(),
+                      const SizedBox(height: 10),
+                      _actionButtons(),
+                    ],
+                  ),
                 ),
-              ),
-              const Divider(height: 1, color: Color(0xFF23262F)),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
-                child: Row(
-                  children: [
-                    Text(
-                      _isSeries ? '选集' : '播放源',
-                      style: const TextStyle(
-                          fontSize: Ts.body, fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      _isSeries
-                          ? '共 ${_curEpisodes.length} 集'
-                          : '${_sourceNames.length} 个源',
-                      style: const TextStyle(fontSize: Ts.caption, color: kOnVideoDim),
-                    ),
-                  ],
+                const Divider(height: 1, color: Color(0xFF23262F)),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+                  child: Row(
+                    children: [
+                      Text(
+                        _isSeries ? '选集' : '播放源',
+                        style: const TextStyle(
+                            fontSize: Ts.body, fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _isSeries
+                            ? '共 ${_curEpisodes.length} 集'
+                            : '${_sourceNames.length} 个源',
+                        style: const TextStyle(fontSize: Ts.caption, color: kOnVideoDim),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              Expanded(
-                child: _isSeries
-                    ? _episodeGrid(crossAxisCount: 5)
-                    : _sourceList(),
-              ),
-            ],
+                Expanded(
+                  child: _isSeries
+                      ? _episodeGrid(crossAxisCount: 5)
+                      : _sourceList(),
+                ),
+              ],
+            ),
           ),
         ),
       ],

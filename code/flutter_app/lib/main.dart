@@ -8,6 +8,7 @@ import 'core/download.dart';
 import 'core/favorites.dart';
 import 'core/history.dart';
 import 'core/layout.dart';
+import 'core/net_proxy.dart';
 import 'core/playback_prefs.dart';
 import 'core/search_history.dart';
 import 'core/source/registry.dart';
@@ -21,8 +22,25 @@ import 'widgets/danmaku_overlay.dart';
 import 'widgets/tv_focus.dart';
 import 'core/tokens.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 代理必须最先装：它挂的是 dart:io 的 HttpClient 工厂，
+  // 晚于任何一次请求再装，那一次就已经直连过了（首屏封面正好在那一批里）。
+  //
+  // 背景：Dart 的 HttpClient 完全不读 Windows 系统代理，浏览器读。
+  // 于是挂在代理后面的源站会出现「网页版秒开、App 里一片空白」——
+  // 暴风封面 CDN（p.bfvp26.com）和可可影视（www.keke1.app）都是这个现象。
+  // 详见 core/net_proxy.dart 的对照表。
+  NetProxy.install();
+  // 探测必须赶在第一批请求之前完成，否则首屏封面就已经直连过了。
+  //
+  // 这里破例 await 一次，但压了 400ms 硬上限——因为它的正常开销和
+  // 下面注释里说的 restore() 不是一个量级：
+  //   一次 `reg query`（约 50ms）+ 一次本机回环 connect（<1ms）；
+  //   代理软件没开时 connect 立刻失败，同样很快。
+  // 400ms 是兜底：万一 reg 卡住，也绝不能把首帧拖成白屏。
+  await NetProxy.refresh()
+      .timeout(const Duration(milliseconds: 400), onTimeout: () {});
   // 桌面端崩溃要能定位。Release 版默认把异常吞成一块灰/白屏，
   // 用户在 Windows 上没有 logcat 可看，只能靠这里的输出落到 stderr。
   FlutterError.onError = (details) {
