@@ -36,6 +36,32 @@ library;
 
 import 'dart:io';
 
+import 'package:flutter/services.dart';
+
+/// 原生方法通道：读系统代理设置。
+///
+/// 名字与 `window_channel.cpp` 里的 `kChannelName` 保持一致。这里复用窗口
+/// 通道而不是新建一个：多一条通道就要多注册一次、多一份原生代码，
+/// 而这两件事同属「Windows 桌面能力」，放一起维护成本更低。
+const MethodChannel _winCh = MethodChannel('zhuiju/window');
+
+/// 向原生侧要「系统代理设置」原文。
+///
+/// 返回值语义（三态，调用方必须区分）：
+///   - `null` → 拿不到（非 Windows / 通道未就绪 / 原生调用失败）
+///   - `''`   → 明确未启用代理
+///   - 非空   → `ProxyServer` 原文，如 `127.0.0.1:7897`
+Future<String?> readSystemProxyRaw() async {
+  if (!Platform.isWindows) return null;
+  try {
+    return await _winCh.invokeMethod<String>('readSystemProxy');
+  } catch (_) {
+    // 通道没就绪（首帧之前）或原生侧抛错：返回 null 让调用方走端口兜底，
+    // 绝不因为「读不到代理」而卡住启动。
+    return null;
+  }
+}
+
 /// 系统代理探测结果，进程内缓存。
 ///
 /// [findProxyFor] 是同步回调（`HttpClient.findProxy` 的签名不允许 await），
@@ -128,15 +154,22 @@ class NetProxy {
         _setOff();
         return;
       }
-      final server = await _readWindowsProxyServer();
-      if (server != null && server.isNotEmpty) {
-        await _tryServer(server);
+      final r = await _readWindowsProxySetting();
+      if (r.server != null && r.server!.isNotEmpty) {
+        await _tryServer(r.server!);
         return;
       }
-      // 读不到注册表（reg.exe 被安全软件/组策略拦掉，或键值缺失）时
-      // 退一步：探一遍常见本地代理端口。这个兜底很值得：
-      // 用户报「网页版正常、App 空白」的机器，多半正是那些装了
-      // 安全加固、外部进程跑不起来的机器，只靠注册表会全军覆没。
+      if (r.known) {
+        // 注册表读到了、而且明确说没启用代理 —— 那就是真的直连。
+        // 这里**不能**再去扫端口兜底：否则用户明明关掉了代理，
+        // 只要本机碰巧有个 7890 在监听（比如另开了个测试服务），
+        // 就会被误判成"有代理"，把全 App 流量导到那儿去。
+        _setOff();
+        return;
+      }
+      // 读失败（原生通道不可用 / 键值缺失）才退一步：探一遍常见本地端口。
+      // 这个兜底仍然值得保留：换过机型、或被安全软件拦住读注册表时，
+      // 只靠注册表会全军覆没，表现为「网页版正常、App 一片空白」。
       await _probeCommonPorts();
     } catch (_) {
       // 探测本身出任何问题都退回直连：宁可走直连，也不能让 App 卡住
@@ -260,49 +293,30 @@ class NetProxy {
 
   /// 从注册表读代理地址。未启用时返回 null。
   ///
-  /// [regRunner] 可注入，方便离线测试；默认走 `reg query`。
-  static Future<String?> _readWindowsProxyServer({
-    Future<ProcessResult?> Function(List<String> args)? regRunner,
-  }) async {
-    // 用 Process.run 而不是 runSync：`reg` 是外部进程，runSync 会把
-    // UI 线程卡住几十毫秒，首屏缓存未命中时这个开销会连着吃好几次。
-    final run = regRunner ?? _defaultRegRunner;
-
-    final enable = await _queryValue('ProxyEnable', run);
-    if (enable == null) return null;
-    final on = enable.startsWith('0x')
-        ? int.tryParse(enable.substring(2), radix: 16) == 1
-        : enable.trim() == '1';
-    if (!on) return null;
-
-    final raw = await _queryValue('ProxyServer', run);
-    return parseProxyServer(raw);
+  /// **不走 `Process.run('reg', ...)`**。原来的实现靠启动 `reg.exe`
+  /// 子进程去查注册表，这在杀毒软件的行为监控里权重极高：
+  /// 「无数字签名的程序 + 创建子进程执行命令行」会被判成
+  /// 「执行来自攻击者的命令」。实测 2026-11-12 有用户机器上
+  /// Defender 直接报 Trojan 并隔离了 zhuiju.exe。
+  ///
+  /// 现在改成向原生侧要结果（`window_channel.cpp` 里用 RegGetValueW
+  /// 进程内直读），全程不产生任何子进程，行为特征回归
+  /// 「普通桌面程序读自己的配置」。
+  static Future<({bool known, String? server})>
+      _readWindowsProxySetting() async {
+    final raw = await readSystemProxyRaw();
+    return interpretNativeSetting(raw);
   }
 
-  static Future<ProcessResult?> _defaultRegRunner(List<String> args) async {
-    try {
-      return await Process.run('reg', args, runInShell: false);
-    } catch (_) {
-      // 被安全软件/组策略禁用时 Process.run 可能直接抛，交给上层降级
-      return null;
-    }
-  }
-
-  static Future<String?> _queryValue(
-    String name,
-    Future<ProcessResult?> Function(List<String>) run,
-  ) async {
-    final r = await run([
-      'query',
-      r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
-      '/v',
-      name,
-    ]);
-    if (r == null || r.exitCode != 0) return null;
-    final text = r.stdout.toString();
-    // 形如：`    ProxyEnable    REG_DWORD    0x1`
-    final m = RegExp('$name\\s+REG_\\w+\\s+(.+)').firstMatch(text);
-    return m?.group(1)?.trim();
+  /// 解释原生侧返回的代理设置文本（纯函数，便于离线回归）。
+  ///
+  /// 三种状态必须区分开，否则会白扫一遍本地端口：
+  ///   - `raw == null`  → 读失败/平台不支持，`known=false`，调用方走端口兜底
+  ///   - `raw == ''`    → **明确关闭**，`known=true, server=null`，直接直连
+  ///   - 非空            → 启用中，`server` 为解析出的 `host:port`
+  static ({bool known, String? server}) interpretNativeSetting(String? raw) {
+    if (raw == null) return (known: false, server: null);
+    return (known: true, server: parseProxyServer(raw));
   }
 
   /// 把注册表里的 `ProxyServer` 原文解析成 `host:port`。拿不到就返回 null。

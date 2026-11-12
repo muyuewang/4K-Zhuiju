@@ -7,6 +7,8 @@
 
 #include <windows.h>
 
+#include <memory>
+
 // 桌面窗口能力通道：窗口全屏 / 最小尺寸。
 //
 // 为什么必须走原生：
@@ -31,6 +33,18 @@ class WindowChannel {
   static int MinWidth();
   static int MinHeight();
   static bool IsFullscreen();
+
+  // 读取系统代理设置（HKCU\...\Internet Settings 的 ProxyEnable / ProxyServer）。
+  //
+  // 为什么必须在原生层做，而不是 Dart 里 `Process.run('reg', ...)`：
+  //   "启动外部进程执行命令行" 是杀毒软件行为监控里权重极高的一条规则。
+  //   本程序没有数字签名，一旦拉起 reg.exe，Defender 就会把
+  //   「无签名程序 + 创建子进程执行命令」判成 "执行来自攻击者的命令"
+  //   （实测 2026-11-12 用户机器报 Trojan 并隔离）。
+  //   改成进程内直接调 RegGetValueW 后，全程不产生任何子进程，
+  //   行为特征回归「普通桌面程序读自己的配置」。
+  static void ReadSystemProxy(
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 };
 
 #endif  // RUNNER_WINDOW_CHANNEL_H_

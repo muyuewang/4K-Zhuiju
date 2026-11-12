@@ -65,3 +65,6 @@ s.jpg
 .DS_Store
 Thumbs.db
 desktop.ini
+# 临时工作目录（调试脚本产物、一次性探针）
+.tmp2/
+.workbuddy/tmp/

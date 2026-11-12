@@ -68,7 +68,7 @@ void main() {
     DramaDetail det;
     try {
       final list = await api.category('25');
-      det = await api.detail('${list.first.id}');
+      det = await api.detail(list.first.id);
     } catch (e) {
       print('[skip] 拿不到直播详情：$e');
       return;

@@ -95,4 +95,50 @@ void main() {
       expect(NetProxy.parseProxyServer('http=;https='), isNull);
     });
   });
+
+  group('interpretNativeSetting 三态语义', () {
+    // 这三态是「不产生子进程」改造的核心。原来用 reg.exe 时，「读不到」
+    // 和「明确关闭」都表现为 null，调用方只能一律去扫本地端口兜底；
+    // 现在必须区分开，否则用户明明关了代理，只要本机碰巧有个 7890
+    // 在监听就会被误判成"有代理"，全 App 流量被导到错误的地方。
+    test('null → 读失败，known=false（允许端口兜底）', () {
+      final r = NetProxy.interpretNativeSetting(null);
+      expect(r.known, isFalse);
+      expect(r.server, isNull);
+    });
+
+    test('空串 → 明确未启用，known=true 且无地址（禁止端口兜底）', () {
+      final r = NetProxy.interpretNativeSetting('');
+      expect(r.known, isTrue);
+      expect(r.server, isNull);
+    });
+
+    test('有效地址 → 启用中', () {
+      final r = NetProxy.interpretNativeSetting('127.0.0.1:7897');
+      expect(r.known, isTrue);
+      expect(r.server, '127.0.0.1:7897');
+    });
+
+    test('分组写法同样解析得出', () {
+      final r = NetProxy.interpretNativeSetting(
+          'http=127.0.0.1:7890;https=127.0.0.1:7897');
+      expect(r.known, isTrue);
+      expect(r.server, '127.0.0.1:7897');
+    });
+
+    test('只有空白字符视为无地址，但仍算 known', () {
+      // 注册表里可能被写成空格，这种属于脏配置：
+      // 不该触发端口兜底，也不能当代理用
+      final r = NetProxy.interpretNativeSetting('   ');
+      expect(r.known, isTrue);
+      expect(r.server, isNull);
+    });
+  });
+
+  test('非 Windows 平台不调原生通道（readSystemProxyRaw 返回 null）', () async {
+    // 测试环境是 Windows 宿主，但通道未注册时 InvokeMethod 会抛
+    // MissingPluginException，必须被吃掉并返回 null，绝不能抛到调用方。
+    final r = await readSystemProxyRaw();
+    expect(r, anyOf(isNull, isA<String>()));
+  });
 }

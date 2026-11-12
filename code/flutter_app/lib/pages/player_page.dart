@@ -110,6 +110,27 @@ class PlayerPage extends StatefulWidget {
 class _PlayerPageState extends State<PlayerPage> {
   VideoPlayerController? _ctrl;
 
+  /// 播放代次：每次 [_resolve] 递增，让还在飞的旧流程自己作废。
+  ///
+  /// **为什么必须有它**
+  ///
+  /// 「换源」按钮没有节流。网络慢的时候用户可以连点好几次，每次都会
+  /// 完整走一遍 `_resolve`（解析地址）→ `_startPlay`（新建 controller
+  /// 并 `initialize`）。这些流程是**并存**的：A 还在解析，B 已经开始。
+  ///
+  /// 没有代次保护时，后完成的那个把 `_ctrl` 字段覆盖成自己的 controller，
+  /// **先完成的那个 controller 就此失去所有引用** —— 永远不会 `dispose`。
+  /// 它占着的解码器和 socket 也就永远不还，直到进程被杀。
+  ///
+  /// 用户报的现象正是这条路径：
+  /// 「偶尔多次快速切换线路 → 某条线路一直转圈出不来画面 → 返回后
+  ///   下拉刷新分组列表就超时 → 怎么刷都不好 → 重开 App 秒出」。
+  /// 转圈的那条线路是最大的泄漏源（`initialize` 正挂着网络连接），
+  /// 而「重开就好」是因为进程退出会把 socket 一次性还给系统。
+  ///
+  /// 有了代次，被作废的流程在自己结束时会把 controller 释放掉。
+  int _playGen = 0;
+
   /// 本条线路所属的数据源，进入页面时定死。
   ///
   /// 不能在每次取址时读「当前源」：播放中途用户可能在别处切了源，
@@ -371,6 +392,9 @@ class _PlayerPageState extends State<PlayerPage> {
 
   @override
   void dispose() {
+    // 作废所有还在飞的解析/初始化流程：它们回来时会看到代次变了，
+    // 从而自己把 controller 释放掉，不会去碰已经销毁的 State。
+    _playGen++;
     desktopFullscreen.removeListener(_onNativeFullscreenChanged);
     if (isDesktop || tvModeOn) {
       HardwareKeyboard.instance.removeHandler(_onGlobalKey);
@@ -729,6 +753,10 @@ class _PlayerPageState extends State<PlayerPage> {
   Future<void> _resolve({DramaVideo? video}) async {
     if (video != null) _cur = video;
 
+    // 本次流程的代次。之后每个 await 返回点都要重新核对一次：
+    // 数字变了就说明用户已经又切了线路，本次流程一律作废。
+    final gen = ++_playGen;
+
     // 换集/换源一律取消待播的自动连播，避免倒计时结束后又把用户拉回去
     _countdownTimer?.cancel();
     _pendingNext = null;
@@ -736,6 +764,9 @@ class _PlayerPageState extends State<PlayerPage> {
     _autoNextHandled = false;
 
     await _disposeCtrl();
+    // dispose 期间用户可能又点了换源：这一次直接让位给更新的那次，
+    // 否则两个流程会同时往下走，各自建一个 controller。
+    if (gen != _playGen || !mounted) return;
 
     setState(() {
       _resolving = true;
@@ -750,12 +781,15 @@ class _PlayerPageState extends State<PlayerPage> {
 
     // 弹幕与地址解析并行：两者互不依赖，串行会让首帧多等一次往返。
     // 失败不抛异常也不提示——弹幕拉不到不影响播放。
-    unawaited(_loadDanmaku());
+    unawaited(_loadDanmaku(gen));
 
     String url;
     try {
       final v = _cur;
       url = await _resolveUrl(v);
+      // 解析期间用户可能已经切到别的线路。不拦的话，这条已作废的结果
+      // 会继续往下建 controller，把新的那条挤掉（见 _playGen 注释）。
+      if (gen != _playGen || !mounted) return;
       // 接口「成功」不代表拿到的是能播的地址。
       //
       // 独家短剧（hgdj）实测返回 code=200 且 playUrl 就是
@@ -772,7 +806,8 @@ class _PlayerPageState extends State<PlayerPage> {
       }
       _realUrl = url;
     } catch (e) {
-      if (!mounted) return;
+      // 这条流程已被作废：它的失败不该覆盖新流程的界面状态
+      if (gen != _playGen || !mounted) return;
       setState(() {
         _resolving = false;
         _err = e is _UnplayableException ? e.message : friendlyError(e);
@@ -782,7 +817,7 @@ class _PlayerPageState extends State<PlayerPage> {
 
     // 地址已拿到：立刻结束骨架屏，进入「播放器初始化中」的 loading 态。
     // 这个阶段下载按钮就该能点，所以不能等播放器就绪。
-    if (!mounted) return;
+    if (gen != _playGen || !mounted) return;
     setState(() {
       _resolving = false;
       _playLoading = true;
@@ -805,46 +840,56 @@ class _PlayerPageState extends State<PlayerPage> {
       unawaited(_recast(url));
     }
 
-    await _startPlay(url);
+    await _startPlay(url, gen);
   }
 
   /// 启动播放器；失败只记录 _playErr，不影响下载/换源
-  Future<void> _startPlay(String url) async {
+  ///
+  /// [gen] 是发起这次播放时的代次。`initialize()` 通常要几百毫秒到几十秒
+  /// （弱网、源站半挂时最长会撞到 30 秒的超时上限）。这段时间里用户完全
+  /// 可能又点了换源。到那时**这里面新建的 controller 必须自己释放**：
+  /// 它已经不会被赋给 `_ctrl` 了，不释放就是一条永久泄漏的解码器 +
+  /// 网络连接，攒几次之后连新请求都发不出去。
+  Future<void> _startPlay(String url, int gen) async {
     VideoPlayerController? ctrl;
     try {
-      // 桌面端把 m3u8 包一层本地代理再交给 Media Foundation。
+      // 桌面端把 m3u8 包一层本地代理。
       //
-      // MF 自带的 HLS 解析器对「相对分片地址 + 含百分号编码的基址」
-      // 处理有缺陷，实测短剧 B蓝光（清单里是 `0000000.ts` 这种相对路径，
-      // 基址是 `.../video/xxx/全集/index.m3u8`）会直接报
-      // `MF_MEDIA_ENGINE_EVENT_ERROR: file not found / corrupted / not supported`，
-      // 而分片地址是绝对路径的 BL 线路一直正常。
-      // 代理负责把相对地址展开、清掉源站私货注释，具体原因见 hls_proxy.dart。
+      // 2026-11-12 换了播放内核（video_player_win/Media Foundation →
+      // video_player_media_kit/libmpv+FFmpeg）之后，这层代理的**理由变了**，
+      // 但结论仍是「必须保留」。两条理由分别记：
       //
-      // 只对 m3u8 生效：mp4 直链在 MF 上一直没问题，没必要多一跳。
-      // Android 走 ExoPlayer，原生支持相对地址，保持直连（少一层转发）。
+      // 【旧理由，已被内核换掉】MF 自带的 HLS 解析器对「相对分片地址 +
+      // 含百分号编码的基址」处理有缺陷，短剧 B蓝光 会报
+      // file not found / corrupted；也不支持 AES-128 加密流。
+      // FFmpeg 这三个能力都是内置的，所以这部分不再需要代理兜。
+      //
+      // 【新理由，反而更硬】libmpv 走的是自己的网络栈（FFmpeg 的
+      // network.c），**完全不读 Windows 系统代理**。而本项目有四个源
+      // （云影 / 低调影视 / 极速追剧 / 4K影视）直连不通、必须走代理。
+      // 播放地址若裸交给 libmpv，它就会直连，结果就是「网页能播、
+      // App 里转圈」。经这层代理转发时，请求由 Dart 的 HttpClient 发出，
+      // 而 NetProxy 已经给 HttpClient 装了系统代理 —— 于是视频流也被
+      // 带上了代理。这是当前唯一能让 libmpv 的流量走代理的通道。
+      //
+      // 只对 m3u8 生效：mp4 直链同样存在上面的代理问题，但它一直没出
+      // 过播放事故，先不动（改它要重跑一遍所有源的回归）。
+      // Android 走 ExoPlayer，它本身读系统代理，保持直连（少一层转发）。
       final playUrl = isDesktop ? await HlsProxy.instance.wrap(url) : url;
+      // 包代理这一步也可能比较慢，返回时同样要核对代次
+      if (gen != _playGen || !mounted) return;
 
       ctrl = VideoPlayerController.networkUrl(
         Uri.parse(playUrl),
-        // 桌面端绝不能带 httpHeaders，这是 HLS 在 Windows 上播不出来的死因。
+        // 桌面端传空请求头。
         //
-        // video_player_win 的原生实现（my_grabber_player.cpp:OpenURL）有两条分支：
-        //     if (!httpHeaders.empty() && url 以 http 开头)
-        //         → SetSourceFromByteStream(自己实现的 WinHttp 字节流)
-        //     else
-        //         → SetSource(url)   // 交给 Media Foundation 自己解析
-        //
-        // 也就是说：只要传了请求头，m3u8 就会被当成一个「普通字节流」喂给
-        // Media Foundation，播放列表的语义彻底丢失（它拿到的是清单文本，
-        // 而不是可解码的媒体流），于是直接报 SRC_NOT_SUPPORTED。
-        // 短剧的 B蓝光 / BL 全是 HLS，因此桌面端一条都放不出来，
-        // 而 Android 走 ExoPlayer 原生支持 HLS，同一地址一直正常——
-        // 这就是「APK 能播、桌面版不能播」的全部原因。
-        //
-        // 不传请求头时走 SetSource(url)，Media Foundation 会自行处理
-        // m3u8 清单与分片请求。实测 B蓝光 / BL 两条线路都不需要
-        // 自定义 UA 或 Referer，所以桌面端去掉请求头不影响可用性。
+        // 这条约束来自**旧内核**：video_player_win 的原生实现在
+        // `httpHeaders` 非空时会走 SetSourceFromByteStream，把 m3u8 当成
+        // 普通字节流喂给 Media Foundation，播放列表语义丢失 → 报
+        // SRC_NOT_SUPPORTED。新内核（media_kit）其实正确支持 httpHeaders
+        // （它映射到 mpv 的 http-header-fields），所以这条限制理论上可以
+        // 放开；但在没有真实源站逐条验证之前不动——现在直连 m3u8 的
+        // 请求头本来就不需要，放开只会引入新的不确定性。
         httpHeaders: isDesktop
             ? const {}
             : const {
@@ -855,6 +900,17 @@ class _PlayerPageState extends State<PlayerPage> {
       // 超时保护：源站半死不活时 initialize 可能挂几分钟，
       // 没有超时用户只会看到一个永远转圈的 loading。
       await ctrl.initialize().timeout(const Duration(seconds: 30));
+
+      // ★ 关键：这条 controller 是在「旧代次」里建的，用户已经切走了。
+      //   必须自己释放。不回这里，它既不会被赋给 _ctrl，也没人 dispose，
+      //   解码器 + 网络连接就永远挂着——这正是「快速切几次线路之后
+      //   整个 App 都连不出去」的来源。
+      if (gen != _playGen || !mounted) {
+        try {
+          await ctrl.dispose();
+        } catch (_) {}
+        return;
+      }
 
       // 续播：仅首次进入、且调用方给了进度时跳一次。
       // 必须在 play() 之前 seek —— 先 play 再 seek，用户会先听到
@@ -889,7 +945,9 @@ class _PlayerPageState extends State<PlayerPage> {
         await ctrl.play();
       }
 
-      if (!mounted) {
+      if (!mounted || gen != _playGen) {
+        // gen 变了：这条 controller 属于已作废的流程，必须自己释放，
+        // 否则就是一条永久泄漏（见 _playGen 注释）
         await ctrl.dispose();
         return;
       }
@@ -911,7 +969,9 @@ class _PlayerPageState extends State<PlayerPage> {
       try {
         await ctrl?.dispose();
       } catch (_) {}
-      if (!mounted) return;
+      // 已作废的流程不能把自己的失败写进界面：用户已经切到新线路了，
+      // 这里再报一句错，等于把新线路的加载态冲掉。
+      if (!mounted || gen != _playGen) return;
       setState(() {
         _ctrl = null;
         _playLoading = false;
@@ -1075,7 +1135,7 @@ class _PlayerPageState extends State<PlayerPage> {
   ///
   /// 定位用的两个参数都不是剧名/链接，而是「剧集 id + 集数序号」：
   /// 服务端按这两者索引每一集的弹幕池（实测传剧名返回 0 条）。
-  Future<void> _loadDanmaku() async {
+  Future<void> _loadDanmaku(int gen) async {
     final ep = _cur.episode;
     final id = widget.dramaId;
     // 该源根本没有弹幕池（kanju），不必发请求、也不该显示「暂无弹幕」。
@@ -1099,6 +1159,8 @@ class _PlayerPageState extends State<PlayerPage> {
     if (!mounted) return;
     // 拉取期间用户可能已经换了集，回来晚的结果不能覆盖新集的弹幕
     if (_cur.episode != ep) return;
+    // 本次流程已被换源/换集作废：连界面状态都别碰
+    if (gen != _playGen) return;
     setState(() {
       _danmaku = list;
       _dmLoaded = true;

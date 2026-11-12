@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/material.dart';
+import 'package:video_player_media_kit/video_player_media_kit.dart';
 
 import 'core/desktop_window.dart';
 import 'core/download.dart';
@@ -24,6 +25,20 @@ import 'core/tokens.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Windows 播放内核换成 FFmpeg（libmpv），必须在任何播放器创建之前完成。
+  //
+  // 为什么需要这一步：video_player 在 Windows 上原本落到系统的
+  // Media Foundation，而它的 HLS 解析器不支持 AES-128 加密流、也拼不对
+  // 相对分片地址，于是「APK 能播、Windows 播不了」。这里把 video_player
+  // 的 Windows 平台实现替换成 media_kit（libmpv + FFmpeg），
+  // 和 PotPlayer / 浏览器同一套解析逻辑，那两类问题一次性消失。
+  //
+  // 只开 windows：Android 走 ExoPlayer，本来就对 HLS/AES 支持完整，
+  // 换内核反而会丢掉 Android 专有的硬解与低延迟配置，没必要动。
+  //
+  // 放在 NetProxy.install() 之前：它内部要加载 libmpv-2.dll 并起解码线程，
+  // 与网络无关；早装可以让后面的首播少等一次初始化。
+  VideoPlayerMediaKit.ensureInitialized(windows: true);
   // 代理必须最先装：它挂的是 dart:io 的 HttpClient 工厂，
   // 晚于任何一次请求再装，那一次就已经直连过了（首屏封面正好在那一批里）。
   //

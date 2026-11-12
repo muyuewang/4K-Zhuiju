@@ -1,7 +1,7 @@
 name: zhuiju
 description: 4K追剧 — 高清影视聚合客户端（Android / Windows）
 publish_to: 'none'
-version: 1.10.2+19
+version: 1.10.7+24
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -13,10 +13,29 @@ dependencies:
   dio: ^5.4.0
   pointycastle: ^3.7.3
   video_player: ^2.8.2
-  # video_player 官方只实现了 Android/iOS/macOS/web。
-  # Windows 由这个插件补上（它 implements: video_player，
-  # 所以业务代码里仍然只用 video_player 的 API，不需要 if/else 分平台）。
-  video_player_win: ^3.3.1
+  # Windows 的播放内核 —— 这里换过一次，改动原因记在这，别再换回去：
+  #
+  # 原来用 video_player_win，它底层是系统的 **Media Foundation**。
+  # MF 的 HLS 解析器是个「能跑但不健全」的实现，实测三类片源全废：
+  #   1. 相对地址分片 + 含百分号编码的基址 → 拼错，报 file not found
+  #   2. `#EXT-X-KEY:METHOD=AES-128` 加密流 → 完全不支持，黑屏
+  #   3. 多级 master/variant 清单 → 展开不了，一直转圈
+  # 而 Android 端一直是好的（ExoPlayer 原生支持这三样），于是长期存在
+  # 「APK 能播、Windows 播不了」这个顽固现象。
+  #
+  # 现在换成 video_player_media_kit：它把 video_player 在 Windows 下的
+  # **平台实现**整个替换成 media_kit（libmpv + FFmpeg）。关键好处是
+  # 业务代码一行都不用改——player_page 里仍然只写 VideoPlayerController，
+  # 但底下跑的是 FFmpeg，和 PotPlayer / 浏览器同一套解析逻辑。
+  # 上面那三类问题因此一次性消失，也不需要我们自己写 AES 解密。
+  video_player_media_kit: ^2.0.0
+  media_kit: ^1.2.6
+  media_kit_video: ^2.0.1
+  # **只装 Windows 的预编译库**（libmpv-2.dll + ANGLE），不装全平台的
+  # `media_kit_libs_video`。后者是个 meta 包，会顺带把 android/ios/macos/
+  # linux 的 libmpv 全部拉进依赖树；而我们只在 Windows 用这个内核
+  # （Android 仍是 ExoPlayer），那些库会被原样打进 APK，纯属白胖几十兆。
+  media_kit_libs_windows_video: ^1.0.11
   path_provider: ^2.1.2
   cached_network_image: ^3.3.1
   shared_preferences: ^2.2.2

@@ -10,9 +10,13 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'data_source.dart';
+import 'ddys_source.dart';
+import 'jisu_source.dart';
 import 'kanju_source.dart';
 import 'keke1_source.dart';
+import 'kvm4k_source.dart';
 import 'site_sources.dart';
+import 'yuny_source.dart';
 import 'zhuiju_source.dart';
 
 class SourceRegistry {
@@ -37,6 +41,10 @@ class SourceRegistry {
     kLiangziSource,
     kPiankuSource,
     Keke1Source.instance,
+    Kvm4kSource.instance,
+    JisuSource.instance,
+    YunySource.instance,
+    DdysSource.instance,
   ];
 
   static List<DataSource> get all => List.unmodifiable(_all);

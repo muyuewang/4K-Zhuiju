@@ -8,10 +8,10 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v1.10.2-ff7a29?style=flat-square" alt="版本">
+  <img src="https://img.shields.io/badge/版本-v1.10.7-ff7a29?style=flat-square" alt="版本">
   <img src="https://img.shields.io/badge/平台-Android%20%7C%20Windows-3ddc84?style=flat-square" alt="平台">
-  <img src="https://img.shields.io/badge/大小-56.3MB-blue?style=flat-square" alt="大小">
-  <img src="https://img.shields.io/badge/片库-33万%2B-52c41a?style=flat-square" alt="片库">
+  <img src="https://img.shields.io/badge/大小-56.8MB-blue?style=flat-square" alt="大小">
+  <img src="https://img.shields.io/badge/数据源-10%20个-52c41a?style=flat-square" alt="数据源">
   <img src="https://img.shields.io/badge/广告-无-ff4d4f?style=flat-square" alt="无广告">
 </p>
 
@@ -174,22 +174,33 @@
 
 ## 片源从哪来
 
-App 里内置 6 个数据源，可以在「我的 → 数据源」里切换和排序。v1.10.0 新增的是两个片子库大、线路直出的源：
+App 里内置 **10 个数据源**，可以在「我的 → 数据源」里切换和排序。
 
-| 源 | 片库 | 特点 |
-|:---|---:|:---|
-| 大师兄 · 暴风 | 171,460 条 | 线路直出 m3u8，稳定性最好 |
-| 大师兄 · 量子 | 163,457 条 | 短剧 / 解说 / AI 漫剧资源极多 |
+| 源 | 类型 | 特点 |
+|:---|:---|:---|
+| 橘汁（默认） | 加密 API | 分类齐全、支持弹幕，单一线路 |
+| 看剧（多线路） | 网页解析 | 多线路、首页分区榜单，无弹幕 |
+| 大师兄 · 暴风 | JSON 采集 | 线路直出 m3u8，片库 17 万+ |
+| 大师兄 · 量子 | JSON 采集 | 短剧 / 解说 / AI 漫剧极多，片库 16 万+ |
+| 片库 4K | 网页解析 | 分类按电影 / 剧集 / 动漫划分 |
+| 可可影视 | 网页解析 | 需通过源站准入校验，源站不可达时会提示切换 |
+| 4K影视 | 网页解析 | 需系统代理；4K 线路需站点 VIP，自动降级 1080P |
+| 极速追剧 | 网页解析 | 需系统代理；线路较多，各线路集数可能不同 |
+| 云影 | 网页解析 | 需系统代理；分类齐全，各线路集数可能不同 |
+| 低调影视 | 网页解析 | 需系统代理；在线播放直出，另有网盘资源 |
 
-两者互补：同一部剧经常一个站有、一个站没有，或两边线路质量不同，正好用来做「这条线挂了换那条」。
+多源的意义在于互补：同一部剧经常一个站有、一个站没有，或两边线路质量不同，正好用来做「这条线挂了换那条」。
 
-这两个源走的是**标准 JSON 采集接口**（`/api.php/provide/vod/`），不是啃网页 HTML。好处很直接：
+采集类源走的是**标准 JSON 采集接口**（`/api.php/provide/vod/`），不是啃网页 HTML。好处很直接：
 
 - 页面模板改版不会把源搞挂，只要字段名不变就一直能用
 - 详情接口一次返回全部播放地址，不用每集再抓一次播放页，点开更快
 - 只有域名和 UA 是脆弱点，比正则匹配 class 名稳得多
 
-**片库大不等于每部都能看。** 采集站的内容由对方维护，冷门老剧、刚上线的新剧都可能缺。搜不到就是真没有，这不是本地数据库，变不出来。
+说明两件事：
+
+- **需要系统代理的源**（4K影视 / 极速追剧 / 云影 / 低调影视）在原站国内直连不通，App 会自动读取 Windows 系统代理设置；Android 端走系统网络，一般无需额外设置。
+- **片库大不等于每部都能看。** 采集站的内容由对方维护，冷门老剧、刚上线的新剧都可能缺。搜不到就是真没有，这不是本地数据库，变不出来。
 
 > 关于「大师兄影视」那个 App：它自己不托管视频，13 条线路本质是在包装公开采集接口，中间还套了一层会失效的 php 中转。所以这里没有复刻它的中转栈，而是直连原始接口——线路更少，但每条都是真的。
 
@@ -198,22 +209,22 @@ App 里内置 6 个数据源，可以在「我的 → 数据源」里切换和�
 ## 下载安装
 
 <p>
-<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.10.2/4KZhuiju-v1.10.2-release.apk"><b>⬇ Android 版（APK · 56.3 MB）</b></a>
+<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.10.7/4KZhuiju-v1.10.7-release.apk"><b>⬇ Android 版（APK · 56.8 MB）</b></a>
 　|　
-<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.10.2/4KZhuiju-v1.10.2-windows-x64.zip"><b>⬇ Windows 版（ZIP · 12.2 MB）</b></a>
+<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.10.7/4KZhuiju-v1.10.7-windows-x64.zip"><b>⬇ Windows 版（ZIP · 31.7 MB）</b></a>
 </p>
 
 全部版本见 [Releases](https://github.com/muyuewang/4K-Zhuiju/releases)。
 
 ### Android
 
-1. 下载 `4KZhuiju-v1.10.2-release.apk`（56.3 MB）
+1. 下载 `4KZhuiju-v1.10.7-release.apk`（56.8 MB）
 2. 手机上点开安装，如果提示「未知来源」，在设置里允许一次即可
 3. 系统要求：Android 7.0 及以上
 
 ### Windows
 
-1. 下载 `4KZhuiju-v1.10.2-windows-x64.zip`（12.2 MB，解压后约 30 MB）
+1. 下载 `4KZhuiju-v1.10.7-windows-x64.zip`（31.7 MB，解压后约 77 MB）
 2. 解压到任意文件夹（**不要**只把 exe 拖出来，它旁边还有 dll 和 data 目录）
 3. 双击 `zhuiju.exe`
 4. 系统要求：Windows 10 及以上，64 位
@@ -245,6 +256,15 @@ App 里内置 6 个数据源，可以在「我的 → 数据源」里切换和�
 **Q：播放卡顿 / 一直转圈怎么办？**
 先点一下「换源」。一部剧通常有十几个源，A 源慢不代表 B 源也慢。还不行就换个时间段，晚高峰公共源普遍吃力。
 
+**Q：以前出现过「下拉刷新一直超时，怎么刷都不行，杀掉 App 重开就秒出」，现在还有吗？**
+已经修了，v1.10.7 起不会再出现。
+
+原因是请求超时的写法有缺陷：`.timeout()` 只让界面不再等，**并不会真的取消底层请求**，那条连接仍然挂在系统里。反复刷新失败一次就漏一条，攒够之后本地端口和 NAT 会话表被占满，新的连接根本发不出去——表现就是「连接超时，请检查网络」，而且越刷越糟。杀掉 App 会把所有连接一次性还给系统，所以重开就好。
+
+同一类缺陷还修了「快速连点换源」：多个解析流程并存时，先完成的那个播放器会失去引用、永远不释放，解码器和连接一起泄漏。
+
+现在每个请求在超时后都会主动 abort，换源也有代次保护，作废的流程会自己收拾干净。补了两个回归测试盯着这件事，其中一个是静态扫描，以后加新数据源时写法倒退会直接测试失败。
+
 **Q：下载的视频在哪？**
 「我的」→「下载管理」能看到全部，点进去有保存路径。默认在 App 私有目录，也可以改到相册可见的位置。
 
@@ -272,6 +292,38 @@ flutter build windows --release    # 出 EXE
 ```
 
 产物分别在 `build/app/outputs/flutter-apk/` 和 `build/windows/x64/runner/Release/`。
+
+### 如果 `flutter build windows` 报找不到 VS 工具链
+
+Flutter 判断 VS 是否安装，是靠执行 `reg query` 查注册表。**如果机器上安全策略把 `reg.exe` 加进了程序黑名单**，就会得到：
+
+```
+Unable to find suitable Visual Studio toolchain. Please run `flutter doctor` for more details.
+```
+
+这时 `flutter doctor` 会直接给出真因（`Flutter failed to run "reg query ..."`），工具链其实完好。两条路可选：
+
+**一、把 `reg.exe` 从黑名单移除**（推荐），之后 `flutter build windows` 恢复正常。
+
+**二、直接用 CMake 驱动编译**，绕过 Flutter 的探测：
+
+```bash
+env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
+  "/c/Program Files/CMake/bin/cmake.exe" \
+  --build build/windows/x64 --config Release --target zhuiju
+```
+
+两个必须注意的点：
+
+1. **清掉大小写两套代理环境变量**。不清会报 `MSB6001: CL.exe 的命令行开关无效`，真因是 MSBuild 构造子进程环境时 Hashtable 键冲突。
+2. **手动同步 `app.so` 并校验 md5**。CMake 的新产物落在 `build/windows/app.so`，而 `Release/data/app.so` 还是旧的。直接打包会把旧代码发出去：
+
+```bash
+cp build/windows/app.so build/windows/x64/runner/Release/data/app.so
+md5sum build/windows/app.so build/windows/x64/runner/Release/data/app.so   # 两者必须一致
+```
+
+> 只比文件大小不可靠——历史上有过大小相同但 md5 不同的情况。
 
 技术栈和目录说明见 [doc/项目说明.md](doc/项目说明.md)。
 

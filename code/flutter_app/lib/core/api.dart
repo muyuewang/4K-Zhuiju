@@ -37,6 +37,13 @@ class ZhuijuApi {
   /// 备用域名：主域被墙时可换
   static String baseUrl = host;
 
+  /// 整条重试链的总期限。
+  ///
+  /// 抽成可写字段只为一件事：让 `test/api_cancel_on_timeout_test.dart`
+  /// 能把 18 秒压到几百毫秒，否则一条用例要跑一分钟。生产路径不写它，
+  /// 行为与原先的 `const Duration(seconds: 18)` 完全一致。
+  static Duration retryDeadline = const Duration(seconds: 18);
+
   /// 固定设备指纹（与原 App 抓包一致，避免风控）
   static const String deviceId = '3342CF6E5B34747029419DBA6B159A35';
   static const String androidId = 'f00b0e69983f85a9';
@@ -128,16 +135,8 @@ class ZhuijuApi {
   /// 业务错误（code != 200）不重试——那是服务端明确拒绝，重试没意义。
   Future<Uint8List> _post(String path, Map<String, String> params) async {
     const maxAttempt = 3;
-    // 整条重试链的总期限。
-    //
-    // 为什么需要它：界面层的 `.timeout()`（PagedGrid / FeedView 的
-    // requestDeadline）只让**界面**不再等，并不会取消底层这次请求。
-    // 单个请求 8s 连接 + 15s 接收，叠 3 次能拖到 69s 以上；这期间它
-    // 一直占着 Dio 的连接池。用户连点几次换集 / 反复返回首页重刷，
-    // 挂起的请求越积越多，连接池被占满，之后的请求只能排队 ——
-    // 表现就是「换集出不来 → 列表永久转圈 → 杀掉重开就好」。
-    // 有了总期限，超时后立刻把异常抛回，让连接尽早释放。
-    final deadline = DateTime.now().add(const Duration(seconds: 18));
+
+    final deadline = DateTime.now().add(retryDeadline);
     Object? lastErr;
 
     for (var attempt = 0; attempt < maxAttempt; attempt++) {
@@ -146,20 +145,42 @@ class ZhuijuApi {
         // 0.4s → 1.2s，短退避即可；用户还在等页面出来
         await Future<void>.delayed(Duration(milliseconds: 400 * attempt * 3));
       }
+
+      // 每次尝试都用一个**独立的** CancelToken。
+      //
+      // 不能全程共用一个：一旦某次尝试被 cancel，同一个 token 上后续的
+      // 请求会被 dio 立刻拒掉，重试就彻底失效了。
+      final token = CancelToken();
       try {
         final remain = deadline.difference(DateTime.now());
         if (remain <= Duration.zero) break;
-        return await _postOnce(path, params).timeout(remain);
+        return await _postOnce(path, params, token).timeout(remain);
       } on ApiException {
         rethrow; // 业务错误，重试无用
       } catch (e) {
+        // ★ 本轮修复的核心 ★
+        //
+        // `.timeout()` 只让**这里**不再等，底层的 Dio 请求和它的 socket
+        // 仍然活着。原来没有 cancel，于是每次「界面已经报错」之后，
+        // 进程里都还挂着一条真实连接：连接已建立就继续憋着等响应
+        // （receiveTimeout 级别的），还在握手就继续握。用户反复下拉
+        // 刷新 → 僵尸连接越攒越多 → 本地端口和 NAT 会话表被占满 →
+        // 新的 SYN 发不出去也没人回 → connect() 卡满 8 秒 → 界面上
+        // 就是「连接超时，请检查网络」。杀掉 App 会把所有 socket 一次
+        // 性还给系统，所以「重开就秒出」。
+        //
+        // 这里无条件 cancel：无论这次尝试是超时、SocketException 还是
+        // 其它异常，那条连接都已经没有继续存在的理由了。
+        if (!token.isCancelled) {
+          token.cancel('attempt ${attempt + 1} aborted: $e');
+        }
         lastErr = e;
         if (!_isRetryable(e)) rethrow;
         debugPrint('[API] $path attempt ${attempt + 1}/$maxAttempt failed: $e');
       }
     }
     throw lastErr ??
-        TimeoutException('接口重试超时', const Duration(seconds: 18));
+        TimeoutException('接口重试超时', retryDeadline);
   }
 
   /// 只有连接层问题值得重试；超时/断开/无网络都算
@@ -181,11 +202,13 @@ class ZhuijuApi {
     return false;
   }
 
-  Future<Uint8List> _postOnce(String path, Map<String, String> params) async {
+  Future<Uint8List> _postOnce(
+      String path, Map<String, String> params, CancelToken token) async {
     final body = _buildBody(params);
     final resp = await _dio.post<List<int>>(
       '$baseUrl$path',
       data: body,
+      cancelToken: token,
       options: Options(
         headers: {
           'Content-Type': 'application/x-protobuf',

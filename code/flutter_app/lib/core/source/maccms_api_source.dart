@@ -260,11 +260,15 @@ class MacCmsApiSource implements DataSource {
         if (DateTime.now().isAfter(deadline)) break;
         await Future<void>.delayed(Duration(milliseconds: 350 * attempt));
       }
+      // 每次尝试独立一个 token：共用一个的话，第一次 cancel 之后
+      // 后面几轮请求会被 dio 直接拒掉，重试等于失效。
+      final token = CancelToken();
       try {
         final remain = deadline.difference(DateTime.now());
         if (remain <= Duration.zero) break;
         final r = await _dio
-            .get(cfg.apiUrl, queryParameters: query)
+            .get(cfg.apiUrl,
+                queryParameters: query, cancelToken: token)
             .timeout(remain);
         final code = r.statusCode ?? -1;
         if (code != 200) {
@@ -282,6 +286,10 @@ class MacCmsApiSource implements DataSource {
         if (e.code >= 500 || e.code == -1) continue;
         rethrow;
       } catch (e) {
+        // ★ 关键：`.timeout()` 只让这里不再等，底层请求和 socket 还活着。
+        // 不 cancel 的话每次失败都留一条僵尸连接，反复换集/重刷会把它
+        // 攒满，最后表现成「连不上、重启才好」。
+        if (!token.isCancelled) token.cancel('attempt ${attempt + 1} aborted: $e');
         // 超时 / 连接被重置 / JSON 截断，都还有重试价值
         last = e;
       }
