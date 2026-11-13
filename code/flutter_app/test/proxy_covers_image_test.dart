@@ -64,8 +64,8 @@ void main() {
 
   test('findProxyFor 对本机返回 DIRECT（避免代理套代理）', () {
     NetProxy.install();
-    // HlsProxy 与本地静态服务都监听 127.0.0.1，
-    // 一旦被塞进代理就会「代理去连代理」，播放与封面全挂。
+    // 本地静态服务监听 127.0.0.1，
+    // 一旦被塞进代理就会「代理去连代理」，请求与封面全挂。
     expect(NetProxy.findProxyFor(Uri.parse(origin)), 'DIRECT');
   });
 }

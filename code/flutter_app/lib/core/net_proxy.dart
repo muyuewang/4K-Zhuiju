@@ -19,8 +19,8 @@
 /// ## 为什么用 HttpOverrides 而不是逐个改 Dio
 ///
 /// 全 App 的 HTTP 出口很分散：8 个 Dio 实例、`SiteHttp` 里裸的 `HttpClient`
-/// （准入 PoW 必须复用同一条 keep-alive 连接，不能换成 Dio）、`HlsProxy`
-/// 的转发、`cached_network_image` 内部的 `package:http`，还有 `video_player`。
+/// （准入 PoW 必须复用同一条 keep-alive 连接，不能换成 Dio）、
+/// `cached_network_image` 内部的 `package:http`，还有 `video_player`。
 /// 逐个注入代理既容易漏，也会在以后新增请求点时再漏一次。
 ///
 /// `HttpOverrides.global` 卡在 `HttpClient()` 工厂这一层，**所有**走 dart:io
@@ -100,16 +100,24 @@ class NetProxy {
 
   /// 判定本次请求该不该走代理。
   ///
-  /// **本机/内网必须直连**：`HlsProxy` 自己监听 `127.0.0.1:<随机端口>`，
-  /// 播放器来拉清单时如果被塞进代理，就会变成「代理去连代理」——
-  /// 直接死循环或者 502，整个 HLS 播放全挂。这条不是优化，是正确性。
+  /// **本机/内网必须直连**：本机可能跑着投屏服务、本地播放服务或开发
+  /// 服务器，请求若被塞进代理，就会变成「代理去连代理」——
+  /// 直接死循环或者 502，整条链路全挂。这条不是优化，是正确性。
+  ///
+  /// 这个判定是**全 App 唯一的**「本机/内网」定义，libmpv 那一侧也调它
+  /// （见 [MpvProxyEnv]）。曾经两处各写一份名单，结果 FFmpeg 那份写成了
+  /// `10.*` 这种它根本不认的形式，内网照样被塞进代理 —— 共用同一份实现
+  /// 才不会再出现这种「一边对一边错」的分裂。
   static String findProxyFor(Uri uri) {
     if (!_active) return 'DIRECT';
-    if (_bypass(uri.host)) return 'DIRECT';
+    if (isBypassed(uri.host)) return 'DIRECT';
     return 'PROXY $_server';
   }
 
-  static bool _bypass(String host) {
+  /// 该 host 是否必须直连（本机 / 私有网段 / mDNS 名字）。
+  ///
+  /// 公开是为了让 [MpvProxyEnv] 复用，**不是**给业务代码调用的。
+  static bool isBypassed(String host) {
     if (host.isEmpty) return true;
     final h = host.toLowerCase();
     if (h == 'localhost' || h == '::1' || h.endsWith('.local')) return true;

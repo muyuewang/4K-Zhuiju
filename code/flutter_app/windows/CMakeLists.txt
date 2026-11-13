@@ -105,6 +105,11 @@ if(PLUGIN_BUNDLED_LIBRARIES)
 endif()
 
 # Copy the native assets provided by the build.dart from all packages.
+#
+# 路径有两个候选，必须都看一眼：这是模板原文写死的旧位置，而新版 Flutter
+# 把 native_assets.json 放到了 runner 的构建输出目录下。v1.11.4 打包时
+# 就因为这里只认旧位置，`cmake --install` 静默漏掉了这个文件 —— 旧的
+# install(DIRECTORY) 在源目录不存在时不报错，只是什么都不做。
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
 # === VC++ 运行时 ===
 #
@@ -132,9 +137,34 @@ if(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
     COMPONENT Runtime)
 endif()
 
+# 旧位置（模板原文）。通常不存在，但保留：个别 Flutter 版本仍会把
+# 原生资产的 dll 放在这儿，存在就必须带上，否则运行期找不到。
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"
    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
    COMPONENT Runtime)
+
+# 新位置：native_assets.json 由 flutter assemble 产在 **Flutter 自己的构建树**
+# 里，即 `${PROJECT_BUILD_DIR}windows/x64/runner/<Config>/`。
+#
+# 这里踩过两次路径错误，都记下来免得再犯：
+#   1. `CMAKE_BINARY_DIR` → build/win_cmake，那是 CMake 的树，
+#      和 Flutter 的 build/windows/... 是两棵完全不同的目录；
+#   2. `$<TARGET_FILE_DIR:zhuiju>` → 同样落在 build/win_cmake/runner/Release，
+#      因为 CMake 只认自己生成的可执行文件位置。
+# 唯一正确的位置是 Flutter assemble 的输出，也就是下面这条拼法。
+#
+# 不用 install(FILES)：它要求文件在**配置阶段**就存在，而这个文件是构建
+# 阶段才生成的。用 install(CODE) 在安装期判断，缺失时明确告警而不是
+# 静默少文件；「安装目录 == 构建输出目录」时也能正确跳过，不会自己拷自己。
+install(CODE "
+  set(_na_src \"${PROJECT_BUILD_DIR}windows/x64/runner/\${CMAKE_INSTALL_CONFIG_NAME}/native_assets.json\")
+  if(EXISTS \"\${_na_src}\")
+    file(COPY \"\${_na_src}\" DESTINATION \"\${CMAKE_INSTALL_PREFIX}\")
+    message(STATUS \"Installing: \${_na_src}\")
+  else()
+    message(WARNING \"native_assets.json 不存在：\${_na_src}，产物会缺这个文件\")
+  endif()
+" COMPONENT Runtime)
 
 # Fully re-copy the assets directory on each build to avoid having stale files
 # from a previous install.

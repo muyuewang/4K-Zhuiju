@@ -1,7 +1,7 @@
 name: zhuiju
 description: 4K追剧 — 高清影视聚合客户端（Android / Windows）
 publish_to: 'none'
-version: 1.11.3+28
+version: 1.11.4+29
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -36,6 +36,10 @@ dependencies:
   # linux 的 libmpv 全部拉进依赖树；而我们只在 Windows 用这个内核
   # （Android 仍是 ExoPlayer），那些库会被原样打进 APK，纯属白胖几十兆。
   media_kit_libs_windows_video: ^1.0.11
+  # 直接依赖，不再只当传递依赖用：core/mpv_proxy_env.dart 要靠它调
+  # UCRT 的 `_putenv_s`，把系统代理写进**进程环境变量**，
+  # 这样 libmpv（FFmpeg 网络栈）自己就会走代理，桌面端不必再中转视频流。
+  ffi: ^2.1.0
   path_provider: ^2.1.2
   cached_network_image: ^3.3.1
   shared_preferences: ^2.2.2

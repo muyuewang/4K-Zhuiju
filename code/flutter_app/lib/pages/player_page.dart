@@ -30,7 +30,7 @@ import '../core/danmaku.dart';
 import '../core/desktop_window.dart';
 import '../core/dlna.dart';
 import '../core/download.dart';
-import '../core/hls_proxy.dart';
+import '../core/mpv_proxy_env.dart';
 import '../core/layout.dart';
 import '../core/platform.dart';
 import '../core/history.dart';
@@ -416,9 +416,9 @@ class _PlayerPageState extends State<PlayerPage> {
     if (Dlna.instance.session != null) {
       unawaited(Dlna.instance.stop());
     }
-    // 离开播放页就关掉本地 HLS 代理，别让 127.0.0.1 的端口一直挂着。
-    // 不 await：dispose 是同步的，代理关闭失败也不该影响页面销毁。
-    if (isDesktop) unawaited(HlsProxy.instance.shutdown());
+    // 离开播放页无需收尾：桌面端不再起本地中转，
+    // 代理是进程环境变量，随进程存在，不需要按页面清理。
+    // （此处原先是 `HlsProxy.instance.shutdown()`，中转层已删除。）
     // 页面被销毁时务必还原屏幕方向，否则退出播放页后整个 App 还是横屏
     if (_fullscreen) {
       _restoreOrientation();
@@ -853,49 +853,69 @@ class _PlayerPageState extends State<PlayerPage> {
   Future<void> _startPlay(String url, int gen) async {
     VideoPlayerController? ctrl;
     try {
-      // 桌面端把 m3u8 包一层本地代理。
+      // 桌面端不再中转视频流（2026-11-13 改）。
       //
-      // 2026-11-12 换了播放内核（video_player_win/Media Foundation →
-      // video_player_media_kit/libmpv+FFmpeg）之后，这层代理的**理由变了**，
-      // 但结论仍是「必须保留」。两条理由分别记：
+      // ## 这段历史值得留档，别再绕回去
       //
-      // 【旧理由，已被内核换掉】MF 自带的 HLS 解析器对「相对分片地址 +
-      // 含百分号编码的基址」处理有缺陷，短剧 B蓝光 会报
-      // file not found / corrupted；也不支持 AES-128 加密流。
-      // FFmpeg 这三个能力都是内置的，所以这部分不再需要代理兜。
+      // 原来这里会调 `HlsProxy.instance.wrap(url)`，把 m3u8 包成
+      // `http://127.0.0.1:<port>/hls/<token>/index.m3u8` 再交给播放器。
+      // 那个代理是 2026-11-12 之前留下的，最初为了绕开 Windows
+      // **Media Foundation** 的 HLS 缺陷（拼不对相对分片地址、不支持
+      // AES-128、展不开多级清单）。
       //
-      // 【新理由，反而更硬】libmpv 走的是自己的网络栈（FFmpeg 的
-      // network.c），**完全不读 Windows 系统代理**。而本项目有四个源
-      // （云影 / 低调影视 / 极速追剧 / 4K影视）直连不通、必须走代理。
-      // 播放地址若裸交给 libmpv，它就会直连，结果就是「网页能播、
-      // App 里转圈」。经这层代理转发时，请求由 Dart 的 HttpClient 发出，
-      // 而 NetProxy 已经给 HttpClient 装了系统代理 —— 于是视频流也被
-      // 带上了代理。这是当前唯一能让 libmpv 的流量走代理的通道。
+      // 换内核到 media_kit（libmpv + FFmpeg）之后，上面三类缺陷 FFmpeg
+      // 本来就都能处理，唯一还剩的理由是：libmpv 走 FFmpeg 自己的网络栈，
+      // **不读 Windows 系统代理**，而四个源（云影/低调/极速/4K影视）
+      // 必须挂代理。于是代理被保留成了「让视频流走代理」的唯一通道。
       //
-      // 只对 m3u8 生效：mp4 直链同样存在上面的代理问题，但它一直没出
-      // 过播放事故，先不动（改它要重跑一遍所有源的回归）。
-      // Android 走 ExoPlayer，它本身读系统代理，保持直连（少一层转发）。
-      final playUrl = isDesktop ? await HlsProxy.instance.wrap(url) : url;
-      // 包代理这一步也可能比较慢，返回时同样要核对代次
-      if (gen != _playGen || !mounted) return;
+      // 但这层的代价极高：取流变成**单线程串行**。实测电影天堂
+      // 《凡人修仙传》一集（322 片、3000k ≈ 375 KB/s）经中转只有
+      // 208 KB/s —— 低于码率就必然缓冲不满、一直转圈直到超时；而同一批
+      // 分片让 FFmpeg 自己并行预读能到 429 KB/s。
+      //
+      // 用户报的「浏览器秒开、雷电模拟器也快、唯独 PC 慢还超时」，
+      // 根子就是这一层。Android 走 ExoPlayer 直连、浏览器有自己的连接池，
+      // 两者都不经过它。
+      //
+      // 解法实测过（用 dart:ffi 直接加载 libmpv-2.dll 问它自己）：
+      //   - `mpv_set_option_string("http-proxy", …)` 返回 0，接受
+      //   - `_putenv_s("http_proxy", 假代理)` 后 loadfile，
+      //     假代理收到 `CONNECT …:443` —— FFmpeg 确实读该环境变量
+      //   - 再加 `no_proxy=该域名`，假代理收到 0 个请求，排除精确生效
+      //
+      // 所以现在把系统代理写进进程环境变量，让 libmpv 自己走代理，
+      // 视频流回到 FFmpeg 的原生并行预读。中转层随之删除。
+      //
+      // sync 放在播放前而不是启动时：用户可能刚开关 Clash，而 NetProxy
+      // 的探测结果有 30 秒缓存，必须给它机会重新判断。
+      if (isDesktop) {
+        // 把目标 host 一起传进去：内网地址必须直连，而这件事没法靠
+        // `no_proxy` 表达（实测 FFmpeg 不认 `10.*` / CIDR 这类写法），
+        // 只能在这一层提前判掉。详见 MpvProxyEnv.sync 的说明。
+        await MpvProxyEnv.sync(targetHost: Uri.tryParse(url)?.host ?? '');
+        // 这一步会做一次代理探测（有 30s TTL 兜着），期间用户可能切线路
+        if (gen != _playGen || !mounted) return;
+      }
+      final playUrl = url;
 
       ctrl = VideoPlayerController.networkUrl(
         Uri.parse(playUrl),
-        // 桌面端传空请求头。
+        // 两端都带 UA，理由不同但同样必要。
         //
-        // 这条约束来自**旧内核**：video_player_win 的原生实现在
-        // `httpHeaders` 非空时会走 SetSourceFromByteStream，把 m3u8 当成
-        // 普通字节流喂给 Media Foundation，播放列表语义丢失 → 报
-        // SRC_NOT_SUPPORTED。新内核（media_kit）其实正确支持 httpHeaders
-        // （它映射到 mpv 的 http-header-fields），所以这条限制理论上可以
-        // 放开；但在没有真实源站逐条验证之前不动——现在直连 m3u8 的
-        // 请求头本来就不需要，放开只会引入新的不确定性。
-        httpHeaders: isDesktop
-            ? const {}
-            : const {
-                'User-Agent':
-                    'Mozilla/5.0 (Linux; Android 9; SM-N9700) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
-              },
+        // 【桌面端】这条以前是空 `{}`，因为旧内核 video_player_win 在
+        // httpHeaders 非空时会走 SetSourceFromByteStream，把 m3u8 当普通
+        // 字节流喂给 Media Foundation，播放列表语义丢失 → SRC_NOT_SUPPORTED。
+        // 换成 media_kit 之后这个缺陷没了：它把 httpHeaders 正确映射到
+        // mpv 的 `http-header-fields`，m3u8 仍按播放列表解析。
+        //
+        // 现在**必须**补回来：此前 UA 是中转层逐请求设的，中转删掉后就
+        // 落到 FFmpeg 默认的 `Lavf/...`，而部分源站（尤其带防盗链的）
+        // 见到非浏览器 UA 会直接 403 —— 表现是「地址解析出来了但播不了」，
+        // 和当初那个坑长得一模一样。
+        httpHeaders: const {
+          'User-Agent':
+              'Mozilla/5.0 (Linux; Android 9; SM-N9700) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
+        },
       );
       // 超时保护：源站半死不活时 initialize 可能挂几分钟，
       // 没有超时用户只会看到一个永远转圈的 loading。

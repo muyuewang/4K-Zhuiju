@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v1.11.3-ff7a29?style=flat-square" alt="版本">
+  <img src="https://img.shields.io/badge/版本-v1.11.4-ff7a29?style=flat-square" alt="版本">
   <img src="https://img.shields.io/badge/平台-Android%20%7C%20Windows-3ddc84?style=flat-square" alt="平台">
   <img src="https://img.shields.io/badge/大小-56.9MB-blue?style=flat-square" alt="大小">
   <img src="https://img.shields.io/badge/数据源-15%20个-52c41a?style=flat-square" alt="数据源">
@@ -218,6 +218,8 @@ App 里内置 **15 个数据源**，可以在**首页顶部的源名胶囊**快�
 - **需要系统代理的源**（4K影视 / 极速追剧 / 云影 / 低调影视）在原站国内直连不通，App 会自动读取 Windows 系统代理设置；Android 端走系统网络，一般无需额外设置。这四个固定排在列表最后，切换面板里会打上「需代理」标记并单独说明。
 - **片库大不等于每部都能看。** 采集站的内容由对方维护，冷门老剧、刚上线的新剧都可能缺。搜不到就是真没有，这不是本地数据库，变不出来。
 
+再补一句播放链路的现状：桌面端的视频流**不经过任何本地中转**，播放器直接连源站，和安卓的 ExoPlayer、浏览器完全一样。系统代理是通过进程环境变量交给 FFmpeg 的（libmpv 不读 Windows 系统代理，但它读 `http_proxy`），所以取流仍是播放器自己的并行预读，不存在「多绕一层」的吞吐损失。v1.11.4 之前的版本有一层 m3u8 中转，取流被压成单线程串行，这才是在 PC 上一直转圈的原因。
+
 > 关于「大师兄影视」那个 App：它自己不托管视频，13 条线路本质是在包装公开采集接口，中间还套了一层会失效的 php 中转。所以这里没有复刻它的中转栈，而是直连原始接口——线路更少，但每条都是真的。
 
 <br>
@@ -225,22 +227,22 @@ App 里内置 **15 个数据源**，可以在**首页顶部的源名胶囊**快�
 ## 下载安装
 
 <p>
-<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.11.3/4KZhuiju-v1.11.3-release.apk"><b>⬇ Android 版（APK · 56.9 MB）</b></a>
+<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.11.4/4KZhuiju-v1.11.4-release.apk"><b>⬇ Android 版（APK · 56.9 MB）</b></a>
 　|　
-<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.11.3/4KZhuiju-v1.11.3-windows-x64.zip"><b>⬇ Windows 版（ZIP · 32.1 MB）</b></a>
+<a href="https://github.com/muyuewang/4K-Zhuiju/releases/download/v1.11.4/4KZhuiju-v1.11.4-windows-x64.zip"><b>⬇ Windows 版（ZIP · 32.1 MB）</b></a>
 </p>
 
 全部版本见 [Releases](https://github.com/muyuewang/4K-Zhuiju/releases)。
 
 ### Android
 
-1. 下载 `4KZhuiju-v1.11.3-release.apk`（56.9 MB）
+1. 下载 `4KZhuiju-v1.11.4-release.apk`（56.9 MB）
 2. 手机上点开安装，如果提示「未知来源」，在设置里允许一次即可
 3. 系统要求：Android 7.0 及以上
 
 ### Windows
 
-1. 下载 `4KZhuiju-v1.11.3-windows-x64.zip`（32.1 MB，解压后约 78 MB）
+1. 下载 `4KZhuiju-v1.11.4-windows-x64.zip`（32.1 MB，解压后约 78 MB）
 2. 解压到任意文件夹（**不要**只把 exe 拖出来，它旁边还有 dll 和 data 目录）
 3. 双击 `zhuiju.exe`
 4. 系统要求：Windows 10 及以上，64 位
