@@ -56,6 +56,8 @@ class MacCmsApiConfig {
     required this.categories,
     this.description = '直连采集接口、无弹幕、线路直出 m3u8',
     this.lineNameCn = const <String, String>{},
+    this.searchViaPost = false,
+    this.preferDirectLine = true,
   });
 
   final String id;
@@ -75,6 +77,34 @@ class MacCmsApiConfig {
   /// 不配也能跑（直接显示 `bfzym3u8`），但线路面板是全 App 最需要
   /// 一眼看懂的地方，`bfzym3u8` 对用户没有任何信息量。
   final Map<String, String> lineNameCn;
+
+  /// 搜索是否改用 POST 表单提交。
+  ///
+  /// 樱花资源（apiyhzy）实测：`?ac=list&wd=关键词` 一律 **403 Forbidden**，
+  /// 由 nginx 直接拦掉（响应 546 字节的 403 页，连 PHP 都没进）。
+  /// 换 UA / Referer / Accept / Origin / 手机 UA 全部无效，
+  /// 但同一个 `ac` + `wd` 用 **POST 表单**发出去就能正常返回 JSON。
+  ///
+  /// 所以这不是反爬策略差异，而是该站把 GET 的 `wd` 参数屏蔽了。
+  /// 默认走 GET（大多数站都是 GET，且 GET 可被缓存），个别站按需打开。
+  final bool searchViaPost;
+
+  /// 是否把「直出 m3u8」的线路排到面板最前面。
+  ///
+  /// 实测（2026-11-13，走马上任）几乎所有采集站在第一部剧上都会给
+  /// **两条线路**：
+  ///   1. 第一条是**网页分享页**（`feifan` / `dytt` / `gsyun`），
+  ///      地址形如 `…/share/<md5>`，返回的是 HTML；
+  ///   2. 第二条才是直出 m3u8（`ffm3u8` / `dyttm3u8` / `gsm3u8`）。
+  ///
+  /// 其中非凡、电影天堂的分享页里连 m3u8 都抠不出来（要靠 JS 渲染），
+  /// 播放器默认选第一条 → 必然失败。用户看到的现象就是
+  /// 「点进去播放没出来」。
+  ///
+  /// 打开这个开关后，[ApiLine] 会按「地址里是否含 .m3u8/.mp4」重排，
+  /// 直出的沉到前面。网页线路仍保留在后面（少数能靠
+  /// [extractShareMainUrl] 二次解析出来，不能直接丢掉）。
+  final bool preferDirectLine;
 }
 
 /// 一条采集线路的原始三元组（纯数据，方便离线测试）。
@@ -155,6 +185,45 @@ String? extractShareMainUrl(String html, String pageUrl) {
   return abs;
 }
 
+/// 把「直出 m3u8 / mp4」的线路排到最前，网页分享页线路保持原相对顺序沉到后面。
+///
+/// ## 为什么必须重排（2026-11-13 实测，走马上任）
+///
+/// 主流采集站给同一部剧常同时下发两条线路，**第一条往往是网页分享页**：
+///
+/// | 站       | 第 1 条（网页）                              | 第 2 条（直出）            |
+/// | -------- | -------------------------------------------- | -------------------------- |
+/// | 光速     | `v.gsuus.com/play/elYvnEra`                  | `…/play/elYvnEra/index.m3u8` |
+/// | 非凡     | `super.ffzy-online6.com/share/3df77411…`     | `…/20261102/44636_3df77411/index.m3u8` |
+/// | 电影天堂 | `vip.dytt-tvs.com/share/0be68b6b40bb…`       | `…/20261102/43673_0be68b6b/index.m3u8` |
+///
+/// 播放器默认取第一条。光速那条分享页还能靠 [extractShareMainUrl] 抠出
+/// 地址，**非凡和电影天堂的分享页里一个 m3u8 都找不到**（靠 JS 渲染），
+/// 于是必然失败——用户看到的就是「点进去播放没出来」。
+///
+/// 这里不能简单 `sort`（Dart 的 sort 不保证稳定，会打乱同组线路的原有
+/// 次序，而原有次序是站方按质量排的）。改用「两趟收集」保序分区。
+List<ApiLine> sortDirectLinesFirst(List<ApiLine> lines) {
+  if (lines.length < 2) return lines;
+
+  bool isDirect(ApiLine l) {
+    if (l.eps.isEmpty) return false;
+    final u = l.eps.first.url.toLowerCase();
+    return u.contains('.m3u8') || u.contains('.mp4');
+  }
+
+  final direct = <ApiLine>[];
+  final web = <ApiLine>[];
+  for (final l in lines) {
+    // 直不直出按「首集地址」判断：同一线路内各集形态一致，
+    // 抽查首集足够，也避免为了判断去遍历几千集。
+    (isDirect(l) ? direct : web).add(l);
+  }
+  // 全是网页线路时保持原样，不要把顺序洗一遍却没带来任何好处
+  if (direct.isEmpty) return lines;
+  return <ApiLine>[...direct, ...web];
+}
+
 class MacCmsApiSource implements DataSource {
   MacCmsApiSource(this.cfg);
 
@@ -197,14 +266,90 @@ class MacCmsApiSource implements DataSource {
     final q = <String, dynamic>{'ac': 'list', 'pg': page};
     final k = keyword.trim();
     if (k.isNotEmpty) q['wd'] = k;
+    // 带关键词搜索且该站屏蔽了 GET 的 wd 参数时，改走 POST 表单。
+    // 只有「真在搜索」才需要：空关键词（推荐位）走 GET 一直是好的，
+    // 樱花实测 `?ac=list&pg=1` 返回 200 正常。
+    if (cfg.searchViaPost && k.isNotEmpty) {
+      return _cards(await _post(q));
+    }
     return _cards(await _get(q));
   }
 
+  /// 分类列表。`categoryId` 支持「逗号串 = 多分类合并」。
+  ///
+  /// ## 为什么要支持逗号串（2026-11-13 实测结论，踩过坑）
+  ///
+  /// 采集接口的父分类（`1` 电影 / `2` 电视剧 / `3` 综艺 / `4` 动漫）
+  /// 在 `ac=list` 下**恒返回 0 条**，数据全挂在子分类上
+  /// （`6` 动作片、`13` 国产剧…）。暴风源早就踩过：父分类实测只有 14 / 7 条。
+  ///
+  /// 一开始我以为接口的 `t` 参数能像 MacCMS 后台那样用逗号聚合，
+  /// 实测**不行**：`t=6,7` 与 `t=6` 的 `total` 完全一致（都是 5705），
+  /// 返回条目的 `type_id` 分布里只有 `6`。也就是说逗号后面全被忽略，
+  /// 只取第一个 id。所以聚合只能在客户端做。
+  ///
+  /// 这里的做法：按逗号拆开，**并发**拉每个子分类的第 [page] 页，
+  /// 再交错合并（round-robin，保证第一屏不会全是同一个子分类）。
+  /// 翻页语义天然正确——每个子分类都取同一页码，不会重复也不会漏。
+  ///
+  /// 去重按 `Drama.id`：少数站会跨分类重复收录同一部片
+  /// （比如「动作片」和「剧情片」都收了同一部），不按 id 去重在
+  /// 列表里会看到两张一模一样的卡。
   @override
   Future<List<Drama>> category(String categoryId, {int page = 1}) async {
-    final q = <String, dynamic>{'ac': 'list', 'pg': page};
-    if (categoryId.isNotEmpty) q['t'] = categoryId;
-    return _cards(await _get(q));
+    final ids = categoryId
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList(growable: false);
+
+    if (ids.isEmpty) {
+      return _cards(await _get(<String, dynamic>{'ac': 'list', 'pg': page}));
+    }
+    if (ids.length == 1) {
+      return _cards(
+          await _get(<String, dynamic>{'ac': 'list', 't': ids.first, 'pg': page}));
+    }
+
+    // 单个子分类失败不能拖垮整个栏目：某条分类临时挂了，
+    // 其余分类照常出内容，总比整页报错强。
+    final groups = await Future.wait(ids.map((id) async {
+      try {
+        final d = await _get(<String, dynamic>{'ac': 'list', 't': id, 'pg': page});
+        return _cards(d);
+      } catch (_) {
+        return const <Drama>[];
+      }
+    }));
+
+    // 全部子分类都失败才报错，让界面给出可重试的提示
+    if (groups.every((g) => g.isEmpty) && page == 1) {
+      throw ApiException(-1, '${cfg.displayName} 暂时取不到内容，请稍后重试');
+    }
+    return _interleave(groups);
+  }
+
+  /// 交错合并多组条目并去重。
+  ///
+  /// 不直接 `addAll`：第一个子分类往往有上千条，直接拼会让前几屏
+  /// 全是同一类（比如点「电影」连翻三屏都是动作片）。交错后
+  /// 每一屏都是混合的，更接近「电影院线」的观感。
+  List<Drama> _interleave(List<List<Drama>> groups) {
+    var maxLen = 0;
+    for (final g in groups) {
+      if (g.length > maxLen) maxLen = g.length;
+    }
+    final out = <Drama>[];
+    final seen = <String>{};
+    for (var i = 0; i < maxLen; i++) {
+      for (final g in groups) {
+        if (i >= g.length) continue;
+        final d = g[i];
+        if (d.id.isEmpty || !seen.add(d.id)) continue;
+        out.add(d);
+      }
+    }
+    return out;
   }
 
   @override
@@ -301,6 +446,65 @@ class MacCmsApiSource implements DataSource {
     throw ApiException(-1, '采集接口暂时不可用，请稍后重试');
   }
 
+  /// POST 表单方式请求（[MacCmsApiConfig.searchViaPost] 专用）。
+  ///
+  /// 樱花资源把 GET 的 `wd` 参数在 nginx 层就拦成 403，但同样的
+  /// `ac` + `wd` 用 POST 表单发出去能正常返回 JSON。这里刻意**不**做成
+  /// 「GET 失败再退 POST」：403 是确定性的，退一次只是多等一个来回，
+  /// 弱网下用户感知明显。由配置显式声明更干净。
+  ///
+  /// 重试与总期限逻辑和 [_get] 保持一致，避免出现「POST 路径没有
+  /// 僵尸连接保护」这种只有某个源才会踩的坑。
+  Future<Map<String, dynamic>> _post(Map<String, dynamic> form) async {
+    const total = Duration(seconds: 18);
+    final deadline = DateTime.now().add(total);
+    Object? last;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        if (DateTime.now().isAfter(deadline)) break;
+        await Future<void>.delayed(Duration(milliseconds: 350 * attempt));
+      }
+      final token = CancelToken();
+      try {
+        final remain = deadline.difference(DateTime.now());
+        if (remain <= Duration.zero) break;
+        final r = await _dio
+            .post(
+              cfg.apiUrl,
+              data: form,
+              // MacCMS 的 POST 分支读的是表单字段，不是 JSON body。
+              // 不显式指定会用 dio 默认的 JSON 序列化，服务端收不到 wd。
+              options: Options(contentType: Headers.formUrlEncodedContentType),
+              cancelToken: token,
+            )
+            .timeout(remain);
+        final code = r.statusCode ?? -1;
+        if (code != 200) {
+          throw ApiException(code, '采集接口返回 HTTP $code');
+        }
+        final data = r.data;
+        if (data is Map<String, dynamic>) return data;
+        if (data is String && data.isNotEmpty) {
+          final dec = jsonDecode(data);
+          if (dec is Map<String, dynamic>) return dec;
+        }
+        throw ApiException(-1, '采集接口返回格式异常');
+      } on ApiException catch (e) {
+        last = e;
+        if (e.code >= 500 || e.code == -1) continue;
+        rethrow;
+      } catch (e) {
+        if (!token.isCancelled) token.cancel('attempt ${attempt + 1} aborted: $e');
+        last = e;
+      }
+    }
+    if (last is ApiException) throw last;
+    if (last is TimeoutException) {
+      throw ApiException(-1, '采集接口 ${total.inSeconds} 秒无响应，请稍后重试');
+    }
+    throw ApiException(-1, '采集接口暂时不可用，请稍后重试');
+  }
+
   Future<String> _getText(String url) async {
     try {
       final r = await _dio.get<String>(
@@ -353,11 +557,14 @@ class MacCmsApiSource implements DataSource {
 
   DramaDetail _detail(String dramaId, Map<String, dynamic> it) {
     final name = _str(it['vod_name']);
-    final lines = parseApiLines(
+    var lines = parseApiLines(
       _str(it['vod_play_from']),
       _str(it['vod_play_url']),
       nameCn: cfg.lineNameCn,
     );
+    // 直出 m3u8 的线路沉不到前面时，用户默认点第一条会撞上「分享页」
+    // （HTML），非凡 / 电影天堂的分享页连 m3u8 都抠不出来 → 播放必失败。
+    if (cfg.preferDirectLine) lines = sortDirectLinesFirst(lines);
 
     final videos = <DramaVideo>[];
     for (final line in lines) {

@@ -20,15 +20,16 @@ import '../core/playback_prefs.dart';
 import '../core/source/data_source.dart';
 import '../core/source/registry.dart';
 import '../core/theme_settings.dart';
+import '../core/tokens.dart';
 import '../core/tv.dart';
 import '../core/version.dart';
 import '../theme.dart';
+import '../widgets/source_switcher.dart';
 import '../widgets/tv_focus.dart';
 import 'detail_page.dart';
 import 'download_page.dart';
 import 'favorites_page.dart';
 import 'history_page.dart';
-import '../core/tokens.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -859,110 +860,22 @@ class ProfilePage extends StatelessWidget {
 
   /// 数据源选择
   ///
-  /// 为什么不放在首页顶部做成切换按钮：
-  ///   1. 换源是**低频**动作。用户选定一个源后会一直用它，把入口摆在
-  ///      首屏每天都在那儿占位，等于天天提示「你用的可能不是最好的」；
-  ///   2. 换源会改变整个首页的分类结构（橘汁 7 个 typeId、
-  ///      kanju 7 个 content_kind），放在首页顶部一旦误触，
-  ///      整个列表内容和滚动位置全丢，用户会以为 App 出问题了。
+  /// 面板本体收口在 [showSourceSwitcher]，首页顶部胶囊与这里共用同一份，
+  /// 避免分组规则、排序、TV 焦点在两处各写一套后分叉。
   ///
-  /// 副标题写清各自的特点，用户不必逐个试才知道区别。
+  /// 早前这里写过「为什么不放在首页顶部」的两条理由（低频 / 误触会丢
+  /// 滚动位置）。用户实测后明确要求加首页入口，说明「换源是低频动作」
+  /// 的判断不成立 —— 搜不到片、线路挂了都要立刻换源。误触风险改由面板
+  /// 的设计来兜：当前源用强调色实心标记，点空白即关，不预置焦点。
+  ///
+  /// 源的差异由各源自己声明（[DataSource.description]），面板直接读，
+  /// 加新源不用改这里。
   Future<void> _pickSource(BuildContext context) async {
-    final cur = SourceRegistry.instance.now;
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: context.palette.card,
-      // 源会越加越多（现在是 6 个），弹窗必须能超过默认的 9/16 屏高，
-      // 否则尾部源会被裁掉——且因为外层是 Column(min) 不带滚动，
-      // 用户连滑都滑不到，看起来就像「某个源消失了」。
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(R.pill)),
-      ),
-      builder: (sheetCtx) {
-        return SafeArea(
-          top: false,
-          child: ConstrainedBox(
-            // 留出上方空间，避免弹窗顶到状态栏；同时保证小屏也能滚。
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(sheetCtx).size.height * 0.72,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
-                  child: Text(
-                    '数据源',
-                    style: TextStyle(
-                      fontSize: Ts.subtitle,
-                      fontWeight: FontWeight.w600,
-                      color: sheetCtx.palette.onSurface,
-                    ),
-                  ),
-                ),
-                Flexible(
-                  child: ListView(
-                    shrinkWrap: true,
-                    padding: EdgeInsets.zero,
-                    children: [
-                      for (final s in SourceRegistry.all)
-                        ListTile(
-                          dense: true,
-                          leading: Icon(
-                            Icons.dns_rounded,
-                            size: 21,
-                            color: identical(s, cur)
-                                ? kAccent
-                                : sheetCtx.palette.textDim,
-                          ),
-                          title: Text(
-                            s.displayName,
-                            style: TextStyle(
-                              fontSize: Ts.bodyLg,
-                              fontWeight: identical(s, cur)
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                              color: identical(s, cur)
-                                  ? kAccent
-                                  : sheetCtx.palette.onSurface,
-                            ),
-                          ),
-                          subtitle: Text(
-                            _sourceHint(s),
-                            style: TextStyle(
-                                fontSize: Ts.bodySm,
-                                color: sheetCtx.palette.textDim),
-                          ),
-                          trailing: identical(s, cur)
-                              ? const Icon(Icons.check_rounded,
-                                  size: 19, color: kAccent)
-                              : null,
-                          onTap: () async {
-                            Navigator.of(sheetCtx).pop();
-                            if (identical(s, cur)) return;
-                            await SourceRegistry.instance.select(s);
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 8),
-              ],
-            ),
-          ),
-        );
-      },
-    );
+    final picked = await showSourceSwitcher(context);
+    if (picked == null) return;
+    if (identical(picked, SourceRegistry.instance.now)) return;
+    await SourceRegistry.instance.select(picked);
   }
-
-  /// 源的差异由各源自己声明（[DataSource.description]），加源不改这里。
-  ///
-  /// 早期版本是 `if (s is SectionedFeed) … else …` 二选一，结果新接入的
-  /// 片库 4K / 可可影视都不支持弹幕，却被统一标成「分类齐全、支持弹幕」。
-  String _sourceHint(DataSource s) =>
-      s.description.isEmpty ? '分类齐全' : s.description;
 
   /// 线路优先级选择
   ///

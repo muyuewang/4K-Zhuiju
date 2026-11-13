@@ -106,6 +106,32 @@ endif()
 
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
+# === VC++ 运行时 ===
+#
+# 为什么必须打包 CRT：`zhuiju.exe` 的导入表里写死了
+# MSVCP140.dll / VCRUNTIME140.dll / VCRUNTIME140_1.dll（Flutter 默认
+# /MD 动态链接）。这三条是**加载期**依赖，缺一个进程就起不来，报的是
+# 「找不到 MSVCP140.dll」——用户只会觉得「解压了双击没反应」。
+#
+# 2026-11-13 的真实事故：v1.11.2 重打包后 zip 从 34 个文件掉到 25 个，
+# 少的 10 个正是这些 CRT dll。原因是上一版是手工把 dll 复制进
+# Release 目录再打包的，构建流程本身从来没产出过它们；一旦清掉
+# build 目录重新构建，就悄悄少了，而打包脚本只检查
+# exe / flutter_windows.dll / data/app.so 三件，检查不出来。
+#
+# 改成由 CMake 自己带上后，`cmake --install` 每次都会把这批 dll 铺到
+# 输出目录，不再依赖谁记得手工复制。
+#
+# 用 SKIP + 自行 install 的原因：模块默认的 install 目标是 bin/ 子目录，
+# 而 Flutter 的产物是「所有 dll 平铺在 exe 旁边」，放错位置等于没放。
+set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+include(InstallRequiredSystemLibraries)
+if(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+  install(FILES ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+endif()
+
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"
    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
    COMPONENT Runtime)

@@ -12,6 +12,7 @@ import '../core/source/registry.dart';
 import '../core/source/zhuiju_source.dart';
 import '../widgets/common.dart';
 import '../widgets/feed_view.dart';
+import '../widgets/source_switcher.dart';
 import '../widgets/tv_focus.dart';
 import '../theme.dart';
 import 'detail_page.dart';
@@ -251,6 +252,8 @@ class _HomePageState extends State<HomePage>
           tabs: _cats.map((e) => Tab(text: e.name)).toList(),
         ),
         actions: [
+          // 数据源快速切换（用户 2026-11-13 要求：原来只能进设置页换，太深）
+          _sourceChip(context),
           IconButton(
             icon: const Icon(Icons.search_rounded),
             tooltip: '搜索',
@@ -272,6 +275,71 @@ class _HomePageState extends State<HomePage>
           );
         }),
       ),
+    );
+  }
+
+  /// 顶部「当前数据源」胶囊 —— 点开就是快速切换面板。
+  ///
+  /// 为什么用胶囊显示源名而不是一个图标：
+  /// 用户换源后最容易产生的疑问是「我现在到底在用哪个源」。一个通用
+  /// 的 `dns` 图标点开才知道当前是谁，等于每次都要多点一次。直接写名字
+  /// 既省一次点击，也天然表明「这里可点」。
+  ///
+  /// 名字必须截断：数据源名最长的是「可可影视（需源站在线）」，
+  /// 在窄屏上和搜索按钮并排会挤爆 AppBar。限宽 + ellipsis。
+  Widget _sourceChip(BuildContext context) {
+    return ValueListenableBuilder<DataSource>(
+      valueListenable: SourceRegistry.instance.current,
+      builder: (c, src, _) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(R.pill),
+            onTap: () async {
+              final picked = await showSourceSwitcher(context);
+              if (picked == null) return;
+              // 由 HomePage 自己 apply：切源要重建 TabController 并丢弃
+              // 所有旧网格，这在 _onSourceChanged 里已集中处理，
+              // 这里只负责发起（select 会触发 current 的监听）。
+              await SourceRegistry.instance.select(picked);
+            },
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 132),
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+              decoration: BoxDecoration(
+                color: context.palette.card,
+                borderRadius: BorderRadius.circular(R.pill),
+                border: Border.all(color: context.palette.divider),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.dns_rounded, size: 14, color: kAccent),
+                  const SizedBox(width: 5),
+                  Flexible(
+                    child: Text(
+                      src.displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: Ts.caption,
+                        fontWeight: FontWeight.w600,
+                        color: context.palette.onSurface,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  Icon(
+                    Icons.expand_more_rounded,
+                    size: 15,
+                    color: context.palette.textDim,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -364,6 +432,19 @@ class _HomePageState extends State<HomePage>
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const SearchPage()),
               ),
+            ),
+          ),
+          TvFocusRing(
+            radius: 26,
+            child: IconButton(
+              iconSize: 26,
+              icon: const Icon(Icons.dns_rounded),
+              tooltip: '切换数据源：${SourceRegistry.instance.now.displayName}',
+              onPressed: () async {
+                final picked = await showSourceSwitcher(context);
+                if (picked == null) return;
+                await SourceRegistry.instance.select(picked);
+              },
             ),
           ),
           TvFocusRing(

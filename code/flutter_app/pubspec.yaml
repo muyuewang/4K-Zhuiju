@@ -1,7 +1,7 @@
 name: zhuiju
 description: 4K追剧 — 高清影视聚合客户端（Android / Windows）
 publish_to: 'none'
-version: 1.11.1+26
+version: 1.11.2+27
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

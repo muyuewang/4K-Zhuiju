@@ -10,15 +10,40 @@ import subprocess
 import tempfile
 
 REPO = "muyuewang/4K-Zhuiju"
-TAG = "v1.11.1"
-NAME = "4K追剧 v1.11.1"
 
 ROOT = r"C:\Users\fengxin\WorkBuddy\vivos7"
+
+# 版本号从 pubspec.yaml 读，不再硬编码。
+# 之前这里是手写的 TAG / NAME / ASSETS / NOTES，升版本时靠人记得来改；
+# 漏改的后果很隐蔽：脚本会把新产物按旧 tag 发上去，或者在 dist/v旧版本/
+# 目录里找不到文件而报「asset 不存在」，看着像打包失败，其实是路径过期。
+def _read_version():
+    import re
+
+    pubspec = os.path.join(ROOT, "code", "flutter_app", "pubspec.yaml")
+    with open(pubspec, encoding="utf-8") as f:
+        for line in f:
+            m = re.match(r"^version:\s*([0-9][^\s+]*)\+(\d+)", line)
+            if m:
+                return m.group(1), m.group(2)
+    raise SystemExit(f"无法从 {pubspec} 读取版本号")
+
+
+VERSION, BUILD = _read_version()
+TAG = f"v{VERSION}"
+NAME = f"4K追剧 v{VERSION}"
+
 ASSETS = [
-    (r"dist\v1.11.1\4KZhuiju-v1.11.1-release.apk", "4KZhuiju-v1.11.1-release.apk"),
-    (r"dist\v1.11.1\4KZhuiju-v1.11.1-windows-x64.zip", "4KZhuiju-v1.11.1-windows-x64.zip"),
+    (
+        rf"dist\{TAG}\4KZhuiju-{TAG}-release.apk",
+        f"4KZhuiju-{TAG}-release.apk",
+    ),
+    (
+        rf"dist\{TAG}\4KZhuiju-{TAG}-windows-x64.zip",
+        f"4KZhuiju-{TAG}-windows-x64.zip",
+    ),
 ]
-NOTES = r"dist\v1.11.1\RELEASE_NOTES.md"
+NOTES = rf"dist\{TAG}\RELEASE_NOTES.md"
 
 # 代理端口别写死：本机在不同网络环境下换过 7897 / 13153 等端口，
 # 写死会让脚本在换环境后直接连不上而报「curl 失败」，看起来像 GitHub 挂了。

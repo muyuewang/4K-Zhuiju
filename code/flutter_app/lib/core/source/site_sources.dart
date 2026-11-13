@@ -119,3 +119,165 @@ final DataSource kLiangziSource = MacCmsApiSource(
     },
   ),
 );
+
+// ---------------------------------------------------------------------------
+// 以下 5 个源来自 2026-11-13 的全网探测 + 用户实机验收。
+//
+// 探测链路（脚本在 code/tools/probe_maccms*.py，可复跑）：
+//   34 个候选 → 接口初筛 15 → 深度验证 13 → 国内直连 13/13 → m3u8 真播 10/13
+//   再经用户浏览器实测，剔掉域名过期 / CF 盾的，最终保留这 5 个。
+//
+// ## 两条必须知道的实测结论
+//
+// 1. **父分类是空的**。`t=1`（电影）/`t=2`（电视剧）在 `ac=list` 下恒返回
+//    0 条，数据全挂在子分类（`6` 动作片、`13` 国产剧…）。而 `t=6,7` 这种
+//    逗号写法**不会聚合**，只取第一个 id（实测 `t=6,7` 与 `t=6` 的 total
+//    完全相同，都是 5705，且返回条目的 type_id 全是 6）。
+//    所以栏目用「逗号串」表达，由 [MacCmsApiSource.category] 在客户端
+//    并发拉取各子分类再交错合并。
+//
+// 2. **第一条线路是网页分享页**。这些站给同一部剧常下发两条线路，第一条
+//    是 `…/share/<md5>` 的 HTML 页，第二条才是直出 m3u8。播放器默认取
+//    第一条，而非凡 / 电影天堂的分享页里连 m3u8 都抠不出来（靠 JS 渲染），
+//    用户就会看到「点进去播放没出来」。所以全部打开
+//    [MacCmsApiConfig.preferDirectLine]，把直出线路顶到前面。
+//
+// 下面的分类 id 全部逐条实测过数据量，不是抄来的。
+// ---------------------------------------------------------------------------
+
+/// 电影天堂 —— 实测首页 213ms，全部 5 个源里最快。
+///
+/// 用户实机反馈：「综合最后视频没有水印、响应也快」，列为第一优先。
+/// 片库 85,114 条；`dyttm3u8` 直出多码率 master，实测 #EXTM3U 合法。
+final DataSource kDyttSource = MacCmsApiSource(
+  const MacCmsApiConfig(
+    id: 'dytt',
+    displayName: '电影天堂',
+    apiUrl: 'http://caiji.dyttzyapi.com/api.php/provide/vod/',
+    description: '直连采集接口、无弹幕；无水印，响应最快；片库 8.5 万+',
+    categories: [
+      SourceCategory('', '推荐'),
+      SourceCategory('11,7,6,10,8,20,9,12', '电影'),
+      SourceCategory('13,16,14,22,15,24,21,23', '剧集'),
+      SourceCategory('25,27,28,26', '综艺'),
+      SourceCategory('30,37,29,31,32', '动漫'),
+      SourceCategory('36', '短剧'),
+    ],
+    lineNameCn: {
+      'dyttm3u8': '天堂线路',
+      'dytt': '天堂网页',
+    },
+  ),
+);
+
+/// 光速资源 —— 实测首页 224ms。
+///
+/// 用户实机反馈「还行就是搜索有验证码」。已查清：**验证码在网页站上，
+/// 采集接口的搜索完全正常**（`走马上任` 命中 1 条、`凡人修仙传` 命中 5 条，
+/// 均为 200 + 合法 JSON）。App 走采集接口，不受影响。
+final DataSource kGuangsuSource = MacCmsApiSource(
+  const MacCmsApiConfig(
+    id: 'guangsu',
+    displayName: '光速资源',
+    apiUrl: 'https://api.guangsuapi.com/api.php/provide/vod/',
+    description: '直连采集接口、无弹幕；短剧极多，另有体育赛事；片库 11.8 万+',
+    categories: [
+      SourceCategory('', '推荐'),
+      SourceCategory('10,6,11,8,24,7,9,12', '电影'),
+      SourceCategory('13,14,21,16,23,22', '剧集'),
+      SourceCategory('37,38,39', '综艺'),
+      SourceCategory('42,52,43', '动漫'),
+      SourceCategory('45,47,44,49,50,46,48', '短剧'),
+      SourceCategory('33,34,35,36', '体育'),
+    ],
+    lineNameCn: {
+      'gsm3u8': '光速线路',
+      'gsyun': '光速网页',
+    },
+  ),
+);
+
+/// 非凡资源 —— 实测首页 228ms。
+///
+/// 用户实机反馈「这个还行」。老牌站，条目多带简介与豆瓣 ID。
+/// 片库 99,094 条；`ffm3u8` 直出多码率 master。
+final DataSource kFeifanSource = MacCmsApiSource(
+  const MacCmsApiConfig(
+    id: 'feifan',
+    displayName: '非凡资源',
+    apiUrl: 'http://cj.ffzyapi.com/api.php/provide/vod/',
+    description: '直连采集接口、无弹幕；老牌站，条目多带简介；片库 9.9 万+',
+    categories: [
+      SourceCategory('', '推荐'),
+      SourceCategory('11,7,10,6,8,20,9,12', '电影'),
+      SourceCategory('13,16,14,22,15,24,21,23', '剧集'),
+      SourceCategory('25,26,27,28', '综艺'),
+      SourceCategory('30,29,31,33,32', '动漫'),
+      SourceCategory('36', '短剧'),
+    ],
+    lineNameCn: {
+      'ffm3u8': '非凡线路',
+      'feifan': '非凡网页',
+    },
+  ),
+);
+
+/// 猫眼资源 —— 实测首页 264ms。
+///
+/// 用户实机反馈「这个也不错」。片库较小（34,482）但分类最细：
+/// 惊悚 / 悬疑 / 犯罪 / 灾难 / 历史 / 家庭 / 西部片各自独立。
+/// **单线路 `mym3u8` 直出**，没有网页分享页，播放最省事。
+///
+/// 不挂「体育」栏目：`t=18`（NBA）实测只有 32 条，点进去几乎是空页。
+final DataSource kMaoyanSource = MacCmsApiSource(
+  const MacCmsApiConfig(
+    id: 'maoyan',
+    displayName: '猫眼资源',
+    apiUrl: 'https://api.maoyanapi.top/api.php/provide/vod/',
+    description: '直连采集接口、无弹幕；分类最细，单线路直出最稳；片库 3.4 万+',
+    categories: [
+      SourceCategory('', '推荐'),
+      SourceCategory('11,7,6,8,20,24,25,9', '电影'),
+      SourceCategory('13,16,31,15,33,30,14', '剧集'),
+      SourceCategory('34,36', '综艺'),
+      SourceCategory('38,40,29,39', '动漫'),
+    ],
+    lineNameCn: {
+      'mym3u8': '猫眼线路',
+    },
+  ),
+);
+
+/// 樱花资源 —— 实测首页 600ms（首轮 5645ms 是单次网络抖动，已用 10 次复测纠正）。
+///
+/// 用户实机反馈两个问题，都已定位：
+///
+/// 1. **搜索走 GET 会 403**。`?ac=list&wd=关键词` 被 nginx 直接拦成
+///    403 Forbidden（546 字节的 403 页，PHP 都没进）。换 UA / Referer /
+///    Accept / Origin / 手机 UA 全部无效，但同一个 `ac`+`wd` 用
+///    **POST 表单**就能正常返回。所以这里打开 [MacCmsApiConfig.searchViaPost]。
+///
+/// 2. **更新慢**。实测《走马上任》只有 23 集，其余源都是 25 集，确实慢 2 集。
+///    这是站方采集节奏问题，客户端无法解决，只能靠排序把它放最后。
+///
+/// 片库 105,335 条；`yhm3u8` 直出，实测 #EXTM3U 合法（4096 B）。
+final DataSource kYinghuaSource = MacCmsApiSource(
+  const MacCmsApiConfig(
+    id: 'yinghua',
+    displayName: '樱花资源',
+    apiUrl: 'https://m3u8.apiyhzy.com/api.php/provide/vod/',
+    description: '直连采集接口、无弹幕；片库 10.5 万+，更新略慢于其它源',
+    // 该站把 GET 的 wd 参数在 nginx 层拦成 403，必须走 POST 表单
+    searchViaPost: true,
+    categories: [
+      SourceCategory('', '推荐'),
+      SourceCategory('11,7,6,10,9,8,21,22', '电影'),
+      SourceCategory('13,24,14,23,25,16,15', '剧集'),
+      SourceCategory('26,27,28,29', '综艺'),
+      SourceCategory('31,30,32,33', '动漫'),
+    ],
+    lineNameCn: {
+      'yhm3u8': '樱花线路',
+    },
+  ),
+);

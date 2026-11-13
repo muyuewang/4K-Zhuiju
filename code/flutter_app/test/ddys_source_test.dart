@@ -385,9 +385,14 @@ void main() {
       expect(SourceRegistry.all.any((e) => e.id == 'ddys'), isTrue);
     });
 
-    test('十个源互不重复', () {
+    // 名字里不写死数量：源在持续增加（10 → 15），写死会变成每加一个源
+    // 就得改一次测试名，而测试要守的是「互不重复」这件事本身。
+    test('所有源的 id 互不重复', () {
       final ids = SourceRegistry.all.map((e) => e.id).toList();
       expect(ids.toSet().length, ids.length);
+      // 顺带守住「id 不能为空串」：空 id 会互相撞成同一个 key，
+      // 但 toSet().length 依然等于 length，上面的断言抓不到。
+      expect(ids.every((id) => id.trim().isNotEmpty), isTrue);
     });
   });
 }

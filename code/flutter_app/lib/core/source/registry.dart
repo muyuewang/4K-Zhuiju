@@ -25,7 +25,7 @@ class SourceRegistry {
 
   static const String _prefKey = 'app.dataSourceId';
 
-  /// 全部可用数据源。顺序即设置页展示顺序，第一个是默认。
+  /// 全部可用数据源。顺序即设置页/快切面板的展示顺序，第一个是默认。
   ///
   /// 加源的完整清单：
   ///   1. MacCMS 类站点 → 在 `site_sources.dart` 加一条 [MacCmsConfig]；
@@ -34,13 +34,33 @@ class SourceRegistry {
   ///      supportsDanmaku，实现 search / category / detail / resolveUrl；
   ///   3. 在这里登记（或运行时调 [register]）。
   /// 页面、收藏、历史、播放器都不需要改：它们只依赖 [DataSource] 契约。
+  ///
+  /// ## 排序规则（用户 2026-11-13 明确指定）
+  ///
+  ///   1. 橘汁（默认，恒第一）
+  ///   2. 追剧 / 暴风 / 量子 / 片库 / 可可影视 —— 这 5 个相对次序不变
+  ///   3. 采集站 —— 按**实测首页响应中位数**从快到慢
+  ///   4. 需要代理的源 —— 全部沉到最后
+  ///
+  /// 为什么代理源必须垫底：它们的源站国内直连不通，没开代理时
+  /// 点进去只能看到「无法连接」。把不能用的源排在能用的源前面，
+  /// 等于每次换源都先让用户撞一次墙。
   static final List<DataSource> _all = <DataSource>[
+    // ① 默认
     ZhuijuSource.instance,
+    // ② 既有 5 个，相对次序由用户指定，不要动
     KanjuSource.instance,
     kBofengSource,
     kLiangziSource,
     kPiankuSource,
     Keke1Source.instance,
+    // ③ 采集站，按实测首页耗时升序（数字为 2026-11-13 实测中位数）
+    kDyttSource, //  213ms
+    kGuangsuSource, //  224ms
+    kFeifanSource, //  228ms
+    kMaoyanSource, //  264ms
+    kYinghuaSource, //  600ms（更新也最慢，正好垫在这组最后）
+    // ④ 需系统代理，国内直连不通，全部最后
     Kvm4kSource.instance,
     JisuSource.instance,
     YunySource.instance,
@@ -48,6 +68,48 @@ class SourceRegistry {
   ];
 
   static List<DataSource> get all => List.unmodifiable(_all);
+
+  /// 某个源属于哪一组（只用于界面分组展示，不参与任何逻辑）。
+  ///
+  /// 为什么不在 [DataSource] 上加一个 `group` 字段：那要求每个源实现类
+  /// 都提供 getter，改一遍 15 个类，且以后加源容易漏。这里按 id 查表，
+  /// 集中在一处维护，加源时只要在这里补一行。
+  ///
+  /// 分组的意义：现在有 15 个源，平铺成一个列表用户根本挑不动。
+  /// 分成「默认 / 常用 / 采集站（直连）/ 需代理」四组后，
+  /// 用户能立刻明白「为什么这 4 个要开代理」「哪几个是新的」。
+  static String groupOf(DataSource s) {
+    if (_groupProxy.contains(s.id)) return '需系统代理';
+    if (_groupDefault.contains(s.id)) return '默认';
+    if (_groupBuiltin.contains(s.id)) return '常用';
+    return '采集站（直连）';
+  }
+
+  /// 分组展示顺序。界面上按这个顺序渲染分组标题。
+  static const List<String> groupOrder = ['默认', '常用', '采集站（直连）', '需系统代理'];
+
+  static const Set<String> _groupDefault = {'zhuiju'};
+  static const Set<String> _groupBuiltin = {
+    'kanju',
+    'bofeng',
+    'liangzi',
+    'pianku',
+    'keke1',
+  };
+
+  /// 源站国内直连不通、必须走系统代理的源。
+  ///
+  /// 与各源 description 里写的「需系统代理」必须一致；这里独立维护是因为
+  /// 界面要在**不发请求**的前提下就知道谁需要代理（不能靠探测）。
+  static const Set<String> _groupProxy = {
+    'kvm4k',
+    'jisu',
+    'yuny',
+    'ddys',
+  };
+
+  /// 该源是否依赖系统代理。用于在切换面板上打标记。
+  static bool needsProxy(DataSource s) => _groupProxy.contains(s.id);
 
   /// 运行时登记一个数据源（幂等）。
   ///
