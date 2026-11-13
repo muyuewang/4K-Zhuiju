@@ -58,6 +58,23 @@ add_subdirectory("runner")
 include(flutter/generated_plugins.cmake)
 
 
+# === 修复 jni 插件的 /DELAYLOAD 未生效问题 ===
+# jni/src/CMakeLists.txt 里写的是：
+#   if(WIN32)
+#     set_target_properties(${TARGET_NAME} PROPERTIES LINK_FLAGS "/DELAYLOAD:jvm.dll")
+#   endif()
+# 但 ${TARGET_NAME} 在该文件中从未定义（真正的 target 名是 `jni`），所以这条
+# 指令静默失效，jvm.dll 进了 dartjni.dll 的【普通导入表】而非延迟加载表。
+# 后果：任何没装 JDK 的机器一加载 dartjni.dll 就会失败。
+# 这里在应用层补上，且用 TARGET 存在性判断包一层，插件将来自己修好了也不冲突。
+if(WIN32 AND TARGET jni)
+  target_link_options(jni PRIVATE "/DELAYLOAD:jvm.dll")
+  # 插件用的是 plain signature（target_link_libraries(jni ${JNI_LIBRARIES})），
+  # CMake 不允许同一 target 混用 plain / keyword 两种写法，这里必须跟随 plain。
+  target_link_libraries(jni delayimp)
+endif()
+
+
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can
 # run in place. This is done instead of making a separate bundle (as on Linux)
