@@ -13,7 +13,6 @@ import 'data_source.dart';
 import 'ddys_source.dart';
 import 'jisu_source.dart';
 import 'kanju_source.dart';
-import 'keke1_source.dart';
 import 'kvm4k_source.dart';
 import 'site_sources.dart';
 import 'yuny_source.dart';
@@ -38,28 +37,39 @@ class SourceRegistry {
   /// ## 排序规则（用户 2026-11-13 明确指定）
   ///
   ///   1. 橘汁（默认，恒第一）
-  ///   2. 追剧 / 暴风 / 量子 / 片库 / 可可影视 —— 这 5 个相对次序不变
+  ///   2. 追剧 / 暴风 / 量子 / 片库 —— 这 4 个相对次序不变
   ///   3. 采集站 —— 按**实测首页响应中位数**从快到慢
   ///   4. 需要代理的源 —— 全部沉到最后
   ///
   /// 为什么代理源必须垫底：它们的源站国内直连不通，没开代理时
   /// 点进去只能看到「无法连接」。把不能用的源排在能用的源前面，
   /// 等于每次换源都先让用户撞一次墙。
+  ///
+  /// ## 2026-11-13 剔除的两个源
+  ///
+  /// **可可影视**（keke1）：站是活的，但 App 侧拿不到数据。
+  /// 实测详情页的 `source-list-box-main` / `episode-list-box-main`
+  /// 两个容器是**空的**，播放页 `playSource.src` 是**硬编码空串**，
+  /// 选集与地址全部改由 `kkys.min.js` 通过 HmacSHA1 签名 API
+  /// （`43.248.100.69:51080`）异步取，而该 API 直连超时、
+  /// 经代理 https 握手失败 / http 502。浏览器能播是因为它跑得动那套 JS，
+  /// App 拿到的静态 HTML 里这两块就是空的 —— 确定性失效，不是偶发。
+  ///
+  /// **樱花资源**（yinghua）：用户反馈「大部分不能看、更新慢」，站方采集节奏问题，
+  /// 客户端无法解决。
   static final List<DataSource> _all = <DataSource>[
     // ① 默认
     ZhuijuSource.instance,
-    // ② 既有 5 个，相对次序由用户指定，不要动
+    // ② 既有 4 个，相对次序由用户指定，不要动
     KanjuSource.instance,
     kBofengSource,
     kLiangziSource,
     kPiankuSource,
-    Keke1Source.instance,
     // ③ 采集站，按实测首页耗时升序（数字为 2026-11-13 实测中位数）
     kDyttSource, //  213ms
     kGuangsuSource, //  224ms
     kFeifanSource, //  228ms
     kMaoyanSource, //  264ms
-    kYinghuaSource, //  600ms（更新也最慢，正好垫在这组最后）
     // ④ 需系统代理，国内直连不通，全部最后
     Kvm4kSource.instance,
     JisuSource.instance,
@@ -94,7 +104,6 @@ class SourceRegistry {
     'bofeng',
     'liangzi',
     'pianku',
-    'keke1',
   };
 
   /// 源站国内直连不通、必须走系统代理的源。

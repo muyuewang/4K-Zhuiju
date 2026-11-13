@@ -53,11 +53,63 @@ cmake --install build/windows/x64 --config Release
 
 产物：`build/windows/x64/runner/Release/`，内含 `zhuiju.exe`、`flutter_windows.dll`、插件 dll 和 `data/` 目录。**打包时必须整个目录一起，只拷 exe 无法运行。**
 
+### Windows 播放内核（FFmpeg）
+
+Windows 端的解码器是 libmpv 内嵌的 FFmpeg。它的版本**不由 `pubspec.yaml` 的版本号决定**，而是由
+`media_kit_libs_windows_video` 的 `windows/CMakeLists.txt` 里硬编码的 libmpv 归档地址决定：
+
+```cmake
+set(LIBMPV "mpv-dev-x86_64-20261111-git-bcde6b93cc.7z")
+```
+
+该包已被 vendor 到 `packages/media_kit_libs_windows_video/`，通过 `pubspec.yaml` 的
+`dependency_overrides` 指过去。**不要改回 pub 上的版本**：上游 `media-kit/libmpv-win32-video-build`
+的 release 只到 2023-09-24（FFmpeg n6.0），而 pub 上这个包最新就是 1.0.11 —— 把版本号改高不会有任何变化，
+因为根本没有更高的版本。
+
+当前版本：FFmpeg `N-128766` / mpv `v0.42.0-38`。升级方式是把 CMakeLists 里的 `LIBMPV`、`LIBMPV_URL`、
+`LIBMPV_MD5` 三行换成新构建（取自 [shinchiro/mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake)），
+然后**删掉 `build/windows/x64/libmpv/` 再重新 configure**。不删这个目录，CMake 的
+`check_directory_exists_and_not_empty` 会认为已经解压过而跳过，构建会静默沿用旧 DLL —— 版本号看着变了，实际没变。
+
+代价提醒：当前用的是全功能构建，`libmpv-2.dll` 有 116 MB（旧版 28 MB），发布包约 +33 MB。
+想压体积需要自己交叉编译裁掉未用的编解码器。
+
+核对当前实际版本（不要靠文件时间戳，media_kit 的分发包时间戳只反映打包时刻）：
+
+```bash
+dart run tool/probe_libmpv_version.dart build/windows/x64/runner/Release/libmpv-2.dll
+```
+
+### Windows 硬解
+
+`hwdec` 默认值是 `auto`（来自 `media_kit_video` 的 `NativeVideoController`：
+`configuration.hwdec ?? 'auto'`，而 `video_player_media_kit` 内部是无参构造）。
+
+**不要显式改成 `d3d11va`。** 实测写死 `d3d11va` 反而退回软解（`hwdec-current = no`），
+交给 `auto` 协商才落到 `d3d11va-copy`。H.264 与 HEVC 都验证过。
+
+验证硬解是否真的生效，要读**运行时**属性（起播前读一律为空）：
+
+```bash
+dart run tool/probe_hwdec_runtime.dart C:/path/to/video.mp4
+```
+
+`MPV_HOME` + `mpv.conf` 这条路不通（libmpv 默认 `config=no`，压根不加载配置文件），别再试。
+
 ## 环境要求
 
 - Flutter 3.x（本项目在 3.47.9 上验证）
 - Android：Android SDK + JDK 17
 - Windows：Visual Studio 2022 的「使用 C++ 的桌面开发」工作负载、Windows 10 SDK
+
+若 `flutter build windows` 报 `Building with plugins requires symlink support`：Flutter 建插件目录链接
+需要符号链接特权，未开开发者模式时会失败（errno 1314）。可以用**目录联接（junction）**绕过，
+它不需要特权，且 Dart 会把 junction 正确识别为 `FileSystemEntityType.link`，Flutter 的复用分支能命中：
+
+```powershell
+New-Item -Path "windows\flutter\ephemeral\.plugin_symlinks\<插件名>" -ItemType Junction -Target "<插件真实路径>"
+```
 
 ## 平台差异
 
@@ -66,7 +118,8 @@ cmake --install build/windows/x64 --config Release
 - `isDesktop` / `isMobile`：判断平台大类
 - `setFullscreen(bool)` / `restorePortrait()`：移动端切横屏沉浸式，桌面端是显式 no-op（桌面没有横竖屏概念）
 
-播放后端通过 `video_player` 的接口统一。`video_player_win` 用 `implements: video_player` 提供 Windows 实现，所以播放页的代码两个平台完全一致。
+播放后端通过 `video_player` 的接口统一。Windows 端由 `video_player_media_kit` 提供实现（底层
+media_kit + libmpv + FFmpeg），Android 端是 ExoPlayer，所以播放页的代码两个平台完全一致。
 
 ## 图标
 

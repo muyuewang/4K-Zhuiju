@@ -1,7 +1,7 @@
 name: zhuiju
 description: 4K追剧 — 高清影视聚合客户端（Android / Windows）
 publish_to: 'none'
-version: 1.11.4+29
+version: 1.11.5+30
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -43,6 +43,29 @@ dependencies:
   path_provider: ^2.1.2
   cached_network_image: ^3.3.1
   shared_preferences: ^2.2.2
+
+# 升级 Windows 端 FFmpeg 的唯一可行路径：vendoring。
+#
+# 为什么必须 override：FFmpeg 的版本**不由这里的版本号决定**，而是由
+# `media_kit_libs_windows_video` 的 `windows/CMakeLists.txt` 里硬编码的
+# libmpv 归档决定的：
+#
+#     set(LIBMPV "mpv-dev-x86_64-20230924-git-652a1dd.7z")   ← FFmpeg n6.0
+#
+# 而 pub 上这个包最新就是 1.0.11（我们原本就在用），上游
+# `media-kit/libmpv-win32-video-build` 的 release 列表也只到 2023-09-24。
+# 也就是说：**把 `^1.0.11` 改成更高的号，什么都不会发生**，因为根本没有
+# 更高的版本。想换 FFmpeg 只能接管这个包的构建脚本。
+#
+# 所以把包复制进 `packages/media_kit_libs_windows_video`，改归档地址指向
+# shinchiro 的官方 Windows 构建（FFmpeg N-128766 / mpv v0.42.0-38）。
+#
+# 注意：**不要改成直接改 ~/AppData/Local/Pub/Cache 下的那份**。那样本地
+# 能编过，但 CI 全新 checkout 时缓存不存在，会重新拉 pub 上的 1.0.11，
+# 静默退回 FFmpeg n6.0 —— 而且失败方式是完全无声的，只是版本悄悄变旧。
+dependency_overrides:
+  media_kit_libs_windows_video:
+    path: packages/media_kit_libs_windows_video
 
 dev_dependencies:
   flutter_test:

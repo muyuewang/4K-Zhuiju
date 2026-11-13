@@ -17,7 +17,7 @@ void main() {
       // 初始状态没有探测过，_active=false
       for (final h in [
         'p.bfvp26.com',
-        'www.keke1.app',
+        'www.maoyanapi.top',
         '4k01.pianku.online',
         'bfzyapi.com',
       ]) {

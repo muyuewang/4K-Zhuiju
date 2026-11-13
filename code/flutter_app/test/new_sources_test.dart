@@ -1,4 +1,4 @@
-/// 2026-11-13 新接入的 5 个采集站：配置契约 + 线路重排回归（不联网）。
+/// 2026-11-13 新接入的采集站（原 5 个，樱花已剔除）：配置契约 + 线路重排回归（不联网）。
 ///
 /// 为什么这些配置需要被测试钉住：它们每一条都是**实测出来的常量**，
 /// 而错一个的表现都极其隐蔽，靠人眼看不出来。
@@ -7,7 +7,6 @@
 /// | --- | --- |
 /// | 分类填了父分类 `1/2/3/4` | 点「电影」进去一片空白，以为源坏了 |
 /// | `apiUrl` 少了结尾斜杠 | 请求 404，报「源站暂时不可用」 |
-/// | 樱花没开 `searchViaPost` | 搜索永远 403，报「搜索失败」 |
 /// | 线路没重排 | 详情页正常，点播放一直转圈 |
 ///
 /// 这四类问题在联网测试里都很难定位（要么看起来像网络问题，要么像源站挂了），
@@ -30,13 +29,12 @@ List<String> splitIds(String raw) =>
     raw.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
 
 void main() {
-  group('5 个新源的配置契约', () {
+  group('4 个采集站的配置契约', () {
     final sources = <String, Object>{
       'dytt': kDyttSource,
       'guangsu': kGuangsuSource,
       'feifan': kFeifanSource,
       'maoyan': kMaoyanSource,
-      'yinghua': kYinghuaSource,
     };
 
     test('id 与注册表里登记的一致', () {
@@ -106,7 +104,6 @@ void main() {
       'guangsu': kGuangsuSource,
       'feifan': kFeifanSource,
       'maoyan': kMaoyanSource,
-      'yinghua': kYinghuaSource,
     };
 
     test('没有任何栏目直接使用父分类 id', () {
@@ -152,12 +149,11 @@ void main() {
     });
   });
 
-  group('searchViaPost 只对樱花打开', () {
-    test('樱花必须走 POST（GET 会被 nginx 拦成 403）', () {
-      expect(cfgOf(kYinghuaSource).searchViaPost, isTrue);
-    });
-
-    test('其余 4 个源保持 GET（GET 可被缓存，能用就别换）', () {
+  group('searchViaPost 保持默认（GET）', () {
+    // 唯一需要 POST 的樱花资源已于 2026-11-13 剔除（用户反馈「大部分不能看、
+    // 更新慢」）。`searchViaPost` 这个开关本身保留：以后接入的站若同样把
+    // GET 的 wd 参数在 nginx 层拦成 403，打开它即可，不必改请求代码。
+    test('现存 4 个源都该走 GET（GET 可被缓存，能用就别换）', () {
       for (final s in [kDyttSource, kGuangsuSource, kFeifanSource, kMaoyanSource]) {
         expect(cfgOf(s).searchViaPost, isFalse,
             reason: '${cfgOf(s).displayName} 没有 403 问题，不该走 POST');
@@ -166,7 +162,7 @@ void main() {
   });
 
   group('preferDirectLine 全部打开', () {
-    test('5 个源都要求把直出线路提到前面', () {
+    test('4 个源都要求把直出线路提到前面', () {
       // 非凡 / 电影天堂的分享页里抠不出 m3u8（靠 JS 渲染），
       // 不重排就会「点进去播放没出来」。默认值是 true，但不能只靠默认值——
       // 显式断言能防止以后有人改默认值把这批源一起带崩。
@@ -175,7 +171,6 @@ void main() {
         kGuangsuSource,
         kFeifanSource,
         kMaoyanSource,
-        kYinghuaSource,
       ]) {
         expect(cfgOf(s).preferDirectLine, isTrue,
             reason: '${cfgOf(s).displayName} 关掉了线路重排');
@@ -190,7 +185,6 @@ void main() {
         kGuangsuSource: 'gsm3u8',
         kFeifanSource: 'ffm3u8',
         kMaoyanSource: 'mym3u8',
-        kYinghuaSource: 'yhm3u8',
       };
       for (final entry in expectM3u8.entries) {
         final cfg = cfgOf(entry.key);
@@ -206,7 +200,6 @@ void main() {
         kGuangsuSource,
         kFeifanSource,
         kMaoyanSource,
-        kYinghuaSource,
       ]) {
         final cfg = cfgOf(s);
         final names = cfg.lineNameCn.values.toList();
@@ -289,13 +282,12 @@ void main() {
   });
 
   group('注册表分组与排序', () {
-    test('5 个新源归在「采集站（直连）」组', () {
+    test('4 个采集站归在「采集站（直连）」组', () {
       for (final s in [
         kDyttSource,
         kGuangsuSource,
         kFeifanSource,
         kMaoyanSource,
-        kYinghuaSource,
       ]) {
         expect(SourceRegistry.groupOf(s), '采集站（直连）');
         expect(SourceRegistry.needsProxy(s), isFalse,
@@ -308,14 +300,16 @@ void main() {
       expect(SourceRegistry.groupOf(SourceRegistry.all.first), '默认');
     });
 
-    test('前 6 个的相对次序不变', () {
-      // 用户明确要求：默认橘汁，后面依次追剧 / 暴风 / 量子 / 片库 / 可可影视
-      const want = ['zhuiju', 'kanju', 'bofeng', 'liangzi', 'pianku', 'keke1'];
-      expect(SourceRegistry.all.take(6).map((e) => e.id).toList(), want);
+    test('前 5 个的相对次序不变', () {
+      // 用户明确要求：默认橘汁，后面依次追剧 / 暴风 / 量子 / 片库。
+      // 可可影视原先排在第 6 位，2026-11-13 因「详情页选集为空、播放地址为
+      // 空串、签名 API 不可达」确定性失效而剔除。
+      const want = ['zhuiju', 'kanju', 'bofeng', 'liangzi', 'pianku'];
+      expect(SourceRegistry.all.take(5).map((e) => e.id).toList(), want);
     });
 
-    test('采集站按实测速度升序：dytt < guangsu < feifan < maoyan < yinghua', () {
-      const want = ['dytt', 'guangsu', 'feifan', 'maoyan', 'yinghua'];
+    test('采集站按实测速度升序：dytt < guangsu < feifan < maoyan', () {
+      const want = ['dytt', 'guangsu', 'feifan', 'maoyan'];
       final ids = SourceRegistry.all.map((e) => e.id).toList();
       final pos = want.map(ids.indexOf).toList();
       expect(pos.every((i) => i >= 0), isTrue, reason: '有源没登记');
@@ -325,9 +319,10 @@ void main() {
       }
     });
 
-    test('需代理的源全部排在 5 个采集站之后', () {
+    test('需代理的源全部排在直连采集站之后', () {
       final ids = SourceRegistry.all.map((e) => e.id).toList();
-      final lastDirect = ids.indexOf('yinghua');
+      // 樱花剔除后，直连组最后一个是猫眼（264ms）
+      final lastDirect = ids.indexOf('maoyan');
       for (final id in ['kvm4k', 'jisu', 'yuny', 'ddys']) {
         final at = ids.indexOf(id);
         expect(at, greaterThan(lastDirect),

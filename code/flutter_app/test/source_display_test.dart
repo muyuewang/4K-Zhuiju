@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuiju/core/models.dart';
 import 'package:zhuiju/core/source/data_source.dart';
 import 'package:zhuiju/core/source/kanju_source.dart';
-import 'package:zhuiju/core/source/keke1_source.dart';
 import 'package:zhuiju/core/source/registry.dart';
 import 'package:zhuiju/core/source/site_sources.dart';
 import 'package:zhuiju/core/source/zhuiju_source.dart';
@@ -32,7 +31,6 @@ void main() {
     }
     expect(ZhuijuSource.instance.supportsDanmaku, isTrue);
     expect(kPiankuSource.supportsDanmaku, isFalse);
-    expect(Keke1Source.instance.supportsDanmaku, isFalse);
   });
 
   test('注册表的展示名不重复', () {

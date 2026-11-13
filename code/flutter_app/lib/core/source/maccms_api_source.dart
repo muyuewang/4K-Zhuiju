@@ -58,6 +58,7 @@ class MacCmsApiConfig {
     this.lineNameCn = const <String, String>{},
     this.searchViaPost = false,
     this.preferDirectLine = true,
+    this.listNeedsDetail = false,
   });
 
   final String id;
@@ -105,6 +106,46 @@ class MacCmsApiConfig {
   /// 直出的沉到前面。网页线路仍保留在后面（少数能靠
   /// [extractShareMainUrl] 二次解析出来，不能直接丢掉）。
   final bool preferDirectLine;
+
+  /// 列表接口是否改用 `ac=detail` 来取（为了拿到封面）。
+  ///
+  /// ## 为什么需要这个开关（2026-11-13 逐站实测）
+  ///
+  /// MacCMS 采集站的 `ac=list` 有两种实现，差别很大：
+  ///
+  /// | 站 | `ac=list` 字段数 | 带 `vod_pic` |
+  /// | --- | --- | --- |
+  /// | 暴风 / 量子 | 19 | **20/20** ✅ |
+  /// | 电影天堂 / 光速 / 非凡 / 猫眼 | 8~9 | **0/20** ❌ |
+  ///
+  /// 后四站把 `ac=list` 精简成了「只要够画列表就行」的字段集，
+  /// 连封面都砍了。这不是我们解析漏了 —— [_drama] 一直在读 `it['vod_pic']`，
+  /// 是服务端根本没下发。用户看到的就是一片灰底占位图。
+  ///
+  /// ## 为什么不是「按条拉详情补封面」
+  ///
+  /// 直觉做法是「列表出 20 条 → 并发拉 20 次 detail 拿封面」。实测否掉：
+  /// 单条 detail 就有几十到上百 KB（电影天堂 3 个 id 就 144 KB），
+  /// 20 条并发等于 **~500 KB + 20 个连接**，比一条整页请求还贵。
+  ///
+  /// ## 打开这个开关的真实代价（实测，不是估计）
+  ///
+  /// | 站 | `ac=list` | `ac=detail` | 涨幅 |
+  /// | --- | --- | --- | --- |
+  /// | 光速资源 | 7.1 KB | 104.4 KB | 15× |
+  /// | 非凡资源 | 6.0 KB | 261.9 KB | 44× |
+  /// | 猫眼资源 | 9.3 KB | 292.5 KB | 31× |
+  /// | 电影天堂 | 6.0 KB | 459.1 KB | 77× |
+  ///
+  /// 涨得凶是因为 `vod_play_url`（全剧分集地址）占了 detail 体积的
+  /// **86%~97%**（电影天堂实测 428 K / 441 K），而列表页一条都用不上。
+  /// 也试过用 `fields=vod_id,vod_pic` 裁字段 —— **服务端不认**，
+  /// 仍返回 83 字段、504.9 KB。
+  ///
+  /// 所以这是个明确的权衡：**用流量换封面**。默认关闭，
+  /// 只在「列表确实没封面」的站上单独打开。翻页语义已实测一致
+  /// （`ac=detail&pg=2` 的首条与 `ac=list&pg=2` 相同），不会错位。
+  final bool listNeedsDetail;
 }
 
 /// 一条采集线路的原始三元组（纯数据，方便离线测试）。
@@ -261,14 +302,29 @@ class MacCmsApiSource implements DataSource {
   @override
   LineOrderPolicy get lineOrderPolicy => LineOrderPolicy.sourceOrder;
 
+  /// 构造列表请求参数。`ac` 由 [MacCmsApiConfig.listNeedsDetail] 决定。
+  ///
+  /// 抽成一个方法而不是每处手写 `'ac': 'list'`：现在有 4 个调用点
+  /// （搜索、推荐、单分类、多分类并发），漏掉任何一个的表现都是
+  /// 「这个入口的封面又没了」，极难发现。只留一个出口就不会漏。
+  Map<String, dynamic> _listQuery(int page, {String? typeId, String? keyword}) {
+    final q = <String, dynamic>{
+      // 用 detail 只是为了拿 vod_pic。翻页语义已实测与 list 一致
+      // （`ac=detail&pg=2` 首条 == `ac=list&pg=2` 首条），不会错位。
+      'ac': cfg.listNeedsDetail ? 'detail' : 'list',
+      'pg': page,
+    };
+    if (typeId != null && typeId.isNotEmpty) q['t'] = typeId;
+    if (keyword != null && keyword.isNotEmpty) q['wd'] = keyword;
+    return q;
+  }
+
   @override
   Future<List<Drama>> search(String keyword, {int page = 1}) async {
-    final q = <String, dynamic>{'ac': 'list', 'pg': page};
     final k = keyword.trim();
-    if (k.isNotEmpty) q['wd'] = k;
+    final q = _listQuery(page, keyword: k);
     // 带关键词搜索且该站屏蔽了 GET 的 wd 参数时，改走 POST 表单。
-    // 只有「真在搜索」才需要：空关键词（推荐位）走 GET 一直是好的，
-    // 樱花实测 `?ac=list&pg=1` 返回 200 正常。
+    // 只有「真在搜索」才需要：空关键词（推荐位）走 GET 一直是好的。
     if (cfg.searchViaPost && k.isNotEmpty) {
       return _cards(await _post(q));
     }
@@ -304,18 +360,17 @@ class MacCmsApiSource implements DataSource {
         .toList(growable: false);
 
     if (ids.isEmpty) {
-      return _cards(await _get(<String, dynamic>{'ac': 'list', 'pg': page}));
+      return _cards(await _get(_listQuery(page)));
     }
     if (ids.length == 1) {
-      return _cards(
-          await _get(<String, dynamic>{'ac': 'list', 't': ids.first, 'pg': page}));
+      return _cards(await _get(_listQuery(page, typeId: ids.first)));
     }
 
     // 单个子分类失败不能拖垮整个栏目：某条分类临时挂了，
     // 其余分类照常出内容，总比整页报错强。
     final groups = await Future.wait(ids.map((id) async {
       try {
-        final d = await _get(<String, dynamic>{'ac': 'list', 't': id, 'pg': page});
+        final d = await _get(_listQuery(page, typeId: id));
         return _cards(d);
       } catch (_) {
         return const <Drama>[];

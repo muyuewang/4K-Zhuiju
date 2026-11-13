@@ -167,6 +167,9 @@ final DataSource kDyttSource = MacCmsApiSource(
       'dyttm3u8': '天堂线路',
       'dytt': '天堂网页',
     },
+    // 该站 ac=list 只回 8 个字段、不含 vod_pic（实测 0/20），
+    // 必须走 ac=detail 才有封面。代价：6.0 KB → 459.1 KB（约 77×）。
+    listNeedsDetail: true,
   ),
 );
 
@@ -194,6 +197,8 @@ final DataSource kGuangsuSource = MacCmsApiSource(
       'gsm3u8': '光速线路',
       'gsyun': '光速网页',
     },
+    // ac=list 9 字段、无封面（实测 0/20）。代价：7.1 KB → 104.4 KB（约 15×）。
+    listNeedsDetail: true,
   ),
 );
 
@@ -219,6 +224,8 @@ final DataSource kFeifanSource = MacCmsApiSource(
       'ffm3u8': '非凡线路',
       'feifan': '非凡网页',
     },
+    // ac=list 8 字段、无封面（实测 0/20）。代价：6.0 KB → 261.9 KB（约 44×）。
+    listNeedsDetail: true,
   ),
 );
 
@@ -245,39 +252,7 @@ final DataSource kMaoyanSource = MacCmsApiSource(
     lineNameCn: {
       'mym3u8': '猫眼线路',
     },
-  ),
-);
-
-/// 樱花资源 —— 实测首页 600ms（首轮 5645ms 是单次网络抖动，已用 10 次复测纠正）。
-///
-/// 用户实机反馈两个问题，都已定位：
-///
-/// 1. **搜索走 GET 会 403**。`?ac=list&wd=关键词` 被 nginx 直接拦成
-///    403 Forbidden（546 字节的 403 页，PHP 都没进）。换 UA / Referer /
-///    Accept / Origin / 手机 UA 全部无效，但同一个 `ac`+`wd` 用
-///    **POST 表单**就能正常返回。所以这里打开 [MacCmsApiConfig.searchViaPost]。
-///
-/// 2. **更新慢**。实测《走马上任》只有 23 集，其余源都是 25 集，确实慢 2 集。
-///    这是站方采集节奏问题，客户端无法解决，只能靠排序把它放最后。
-///
-/// 片库 105,335 条；`yhm3u8` 直出，实测 #EXTM3U 合法（4096 B）。
-final DataSource kYinghuaSource = MacCmsApiSource(
-  const MacCmsApiConfig(
-    id: 'yinghua',
-    displayName: '樱花资源',
-    apiUrl: 'https://m3u8.apiyhzy.com/api.php/provide/vod/',
-    description: '直连采集接口、无弹幕；片库 10.5 万+，更新略慢于其它源',
-    // 该站把 GET 的 wd 参数在 nginx 层拦成 403，必须走 POST 表单
-    searchViaPost: true,
-    categories: [
-      SourceCategory('', '推荐'),
-      SourceCategory('11,7,6,10,9,8,21,22', '电影'),
-      SourceCategory('13,24,14,23,25,16,15', '剧集'),
-      SourceCategory('26,27,28,29', '综艺'),
-      SourceCategory('31,30,32,33', '动漫'),
-    ],
-    lineNameCn: {
-      'yhm3u8': '樱花线路',
-    },
+    // ac=list 8 字段、无封面（实测 0/30）。代价：9.3 KB → 292.5 KB（约 31×）。
+    listNeedsDetail: true,
   ),
 );
