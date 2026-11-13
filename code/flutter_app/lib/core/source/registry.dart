@@ -12,7 +12,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'data_source.dart';
 import 'ddys_source.dart';
 import 'jisu_source.dart';
-import 'jplink_source.dart';
 import 'kanju_source.dart';
 import 'keke1_source.dart';
 import 'kvm4k_source.dart';
@@ -46,7 +45,6 @@ class SourceRegistry {
     JisuSource.instance,
     YunySource.instance,
     DdysSource.instance,
-    JplinkSource.instance,
   ];
 
   static List<DataSource> get all => List.unmodifiable(_all);

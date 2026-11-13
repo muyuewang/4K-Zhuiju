@@ -10,15 +10,15 @@ import subprocess
 import tempfile
 
 REPO = "muyuewang/4K-Zhuiju"
-TAG = "v1.11.0"
-NAME = "4K追剧 v1.11.0"
+TAG = "v1.11.1"
+NAME = "4K追剧 v1.11.1"
 
 ROOT = r"C:\Users\fengxin\WorkBuddy\vivos7"
 ASSETS = [
-    (r"dist\v1.11.0\4KZhuiju-v1.11.0-release.apk", "4KZhuiju-v1.11.0-release.apk"),
-    (r"dist\v1.11.0\4KZhuiju-v1.11.0-windows-x64.zip", "4KZhuiju-v1.11.0-windows-x64.zip"),
+    (r"dist\v1.11.1\4KZhuiju-v1.11.1-release.apk", "4KZhuiju-v1.11.1-release.apk"),
+    (r"dist\v1.11.1\4KZhuiju-v1.11.1-windows-x64.zip", "4KZhuiju-v1.11.1-windows-x64.zip"),
 ]
-NOTES = r"dist\v1.11.0\RELEASE_NOTES.md"
+NOTES = r"dist\v1.11.1\RELEASE_NOTES.md"
 
 # 代理端口别写死：本机在不同网络环境下换过 7897 / 13153 等端口，
 # 写死会让脚本在换环境后直接连不上而报「curl 失败」，看起来像 GitHub 挂了。

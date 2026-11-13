@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/版本-v1.10.7-ff7a29?style=flat-square" alt="版本">
   <img src="https://img.shields.io/badge/平台-Android%20%7C%20Windows-3ddc84?style=flat-square" alt="平台">
   <img src="https://img.shields.io/badge/大小-56.8MB-blue?style=flat-square" alt="大小">
-  <img src="https://img.shields.io/badge/数据源-11%20个-52c41a?style=flat-square" alt="数据源">
+  <img src="https://img.shields.io/badge/数据源-10%20个-52c41a?style=flat-square" alt="数据源">
   <img src="https://img.shields.io/badge/广告-无-ff4d4f?style=flat-square" alt="无广告">
 </p>
 
@@ -174,7 +174,7 @@
 
 ## 片源从哪来
 
-App 里内置 **11 个数据源**，可以在「我的 → 数据源」里切换和排序。
+App 里内置 **10 个数据源**，可以在「我的 → 数据源」里切换和排序。
 
 | 源 | 类型 | 特点 |
 |:---|:---|:---|
@@ -188,7 +188,6 @@ App 里内置 **11 个数据源**，可以在「我的 → 数据源」里切换
 | 极速追剧 | 网页解析 | 需系统代理；线路较多，各线路集数可能不同 |
 | 云影 | 网页解析 | 需系统代理；分类齐全，各线路集数可能不同 |
 | 低调影视 | 网页解析 | 需系统代理；在线播放直出，另有网盘资源 |
-| 金牌影院 | 签名 API | 电影 / 电视剧 / 综艺 / 动漫 / 短剧五类齐全，三档清晰度，支持搜索 |
 
 多源的意义在于互补：同一部剧经常一个站有、一个站没有，或两边线路质量不同，正好用来做「这条线挂了换那条」。
 
