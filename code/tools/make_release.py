@@ -10,16 +10,27 @@ import subprocess
 import tempfile
 
 REPO = "muyuewang/4K-Zhuiju"
-TAG = "v1.10.2"
-NAME = "4K追剧 v1.10.2"
+TAG = "v1.11.0"
+NAME = "4K追剧 v1.11.0"
 
 ROOT = r"C:\Users\fengxin\WorkBuddy\vivos7"
 ASSETS = [
-    (r"dist\v1.10.2\4KZhuiju-v1.10.2-release.apk", "4KZhuiju-v1.10.2-release.apk"),
-    (r"dist\v1.10.2\4KZhuiju-v1.10.2-windows-x64.zip", "4KZhuiju-v1.10.2-windows-x64.zip"),
+    (r"dist\v1.11.0\4KZhuiju-v1.11.0-release.apk", "4KZhuiju-v1.11.0-release.apk"),
 ]
-NOTES = r"dist\v1.10.2\RELEASE_NOTES.md"
-PROXY = "http://127.0.0.1:7897"
+NOTES = r"dist\v1.11.0\RELEASE_NOTES.md"
+
+# 代理端口别写死：本机在不同网络环境下换过 7897 / 13153 等端口，
+# 写死会让脚本在换环境后直接连不上而报「curl 失败」，看起来像 GitHub 挂了。
+# 依次取 HTTPS_PROXY / HTTP_PROXY，都没有就走直连（PROXY=None）。
+def _detect_proxy():
+    for k in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+        v = os.environ.get(k, "").strip()
+        if v:
+            return v
+    return None
+
+
+PROXY = _detect_proxy()
 API = "https://api.github.com"
 
 _tok = None
@@ -43,12 +54,17 @@ def token():
     raise SystemExit("凭据里没有 password")
 
 
+def _proxy_args():
+    """PROXY 为 None 时必须整个省略 --proxy，否则 curl 会拿到字符串 "None"。"""
+    return ["--proxy", PROXY] if PROXY else []
+
+
 def api(path, method="GET", payload=None, timeout=180):
     url = path if path.startswith("http") else f"{API}/repos/{REPO}{path}"
     cmd = [
         "curl", "-s", "-w", "\n%{http_code}",
         "--max-time", str(timeout),
-        "--proxy", PROXY,
+        *_proxy_args(),
         "--ssl-no-revoke",
         "-X", method, url,
         "-H", f"Authorization: Bearer {token()}",
@@ -86,7 +102,7 @@ def upload(upload_url, path, name):
     cmd = [
         "curl", "-s", "-w", "\n%{http_code}",
         "--max-time", "900",
-        "--proxy", PROXY,
+        *_proxy_args(),
         "--ssl-no-revoke",
         "-X", "POST", url,
         "-H", f"Authorization: Bearer {token()}",
