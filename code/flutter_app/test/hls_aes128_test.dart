@@ -67,6 +67,9 @@ void main() {
   final zeroIv = Uint8List(16);
 
   setUp(() async {
+    // 本文件测的是**代理内部**的 AES 解密与 #EXT-X-KEY 摘除，
+    // 而本地服务天然可直连。不关掉直连优先，代理根本不介入。
+    HlsProxy.debugForceProxy = true;
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     origin = 'http://127.0.0.1:${server.port}';
 

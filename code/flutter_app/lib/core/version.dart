@@ -21,10 +21,10 @@ const String kAppTitle = '4K追剧';
 /// 1.3.0+5，「我的 → 关于」和侧栏显示的版本号是错的，用户报问题时
 /// 给的版本号也对不上。现在有 test/version_sync_test.dart 盯着，
 /// 任何一个改错都会让 `flutter test` 直接失败。
-const String kAppVersion = '1.11.2';
+const String kAppVersion = '1.11.3';
 
 /// 构建号（pubspec.yaml 的 version 中 `+` 之后部分）
-const String kAppBuild = '27';
+const String kAppBuild = '28';
 
 /// 完整标识，如 `1.1.0 (3)`
 const String kAppVersionFull = '$kAppVersion ($kAppBuild)';

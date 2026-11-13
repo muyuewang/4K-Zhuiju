@@ -173,8 +173,74 @@ class HlsProxy {
   HttpServer? _server;
   Future<int>? _starting;
 
+  /// 回源用的共享 HttpClient（懒建，整个代理生命周期只建一个）。
+  ///
+  /// ## 为什么必须共享（2026-11-13 实测，这个缺陷让 PC 版几乎不可用）
+  ///
+  /// 改动前每个分片都 `HttpClient()` + `close(force: true)`：等于**每个
+  /// 分片都重做一次 TCP + TLS 握手**，而 `force: true` 还会明确把连接
+  /// 踢掉、绝不复用。电影天堂《凡人修仙传》一集 322 个分片，就是 322
+  /// 次完整握手。
+  ///
+  /// 同一批 6 个分片（4.24MB）在本机实测：
+  ///   串行 + 每片新建连接   20.3s（214 KB/s）
+  ///   并发 + 复用连接       10.6s（411 KB/s）
+  /// 而这是 3000k 的流（约 375 KB/s 码率）。取流速度贴着甚至低于码率，
+  /// 播放器缓冲永远填不满，表现就是「一直转圈」直到超时。
+  ///
+  /// 只看单次数字会误判：源站抖动极大（同一分片有时 2.5s、有时 22s），
+  /// 偶尔会出现「新建比复用还快」的假象。真正的硬证据是复用时抓到的
+  /// `Connection closed before full header was received` —— 源站对
+  /// **高频新建连接**会直接掐，复用连接正是为了绕开它。
+  ///
+  /// 这也解释了为什么「浏览器 / 雷电模拟器都快，只有 PC 慢」：Android
+  /// 走 ExoPlayer 直连、浏览器走自己的连接池，都不经过这一层；只有
+  /// 桌面端被这层中转的每请求新建连接拖死。
+  HttpClient? _client;
+
+  HttpClient get _upstream {
+    final c = _client;
+    if (c != null) return c;
+    final n = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20)
+      // 空闲连接留一会儿：分片是连续请求的，间隔通常只有几百毫秒，
+      // 15s 足够覆盖，又不会把死连接留太久。
+      ..idleTimeout = const Duration(seconds: 15)
+      // 播放器会预读后续分片，允许多条并行，减少排队。
+      ..maxConnectionsPerHost = 8;
+    _client = n;
+    return n;
+  }
+
   /// token -> 播放会话。只在播放期间有效，离开页面整体清掉。
   final Map<String, _Session> _sessions = <String, _Session>{};
+
+  /// host -> 是否可直连。**只在本次播放会话内有效**，[shutdown] 清空。
+  ///
+  /// 不做跨会话持久化：源站可达性是会变的（用户开关代理、CDN 切换、
+  /// 源站临时抽风），把一次判定永久缓存会让「本来能播的源」长期走中转。
+  final Map<String, bool> _directCache = <String, bool>{};
+
+  /// 直连探测的时限。
+  ///
+  /// 只等 2.5s，因为这一步是**起播前的串行等待**：探通了省掉整集的中转，
+  /// 探不通也只是多花 2.5s 然后走原来的路径。取太大会让代理源的起播
+  /// 明显变慢，取太小会把「慢但能通」的源误判成不能直连（回退到中转，
+  /// 只是没优化，不影响正确性）。
+  static const Duration _probeTimeout = Duration(milliseconds: 2500);
+
+  /// 测试开关：为 true 时**跳过直连判定**，强制走中转。
+  ///
+  /// 回归测试（hls_aes128 / hls_redirect_playlist / hls_nested_playlist）
+  /// 都在 `127.0.0.1` 上起本地服务模拟源站，而这些服务本身必然可直连。
+  /// 不关掉直连优先的话，`wrap()` 会把地址原样返回，代理根本不介入，
+  /// 那三组测试就全在测空气——它们锁的「相对地址补全 / 302 基准 /
+  /// AES 解密」恰好都是**代理内部**的行为。
+  ///
+  /// 生产代码永远不设它。
+  @visibleForTesting
+  static bool debugForceProxy = false;
+
   final Random _rnd = Random();
 
   /// 把外部 m3u8 地址包成本地代理地址。
@@ -187,6 +253,13 @@ class HlsProxy {
   Future<String> wrap(String url) async {
     if (!url.startsWith('http')) return url;
     if (!looksLikeM3u8(url)) return url;
+
+    // ★ 直连优先：能直连就彻底不碰这一层（见 [_canDirect] 的注释）。
+    // 这一步放在最前面，因为它决定了后面所有代码要不要执行。
+    if (!debugForceProxy && await _canDirect(url)) {
+      debugPrint('[HLS] direct reachable, bypass proxy: $url');
+      return url;
+    }
 
     try {
       final port = await _ensureStarted();
@@ -204,6 +277,96 @@ class HlsProxy {
   Future<int> _ensureStarted() {
     // 并发调用只允许 bind 一次，否则第二个 bind 会抛端口占用
     return _starting ??= _start();
+  }
+
+  /// 这条地址所在的源站，**不经本代理**能否直接取到。
+  ///
+  /// ## 为什么必须做这一步（2026-11-13，用户实测后定的架构）
+  ///
+  /// 中转层解决的是「libmpv 不读系统代理」，但它同时也**接管了那些本来
+  /// 不需要代理的源**，并因此引入了自己的短板：串行转发。实测本机
+  /// 电影天堂《凡人修仙传》同一批分片：
+  ///
+  ///   经代理串行（共享连接池）  7.12MB / 35.1s / 208 KB/s
+  ///   libmpv 直连（并行预读）   远高于此，起播只要 1~2s
+  ///
+  /// 而该流是 3000k ≈ 375 KB/s。中转一旦低于码率，缓冲永远填不满，
+  /// 表现就是「一直转圈，最后报源站响应超时」——正是用户报的故障。
+  ///
+  /// 用户那三个对照很有说服力：浏览器快、雷电模拟器快、只有 PC 版慢。
+  /// 浏览器有自己的连接池 + 并行拉片，ExoPlayer 读系统代理直连，
+  /// **两者都不经过这一层**。所以正确的做法不是把中转层优化到极致，
+  /// 而是让它只处理真正需要它的源。
+  ///
+  /// ## 判定方式与代价
+  ///
+  /// 用一个显式 `findProxy = DIRECT` 的独立 client 去取一次清单；
+  /// 拿到 2xx 且响应体像 m3u8 就认定可直连。
+  ///
+  /// 不用 HEAD：不少源站对 HEAD 回 405，会把这批源误判成「不能直连」。
+  /// 不查 DNS/端口：DNS 能解析、TCP 能连，都不代表 TLS 和实际取流能通，
+  /// 而这里要的正是「真的能取到」。
+  ///
+  /// 代价是起播前多一次串行探测（上限 [_probeTimeout]）。命中缓存后
+  /// 整集不再重复探测；探不通也只损失一次 2.5s，随后仍走原来的路径。
+  /// 命中后不再探测的缓存键：`scheme://host:port`。
+  ///
+  /// 不能只用 host：同一台机器上不同端口是完全不同的服务
+  /// （探通 8080 不代表 8081 也通），只用 host 会把结论串味。
+  String _originKey(String url) {
+    final u = Uri.tryParse(url);
+    if (u == null) return '';
+    final port = u.hasPort
+        ? u.port
+        : (u.scheme == 'https' ? 443 : 80);
+    return '${u.scheme}://${u.host}:$port';
+  }
+
+  Future<bool> _canDirect(String url) async {
+    final key = _originKey(url);
+    if (key.isEmpty) return false;
+    final hit = _directCache[key];
+    if (hit != null) return hit;
+
+    var ok = false;
+    HttpClient? probe;
+    try {
+      probe = HttpClient()
+        // 显式 DIRECT：HttpOverrides 会给每个新建的 client 装系统代理，
+        // 这里必须推翻它，否则探的其实是「经代理能不能通」，
+        // 那就不用探了——代理能用时永远为真，直连优先也就永远不生效。
+        ..findProxy = ((Uri _) => 'DIRECT')
+        ..connectionTimeout = _probeTimeout;
+      final rq = await probe.getUrl(Uri.parse(url)).timeout(_probeTimeout);
+      rq.headers.set(HttpHeaders.userAgentHeader, _ua);
+      final rp = await rq.close().timeout(_probeTimeout);
+      // 只读到够判断就走：真清单开头必然是 `#EXTM3U`。
+      // 不整份读完，是因为超大清单（片库那份 451KB）会把探测时间拉长。
+      // `await for` + break 会自动取消订阅；不读完的残留连接由
+      // 下面的 force close 收掉。
+      final head = <int>[];
+      await for (final d in rp.timeout(_probeTimeout)) {
+        head.addAll(d.take(64 - head.length));
+        if (head.length >= 64) break;
+      }
+      ok = rp.statusCode == HttpStatus.ok &&
+          String.fromCharCodes(head).contains('#EXTM3U');
+      if (!ok) {
+        debugPrint('[HLS] direct probe not usable '
+            '(status=${rp.statusCode}) for $url');
+      }
+    } catch (e) {
+      // 超时 / 连接被拒 / TLS 失败都算「不能直连」，这是预期分支，
+      // 不是错误——四个代理源就是靠这个分支才继续走中转的。
+      debugPrint('[HLS] direct probe failed: ${e.runtimeType}  ($url)');
+      ok = false;
+    } finally {
+      try {
+        probe?.close(force: true);
+      } catch (_) {}
+    }
+    _directCache[key] = ok;
+    return ok;
   }
 
   Future<int> _start() async {
@@ -227,6 +390,18 @@ class HlsProxy {
     _sessions.clear();
     // 密钥跟着会话一起清：换片后旧 key 没用，留着只是徒增内存足迹。
     _keyCache.clear();
+    // 直连判定的结论也必须清：用户开关代理、换源之后可达性会变。
+    // 留着会让「上次探不通、这次其实能直连」的源一直走中转。
+    _directCache.clear();
+    // 共享连接池也要关：本代理是「进播放页建、离开就拆」的生命周期，
+    // 留着连接会一直占用源站的 keep-alive 额度，下次进页面反而是旧的。
+    final c = _client;
+    _client = null;
+    if (c != null) {
+      try {
+        c.close(force: true);
+      } catch (_) {}
+    }
     final s = _server;
     _server = null;
     _starting = null;
@@ -465,18 +640,66 @@ class HlsProxy {
     await res.close();
   }
 
+  /// 单个分片的取流时限。
+  ///
+  /// 为什么必须有（2026-11-13，用户报「PC 版慢得很还会超时失败」）：
+  /// 改动前 `_relay` 里**一个超时都没有** —— `rq.close()` 等待响应头、
+  /// `rp.forEach()` 读响应体，两处都能无限期挂着。源站一抖（实测同一
+  /// 分片有时 2.5s、有时 22s），整个播放就干等这一片，最后是播放页
+  /// 那个 `initialize().timeout(30s)` 到点报「源站响应超时」。
+  ///
+  /// 用户看到的是「失败」，但同一片重试一次往往就成功了 —— 因为慢的
+  /// 那一次多半是撞上了源站的坏连接，而不是这一片真的没了。
+  ///
+  /// 15s 是折中：3 秒一段的分片正常 2~5s 拿完，15s 已能覆盖明显抖动；
+  /// 再长就会把「应该重试」的等待变成「用户干等半分钟」。
+  static const Duration _segTimeout = Duration(seconds: 15);
+
+  /// 失败后额外重试的次数（只对「尚未开始写响应体」的失败生效）。
+  static const int _segRetries = 1;
+
+  /// 清单 / 密钥请求的时限。
+  ///
+  /// 比单分片更短：清单本身只有几十 KB，正常几百毫秒。
+  /// 它拿不到就等于整集起不来，快速失败让播放器重试比干等更好——
+  /// 用户看到的是「重连一次就好了」，而不是「卡住半分钟然后报错」。
+  static const Duration _playlistTimeout = Duration(seconds: 10);
+
   /// 转发分片/其它资源，保留 Range 语义（MF 会发 Range 做 seek 探测）
   Future<void> _relay(
       String target, HttpRequest req, HttpResponse res) async {
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 20);
+    final range = req.headers.value(HttpHeaders.rangeHeader);
+    for (var attempt = 0; attempt <= _segRetries; attempt++) {
+      final done = await _relayOnce(target, range, res);
+      if (done) return;
+      // _relayOnce 返回 false 只代表「还没往响应里写字节就失败了」，
+      // 此时重试是安全的：播放器那边什么都还没收到。
+      if (attempt < _segRetries) {
+        debugPrint('[HLS] relay retry ${attempt + 1}: $target');
+        _discardUpstream(reason: 'relay retry');
+      }
+    }
     try {
-      final rq = await client.getUrl(Uri.parse(target));
+      await res.close();
+    } catch (_) {}
+  }
+
+  /// 单次转发。
+  ///
+  /// 返回值语义很关键：
+  ///   - `true`  → 本次转发已经「了结」：要么成功，要么响应体写到一半
+  ///               断了（此时**不能**重试，否则播放器会收到两份拼接的
+  ///               数据，表现为花屏或解码错误）
+  ///   - `false` → 尚未写任何响应体就失败，调用方可以安全重试
+  Future<bool> _relayOnce(
+      String target, String? range, HttpResponse res) async {
+    var bodyStarted = false;
+    try {
+      final rq = await _upstream.getUrl(Uri.parse(target)).timeout(_segTimeout);
       rq.headers.set(HttpHeaders.userAgentHeader, _ua);
-      final range = req.headers.value(HttpHeaders.rangeHeader);
       if (range != null) rq.headers.set(HttpHeaders.rangeHeader, range);
 
-      final rp = await rq.close();
+      final rp = await rq.close().timeout(_segTimeout);
       res.statusCode = rp.statusCode;
       final ct = rp.headers.contentType;
       if (ct != null) res.headers.contentType = ct;
@@ -485,15 +708,28 @@ class HlsProxy {
       final cl = rp.headers.contentLength;
       if (cl > 0) res.contentLength = cl;
 
-      await rp.forEach(res.add);
+      bodyStarted = true;
+      // 用 Stream.timeout 而不是 Future.timeout：后者只是「不再等」，
+      // 底层连接仍在读，数据还会继续往 res 里灌，把响应写坏。
+      await rp.timeout(_segTimeout).forEach(res.add);
       await res.close();
+      return true;
     } catch (e) {
       debugPrint('[HLS] relay error: $e  ($target)');
-      try {
-        await res.close();
-      } catch (_) {}
-    } finally {
-      client.close(force: true);
+      // 连接级 / 超时错误：池子里那条连接多半已经废了，丢掉重建，
+      // 否则后续每个分片都会立刻踩到同一条坏连接。
+      if (e is HttpException ||
+          e is SocketException ||
+          e is TimeoutException) {
+        _discardUpstream(reason: 'relay: ${e.runtimeType}');
+      }
+      if (bodyStarted) {
+        try {
+          await res.close();
+        } catch (_) {}
+        return true;
+      }
+      return false;
     }
   }
 
@@ -676,16 +912,17 @@ class HlsProxy {
 
   /// 取原始字节（分片/密钥都用它，不解码文本）
   Future<List<int>?> _fetchBytes(String url) async {
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 20);
+    final client = _upstream;
     try {
-      final rq = await client.getUrl(Uri.parse(url));
+      final rq = await client.getUrl(Uri.parse(url)).timeout(_playlistTimeout);
       rq.headers.set(HttpHeaders.userAgentHeader, _ua);
-      final rp = await rq.close();
-      final bytes = await rp.fold<List<int>>(<int>[], (a, d) {
-        a.addAll(d);
-        return a;
-      });
+      final rp = await rq.close().timeout(_playlistTimeout);
+      final bytes = await rp
+          .fold<List<int>>(<int>[], (a, d) {
+            a.addAll(d);
+            return a;
+          })
+          .timeout(_playlistTimeout);
       if (rp.statusCode != HttpStatus.ok) {
         debugPrint('[HLS] upstream ${rp.statusCode} for $url');
         return null;
@@ -693,9 +930,12 @@ class HlsProxy {
       return bytes;
     } catch (e) {
       debugPrint('[HLS] fetchBytes error: $e  ($url)');
+      if (e is HttpException ||
+          e is SocketException ||
+          e is TimeoutException) {
+        _discardUpstream(reason: 'fetchBytes: ${e.runtimeType}');
+      }
       return null;
-    } finally {
-      client.close(force: true);
     }
   }
 
@@ -722,16 +962,20 @@ class HlsProxy {
   /// 所以修复放在这一层，而不是给直播开特例。
   Future<({List<int>? bytes, String finalUrl})> _fetchWithUrl(
       String url) async {
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 20);
+    final client = _upstream;
     try {
-      final rq = await client.getUrl(Uri.parse(url));
+      // 清单本身很小（实测 97B ~ 40KB），但源站抖动时也会挂很久。
+      // 这里用比单分片更短的上限：清单拿不到就等于整集起不来，
+      // 快速失败 + 让播放器重试，比干等 15s 体验好得多。
+      final rq = await client.getUrl(Uri.parse(url)).timeout(_playlistTimeout);
       rq.headers.set(HttpHeaders.userAgentHeader, _ua);
-      final rp = await rq.close();
-      final bytes = await rp.fold<List<int>>(<int>[], (a, d) {
-        a.addAll(d);
-        return a;
-      });
+      final rp = await rq.close().timeout(_playlistTimeout);
+      final bytes = await rp
+          .fold<List<int>>(<int>[], (a, d) {
+            a.addAll(d);
+            return a;
+          })
+          .timeout(_playlistTimeout);
 
       // 逐跳解析重定向：`location` 可能是相对地址，不能直接取最后一跳的原文。
       var finalUrl = url;
@@ -750,10 +994,31 @@ class HlsProxy {
       return (bytes: bytes, finalUrl: finalUrl);
     } catch (e) {
       debugPrint('[HLS] fetch error: $e  ($url)');
+      if (e is HttpException ||
+          e is SocketException ||
+          e is TimeoutException) {
+        _discardUpstream(reason: 'fetchUrl: ${e.runtimeType}');
+      }
       return (bytes: null, finalUrl: url);
-    } finally {
-      client.close(force: true);
     }
+  }
+
+  /// 丢弃共享连接池并重建。
+  ///
+  /// 只在遇到连接级错误（`HttpException` / `SocketException`）时调用：
+  /// 源站掐断连接后，池子里那条连接已经是坏的，继续复用会让后续每个
+  /// 分片都立刻失败。重建的代价远低于「整集播不出来」。
+  ///
+  /// 用 `force: false` 而不是 `true`：正在传输中的连接不打断，
+  /// 只把空闲的关掉，避免误伤同时进行的其它分片请求。
+  void _discardUpstream({required String reason}) {
+    final c = _client;
+    if (c == null) return;
+    _client = null;
+    debugPrint('[HLS] upstream pool reset ($reason)');
+    try {
+      c.close(force: false);
+    } catch (_) {}
   }
 
   /// 清单基本都是 ASCII（分片名、tag），但个别源站会带 BOM 或 GBK 注释。

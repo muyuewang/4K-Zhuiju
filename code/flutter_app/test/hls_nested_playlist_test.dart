@@ -42,6 +42,9 @@ void main() {
   late String origin;
 
   setUp(() async {
+    // 本文件测的是**代理内部**的多级清单展开，而本地服务天然可直连。
+    // 不关掉直连优先，wrap() 会原样返回地址，代理不介入，断言全落空。
+    HlsProxy.debugForceProxy = true;
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     origin = 'http://127.0.0.1:${server.port}';
 
