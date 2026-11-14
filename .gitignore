@@ -68,3 +68,7 @@ desktop.ini
 # 临时工作目录（调试脚本产物、一次性探针）
 .tmp2/
 .workbuddy/tmp/
+
+# Python 字节码缓存（probe 脚本运行后到处留，且与 Python 版本绑定）
+__pycache__/
+*.pyc

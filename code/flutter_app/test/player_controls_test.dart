@@ -222,4 +222,88 @@ void main() {
     expect(find.text('0.5X'), findsNothing);
     expect(find.text('倍速'), findsOneWidget);
   });
+
+  // ---------------- 直播模式 ----------------
+  //
+  // 直播流的 duration 是没有意义的：HLS 直播报 0，FLV 直播报一个不断
+  // 增长的「已推流时长」。若不单独处理，duration=0 时 _progress 里
+  // max 被兜成 1.0，滑块永远贴在最左端，看着就像卡住了。
+  // 这一组保证直播下不渲染进度条，改用「直播中」标识。
+
+  Future<void> pumpLive(WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 420,
+              height: 160,
+              child: ColoredBox(
+                color: Colors.black,
+                child: PlayerControlBar(ctrl: ctrl, isLive: true),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+  }
+
+  testWidgets('直播模式不渲染进度条，显示「直播中」', (tester) async {
+    await pumpLive(tester);
+
+    // 进度条整个消失（点播时这里有一个 Slider）
+    expect(find.byType(Slider), findsNothing);
+    expect(find.text('直播中'), findsOneWidget);
+  });
+
+  testWidgets('直播模式不显示时长时间码（避免 0:00 造成「卡住」的错觉）', (tester) async {
+    await pumpLive(tester);
+
+    // 点播模式会渲染 `00:00 / 00:00` 这类文本，直播下一律不出现。
+    // 用正则找形如 x:xx 的时间串，比硬编码具体值更抗后续改动。
+    expect(
+      find.byWidgetPredicate(
+        (w) => w is Text && (w.data ?? '').contains(' / '),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets('直播模式仍保留播放/暂停与全屏按钮', (tester) async {
+    await pumpLive(tester);
+
+    // 播放/暂停是必需能力：直播也要能暂停（时移）与全屏。
+    expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.fullscreen_rounded), findsNothing,
+        reason: '未传 onToggleFullscreen 时全屏按钮不该出现');
+  });
+
+  testWidgets('切回点播模式后进度条恢复', (tester) async {
+    await pumpLive(tester);
+    expect(find.byType(Slider), findsNothing);
+
+    // 同一个 State 复用的路径：只改 isLive，组件必须跟着重建
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 420,
+              height: 160,
+              child: ColoredBox(
+                color: Colors.black,
+                child: PlayerControlBar(ctrl: ctrl),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(Slider), findsOneWidget);
+    expect(find.text('直播中'), findsNothing);
+  });
 }

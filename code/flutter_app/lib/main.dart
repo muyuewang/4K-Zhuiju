@@ -17,6 +17,7 @@ import 'core/theme_settings.dart';
 import 'core/tv.dart';
 import 'core/version.dart';
 import 'pages/home_page.dart';
+import 'pages/live_page.dart';
 import 'pages/profile_page.dart';
 import 'theme.dart';
 import 'widgets/danmaku_overlay.dart';
@@ -215,6 +216,15 @@ class _RootPageState extends State<RootPage> {
 
   static const _destinations = [
     (icon: Icons.home_outlined, selected: Icons.home_rounded, label: '首页'),
+    // 直播放在第二位而不是塞进首页的某个角落：
+    // 它和「看剧」是并列的内容形态（一个点播、一个线性播出），
+    // 用户对这类功能的心理预期就是导航栏一级入口。
+    // 埋进 AppBar 图标的话，2710 个频道等于白接入。
+    (
+      icon: Icons.live_tv_outlined,
+      selected: Icons.live_tv_rounded,
+      label: '直播'
+    ),
     (icon: Icons.person_outline_rounded, selected: Icons.person_rounded, label: '我的'),
   ];
 
@@ -243,7 +253,8 @@ class _RootPageState extends State<RootPage> {
                 // 表现为"按方向键没反应"。用 ExcludeFocus 把非当前页的
                 // 焦点子树摘掉。
                 children: [
-                  for (final (i, page) in const [HomePage(), ProfilePage()].indexed)
+                  for (final (i, page)
+                      in const [HomePage(), LivePage(), ProfilePage()].indexed)
                     ExcludeFocus(
                       excluding: i != _index,
                       child: TickerMode(enabled: i == _index, child: page),
@@ -259,7 +270,8 @@ class _RootPageState extends State<RootPage> {
       body: IndexedStack(
         index: _index,
         children: [
-          for (final (i, page) in const [HomePage(), ProfilePage()].indexed)
+          for (final (i, page)
+              in const [HomePage(), LivePage(), ProfilePage()].indexed)
             ExcludeFocus(
               excluding: i != _index,
               child: TickerMode(enabled: i == _index, child: page),

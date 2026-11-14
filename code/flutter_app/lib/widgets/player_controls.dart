@@ -35,12 +35,22 @@ class PlayerControlBar extends StatefulWidget {
   /// 右侧额外插槽（比如本地播放页的「从头播」）
   final List<Widget> extraActions;
 
+  /// 直播模式：整条进度条与时间都不渲染，只留播放/暂停与全屏。
+  ///
+  /// 直播流的 duration 是**无意义的**：HLS 直播报 0，FLV 直播报一个
+  /// 不断增长的「已推流时长」。两种都对用户没用 —— 拖到某个位置既
+  /// 不可能回看（服务端只保留最近几秒），数值还会随时间跳动。
+  /// 更糟的是 duration=0 时 `_progress` 里 max 被兜成 1.0，滑块会
+  /// 一直贴在最左端，看着像「卡住了」。
+  final bool isLive;
+
   const PlayerControlBar({
     super.key,
     required this.ctrl,
     this.fullscreen = false,
     this.onToggleFullscreen,
     this.extraActions = const [],
+    this.isLive = false,
   });
 
   @override
@@ -250,21 +260,28 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
                       size: 26,
                       onTap: () => v.isPlaying ? c.pause() : c.play(),
                     ),
-                    Expanded(child: _progress(c, total, max, value)),
-                    // 时间放在进度条右侧（B 站的位置）：左边留给滑块起点，
-                    // 手指从最左按下拖动的行程不被文字挤短。
-                    Padding(
-                      padding: const EdgeInsets.only(left: 6, right: 2),
-                      child: Text(
-                        '${_dur(shown)} / ${_dur(v.duration)}',
-                        style: const TextStyle(
-                          fontSize: Ts.caption,
-                          color: Colors.white,
-                          fontWeight: FontWeight.w500,
-                          height: 1.1,
+                    if (widget.isLive)
+                      // 直播不给进度条与时间，空出的横向空间留给右侧按钮。
+                      // 这里放一个红点 + 「直播中」，替代原本会被误读成
+                      // 「卡在 0:00」的进度条。
+                      const Expanded(child: _LiveBadge())
+                    else ...[
+                      Expanded(child: _progress(c, total, max, value)),
+                      // 时间放在进度条右侧（B 站的位置）：左边留给滑块起点，
+                      // 手指从最左按下拖动的行程不被文字挤短。
+                      Padding(
+                        padding: const EdgeInsets.only(left: 6, right: 2),
+                        child: Text(
+                          '${_dur(shown)} / ${_dur(v.duration)}',
+                          style: const TextStyle(
+                            fontSize: Ts.caption,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500,
+                            height: 1.1,
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                     if (roomy) ...[
                       _speedBtn(_speedOf(v)),
                       _volumeBtn(_volOf(v)),
@@ -517,6 +534,49 @@ class _PlayerControlBarState extends State<PlayerControlBar> {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+}
+
+/// 直播模式下顶替进度条的那一小块：红点 + 「直播中」。
+///
+/// 为什么不能干脆留空：单行控制条是 `Row`，进度条原本占 `Expanded`。
+/// 直播时把 `Expanded` 整个去掉，播放按钮和右侧的全屏按钮会直接贴到
+/// 一起，整条控制条缩成一小团——观感上像控件加载失败。
+/// 保留一个 `Expanded` 撑住中间，布局才和点播一致。
+class _LiveBadge extends StatelessWidget {
+  const _LiveBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 10),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration: const BoxDecoration(
+                color: Color(0xFFFF3B30),
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 6),
+            const Text(
+              '直播中',
+              style: TextStyle(
+                fontSize: Ts.caption,
+                color: Colors.white,
+                fontWeight: FontWeight.w500,
+                height: 1.1,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

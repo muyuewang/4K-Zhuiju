@@ -132,7 +132,34 @@ class ZhuijuSource implements DataSource {
         isEnd: d.isEnd,
         stars: d.stars,
         cover: d.cover,
-        videos: d.videos,
+        videos: d.videos.map(_tagVideo).toList(),
         sourceId: id,
       );
+
+  /// 给 video 打「是不是直播流」的标记。
+  ///
+  /// 判据 `source == 'cctv' && path` 以 `zb-` 开头，来自对四个分类的
+  /// 全量对照实测（见 `test/zhuiju_live_marker_probe_test.dart`）：
+  ///
+  ///   | 分类 | video 数 | 命中 |
+  ///   | --- | --- | --- |
+  ///   | 直播 25 | 114 | **114（100%）** |
+  ///   | 电视剧 21 | 1947 | 0 |
+  ///   | 电影 20 | 61 | 0 |
+  ///   | 短剧 24 | 378 | 0 |
+  ///
+  /// 两个方向都验过才敢用：漏判会让直播内容继续套着「选集」外壳，
+  /// 误判则会让正常剧集丢掉选集、不能记进度、播完不自动下一集 ——
+  /// 后者对用户的伤害大得多，所以判据取「source + 前缀」双条件，
+  /// 比只看 `zb-` 前缀更难被将来的新源撞上。
+  ///
+  /// 为什么标记打在这一层而不是详情页：只有数据源知道自家接口的语义。
+  /// 让 UI 去猜「source=cctv 是不是直播」，每接一个带直播的分类就要
+  /// 改一次页面，而且散落各处的判断迟早会不一致。
+  DramaVideo _tagVideo(DramaVideo v) {
+    final live = v.source == 'cctv' && v.path.trimLeft().startsWith('zb-');
+    // 已经是目标值就直接返回原对象，避免 detail 每次刷新都重建上百个对象
+    if (live == v.isLive) return v;
+    return v.copyWith(isLive: live);
+  }
 }

@@ -198,6 +198,19 @@ class DramaVideo {
   /// kanju 专用：该线路是否需要第二阶段解析（官方线）。
   final bool needsResolve;
 
+  /// 本条是不是**直播流**（而不是一集点播内容）。
+  ///
+  /// 为什么要在数据层标出来，而不是让页面自己判断：
+  /// 橘汁的「直播」分类走的是同一个 `detail` 接口，返回的 videos 和
+  /// 普通剧集长得一模一样（也是列表、也被 UI 当成"选集"）。但两者
+  /// 的播放语义完全不同 —— 直播要跳过弹幕、不能记观看进度、不能自动
+  /// 连播下一台、断了要重连而不是重解析。
+  ///
+  /// 由数据源在适配层打标（见 `ZhuijuSource._tagVideo`），是因为只有
+  /// 它知道自己的接口语义；放到详情页判断则是把源的知识漏进 UI 层，
+  /// 每接一个带直播的分类就要改一次页面。
+  final bool isLive;
+
   DramaVideo({
     required this.id,
     required this.title,
@@ -215,7 +228,34 @@ class DramaVideo {
     this.priority = 0,
     this.playToken = '',
     this.needsResolve = false,
+    this.isLive = false,
   });
+
+  /// 复制并覆盖少数字段。
+  ///
+  /// 加它是因为 `DramaVideo` 有 17 个字段，而适配层只需要改其中一个
+  /// （打直播标记）。手写 17 行复制不但啰嗦，更危险的是**漏抄一个字段
+  /// 不会编译报错**——这种错误在运行时表现为"某一集突然没标题了"，
+  /// 极难定位。
+  DramaVideo copyWith({bool? isLive}) => DramaVideo(
+        id: id,
+        title: title,
+        titleOld: titleOld,
+        path: path,
+        size: size,
+        format: format,
+        type: type,
+        source: source,
+        sourceCn: sourceCn,
+        season: season,
+        episode: episode,
+        isVip: isVip,
+        dramaId: dramaId,
+        priority: priority,
+        playToken: playToken,
+        needsResolve: needsResolve,
+        isLive: isLive ?? this.isLive,
+      );
 
   factory DramaVideo.fromBytes(Uint8List b) {
     final fs = PbReader(b).readAll();

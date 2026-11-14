@@ -70,7 +70,16 @@ class SourceRegistry {
     kGuangsuSource, //  224ms
     kFeifanSource, //  228ms
     kMaoyanSource, //  264ms
-    // ④ 需系统代理，国内直连不通，全部最后
+    // ④ 2026-11-14 之后新增的 6 个站，耗时按「App 实际列表请求」量
+    //    （前四站是单次 ac=list，这批要多走一次 detail 换封面，
+    //      口径不同，所以单独成段、内部仍按耗时升序）
+    kSuoniSource, //   1.4s（detail 113 KB，片库 14.9 万，单线路直出）
+    kQdys2Source, //   1.5s（走 ac=detail 换封面，283 KB，片库 23 万）
+    kJinyingSource, // 2.6s（detail 236 KB，片库 11.8 万，双线路）
+    kWujinSource, //   2.9s（detail 269 KB，片库 12.5 万，单线路直出）
+    kYzzySource, //    3.3s（list 1.2s + 批量补 2.1s，两次串行）
+    kJszySource, //    4.4s（走 ac=detail 换封面，278 KB）
+    // ⑤ 需系统代理，国内直连不通，全部最后
     Kvm4kSource.instance,
     JisuSource.instance,
     YunySource.instance,

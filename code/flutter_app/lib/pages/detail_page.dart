@@ -231,6 +231,10 @@ class _DetailPageState extends State<DetailPage> {
         }
       }
     }
+    // 直播不传 startAtSec：直播流没有"上次看到第几秒"这回事，
+    // 传了只会让播放器尝试 seek 到一个不存在的时间点（直播窗口是
+    // 滚动的，seek 到 120 秒前要么失败、要么把用户拉回时移）。
+    final live = v.isLive;
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => PlayerPage(
         video: v,
@@ -244,7 +248,12 @@ class _DetailPageState extends State<DetailPage> {
         // 只传 alternates（同集候选）是不够的：那样不知道该集后面还有没有
         // 下一集，也无法在播放器里列出别的源的剧集。
         sources: d?.sourcesByCn ?? const {},
-        startAtSec: startAtSec,
+        startAtSec: live ? 0 : startAtSec,
+        // 直播必须显式告诉播放器，否则它会按点播处理：
+        // 用 m3u8 地址去请求「第 0 集」的弹幕、把频道列表渲染成选集、
+        // 播放进度写进观看历史、播完一个台还倒计时跳到下一个台。
+        // 这个标志以前只有直播页会传，详情页进来的直播频道全走错了路径。
+        isLive: live,
       ),
     ));
     // 从播放页回来必须重读一次记录，否则「继续观看」按钮和剧集高亮
@@ -410,13 +419,16 @@ class _DetailPageState extends State<DetailPage> {
   /// 主流 App 都提供「倒序」，这里补上；集数少时不必显示，省得干扰。
   Widget _episodeHeader(List<DramaVideo> eps) {
     final tv = isTv(context);
-    final showSort = eps.length > 12;
+    // 直播：这一栏装的是「台」不是「集」，倒序也毫无意义
+    // （频道没有先后顺序，用户不会想从最后一个台开始看）。
+    final live = eps.isNotEmpty && eps.first.isLive;
+    final showSort = !live && eps.length > 12;
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 10, 8, 0),
       child: Row(
         children: [
           Text(
-            eps.length > 1 ? '选集' : '播放',
+            live ? '频道' : (eps.length > 1 ? '选集' : '播放'),
             style: TextStyle(
               fontSize: tv ? Ts.subtitle : Ts.bodyLg,
               fontWeight: FontWeight.w600,
@@ -424,7 +436,9 @@ class _DetailPageState extends State<DetailPage> {
           ),
           const SizedBox(width: 8),
           Text(
-            '共 ${eps.length} ${eps.length > 1 ? '集' : '条线路'}',
+            live
+                ? '共 ${eps.length} 个'
+                : '共 ${eps.length} ${eps.length > 1 ? '集' : '条线路'}',
             style: TextStyle(
               fontSize: tv ? Ts.body : Ts.bodySm,
               color: context.palette.textDim,
@@ -465,11 +479,18 @@ class _DetailPageState extends State<DetailPage> {
     final r = _record;
     // 只有「确实看过一部分」才叫继续观看；刚点开就退出（<10 秒）
     // 不算，否则用户会一直看到「继续观看 00:03」这种没意义的文案。
-    final resumable = t != null && r != null && r.positionSec >= 10;
+    final live = eps.isNotEmpty && eps.first.isLive;
+    // 直播不看续播：直播没有进度可续（流是实时的，续上去也是当前时刻），
+    // 而且观看历史对直播本来就不该记录，_resumeTarget 拿到的是脏数据。
+    final resumable = !live && t != null && r != null && r.positionSec >= 10;
 
-    final label = resumable
-        ? '继续观看 · ${t.epLabel} ${_mmss(r.positionSec)}'
-        : (eps.length > 1 ? '播放第 1 集' : '立即播放');
+    final label = live
+        // 直播用「看」而不是「播放」，和播放器里「重新连接」保持同一套
+        // 直播语感；有多个台时指出第一个台名，用户知道点下去会进哪个。
+        ? (eps.length > 1 ? '观看 ${eps.first.epLabel}' : '开始观看')
+        : resumable
+            ? '继续观看 · ${t.epLabel} ${_mmss(r.positionSec)}'
+            : (eps.length > 1 ? '播放第 1 集' : '立即播放');
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),

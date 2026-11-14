@@ -152,6 +152,29 @@ class PbWriter {
     _varint(v);
   }
 
+  /// 写一段任意字节（wiretype=2）。空段按「未设置」处理，与 [str] 一致。
+  ///
+  /// 与 [alwaysBytes] 的区别见后者的注释：这里是为了对齐 protobuf
+  /// 生成代码的默认语义（空 repeated/optional bytes 不落盘），
+  /// 便于和棕汁那套「字段省略即默认值」的报文互通。
+  void bytes(int field, List<int>? b) {
+    if (b == null || b.isEmpty) return;
+    _varint((field << 3) | 2);
+    _varint(b.length);
+    _b.add(b);
+  }
+
+  /// 写一段任意字节，**即使为空也写出来**（tag + 长度 0）。
+  ///
+  /// 为什么需要这个：咕噜咕噜协议的 `inner` 报文里，field 5 是一个
+  /// 恒定空串，服务端按「字段必须存在」解析。用 [bytes] 会把它吞掉，
+  /// 报文长度对不上，实测握手后的首个业务请求直接返回空响应。
+  void alwaysBytes(int field, List<int> b) {
+    _varint((field << 3) | 2);
+    _varint(b.length);
+    _b.add(b);
+  }
+
   Uint8List takeBytes() => _b.takeBytes();
 }
 

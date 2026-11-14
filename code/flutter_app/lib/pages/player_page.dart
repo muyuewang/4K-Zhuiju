@@ -37,6 +37,7 @@ import '../core/history.dart';
 import '../core/models.dart';
 import '../core/screen_awake.dart';
 import '../core/source/data_source.dart';
+import '../core/source/live_tv_source.dart';
 import '../core/source/registry.dart';
 import '../core/playback_prefs.dart';
 import '../core/source_picker.dart';
@@ -91,6 +92,40 @@ class PlayerPage extends StatefulWidget {
   /// 一条来自旧源的条目——那会拿着 av_ 长串去调数字 id 的接口。
   final String sourceId;
 
+  /// 播放请求要用的 User-Agent（空串用默认浏览器 UA）。
+  ///
+  /// 只对直播频道有实际意义：IPTV 源站的 m3u 里带 `http-user-agent`
+  /// 属性，实测同一个地址给不同 UA 的响应完全不同 ——
+  /// `101.35.240.114:88/live.php?id=CCTV1` 用默认 UA 是 **404**，
+  /// 用属性里写的 UA 才是 200 + `#EXTM3U`。
+  ///
+  /// 所以这个值必须从 [LiveChannel.ua] 一路传到这里，中途丢了就是
+  /// 「直播列表里能看到央视、点开却黑屏报错」。
+  final String userAgent;
+
+  /// 直连地址：非空时**跳过一切源解析**，直接拿它建播放器。
+  ///
+  /// 为什么直播必须走这条路：其余源都是「给 id，问接口要地址」，
+  /// 而直播频道在打包那一刻就已经握有最终流地址了。若仍走
+  /// [DataSource.resolveUrl]（内部会调 `ZhuijuApi.playUrl`），
+  /// 只会拿着一条 m3u8 去问一个不认识它的接口，结果必然失败。
+  ///
+  /// 也不能靠 [DramaVideo.path] 冒充直链：那条路会先跑
+  /// `isDirectUrl` 判断，而 FLV 直播流（`…/douyu/9065082` 这类
+  /// 无扩展名的地址）过不了这个判断，会被当成「不可播」拦下。
+  final String directUrl;
+
+  /// 是否直播。只影响两处文案与交互：不显示「第N集」、不显示进度条。
+  final bool isLive;
+
+  /// 正在播放的直播频道（非直播时为 null）。
+  ///
+  /// 只用来读取展示信息（栏目 / 流类型）与拼标题。播放地址本身走
+  /// [directUrl]，不从这里取 —— 两者分开是因为 [directUrl] 一旦确定
+  /// 就不该再被别的字段影响，否则排查「放的是不是我要的那个台」
+  /// 会多一层间接。
+  final LiveChannel? liveChannel;
+
   const PlayerPage({
     super.key,
     required this.video,
@@ -101,6 +136,10 @@ class PlayerPage extends StatefulWidget {
     this.alternates = const [],
     this.sources = const {},
     this.startAtSec = 0,
+    this.userAgent = '',
+    this.directUrl = '',
+    this.isLive = false,
+    this.liveChannel,
   });
 
   @override
@@ -196,6 +235,67 @@ class _PlayerPageState extends State<PlayerPage> {
 
   /// 本集是否已经处理过「播完」，防止 listener 每帧重复触发自动连播
   bool _autoNextHandled = false;
+
+  // ---------------- 直播多线路 ----------------
+
+  /// 当前正在播第几条线路（下标，对应 [_liveLines]）。
+  ///
+  /// 只在直播下有意义。一条线路播不出来时自动 +1 试下一条，用户无感。
+  /// 手动点「重新连接」会归零 —— 那代表用户想再试一遍全部线路，
+  /// 而不是接着上次失败的位置往下走。
+  int _lineIdx = 0;
+
+  /// 本频道可用的全部线路。
+  ///
+  /// 两种来源，优先级从高到低：
+  ///   1. [PlayerPage.liveChannel]（直播页进来的）→ 构建期聚合好的多线路；
+  ///   2. [PlayerPage.directUrl]（详情页进来的橘汁直播）→ 只有一条，
+  ///      没有可切换的余地。
+  ///
+  /// 返回空列表表示「不在直播或没有地址」，调用方按"无线路可切"处理。
+  List<LiveLine> get _liveLines {
+    final ch = widget.liveChannel;
+    if (ch != null && ch.url.isNotEmpty) return ch.allLines;
+    final d = widget.directUrl;
+    if (d.isNotEmpty) {
+      return [LiveLine(url: d, ua: widget.userAgent)];
+    }
+    return const [];
+  }
+
+  /// 当前线路的播放地址。
+  String get _playSrcUrl {
+    if (!widget.isLive) return widget.directUrl;
+    final lines = _liveLines;
+    if (_lineIdx >= 0 && _lineIdx < lines.length) return lines[_lineIdx].url;
+    return widget.directUrl;
+  }
+
+  /// 当前线路要用的 UA。
+  ///
+  /// **必须跟着线路走**：同一个台的不同线路来自不同源站，实测
+  /// `101.35.240.114:88/live.php?id=CCTV1` 这条不带指定 UA 直接 404，
+  /// 而官方 CDN 那条带不带都行。若始终用主线路的 UA 去播备线路，
+  /// 会出现「备线路探活是好的、切过去却 404」这种极难排查的现象。
+  String get _playUa {
+    if (!widget.isLive) return widget.userAgent;
+    final lines = _liveLines;
+    if (_lineIdx >= 0 && _lineIdx < lines.length) {
+      final u = lines[_lineIdx].ua;
+      if (u.isNotEmpty) return u;
+    }
+    return widget.userAgent;
+  }
+
+  /// 还有没有没试过的线路
+  bool get _hasMoreLines => widget.isLive && _lineIdx < _liveLines.length - 1;
+
+  /// 当前线路是第几条 / 共几条（给界面显示，如「线路 2/3」）
+  (int, int) get _lineProgress {
+    final n = _liveLines.length;
+    if (n <= 1) return (1, 1);
+    return (_lineIdx + 1, n);
+  }
 
   /// 续播只做一次。
   ///
@@ -786,25 +886,45 @@ class _PlayerPageState extends State<PlayerPage> {
     String url;
     try {
       final v = _cur;
-      url = await _resolveUrl(v);
-      // 解析期间用户可能已经切到别的线路。不拦的话，这条已作废的结果
-      // 会继续往下建 controller，把新的那条挤掉（见 _playGen 注释）。
-      if (gen != _playGen || !mounted) return;
-      // 接口「成功」不代表拿到的是能播的地址。
-      //
-      // 独家短剧（hgdj）实测返回 code=200 且 playUrl 就是
-      // `7512797350914444313&1` —— 这是原版播放器内部的令牌，
-      // 必须由它自己的播放器去换取真实流，我们拿到手无法使用。
-      // 不拦这一层的话，值会一路传到 VideoPlayerController，
-      // 抛出 UnrecognizedInputFormat，用户看到的是
-      // 「当前源无法播放（源站限制或分片失效）」，完全没说清原因。
-      if (url.isEmpty) throw Exception('解析结果为空');
-      if (!ZhuijuApi.isDirectUrl(url)) {
-        throw _UnplayableException(v.sourceCn.isNotEmpty
-            ? v.sourceCn
-            : (v.source.isNotEmpty ? v.source : '当前线路'));
+      if (widget.isLive && _playSrcUrl.isNotEmpty) {
+        // 直播：地址已经在手上，没有「源」可解析，直接进播放器。
+        //
+        // 这条分支不能并进下面的 isDirectUrl 校验，因为直播流有一批
+        // 地址根本不像文件：`live.ottiptv.cc/douyu/9065082` 返回的是裸
+        // FLV（带 onMetaData），没有扩展名也没有 m3u8 特征串。校验会把
+        // 它判成「不可播」，而这恰恰是可播的。
+        //
+        // 用 _playSrcUrl 而不是 widget.directUrl：多线路频道要能
+        // 从第 N 条开始播（自动切换后重试的就是这一条）。
+        url = _playSrcUrl;
+        final (i, n) = _lineProgress;
+        _tip = n > 1 ? '直播 · 线路 $i/$n' : '直播';
+        _realUrl = url;
+      } else if (widget.directUrl.isNotEmpty) {
+        url = widget.directUrl;
+        _tip = '直播';
+        _realUrl = url;
+      } else {
+        url = await _resolveUrl(v);
+        // 解析期间用户可能已经切到别的线路。不拦的话，这条已作废的结果
+        // 会继续往下建 controller，把新的那条挤掉（见 _playGen 注释）。
+        if (gen != _playGen || !mounted) return;
+        // 接口「成功」不代表拿到的是能播的地址。
+        //
+        // 独家短剧（hgdj）实测返回 code=200 且 playUrl 就是
+        // `7512797350914444313&1` —— 这是原版播放器内部的令牌，
+        // 必须由它自己的播放器去换取真实流，我们拿到手无法使用。
+        // 不拦这一层的话，值会一路传到 VideoPlayerController，
+        // 抛出 UnrecognizedInputFormat，用户看到的是
+        // 「当前源无法播放（源站限制或分片失效）」，完全没说清原因。
+        if (url.isEmpty) throw Exception('解析结果为空');
+        if (!ZhuijuApi.isDirectUrl(url)) {
+          throw _UnplayableException(v.sourceCn.isNotEmpty
+              ? v.sourceCn
+              : (v.source.isNotEmpty ? v.source : '当前线路'));
+        }
+        _realUrl = url;
       }
-      _realUrl = url;
     } catch (e) {
       // 这条流程已被作废：它的失败不该覆盖新流程的界面状态
       if (gen != _playGen || !mounted) return;
@@ -912,9 +1032,14 @@ class _PlayerPageState extends State<PlayerPage> {
         // 落到 FFmpeg 默认的 `Lavf/...`，而部分源站（尤其带防盗链的）
         // 见到非浏览器 UA 会直接 403 —— 表现是「地址解析出来了但播不了」，
         // 和当初那个坑长得一模一样。
-        httpHeaders: const {
-          'User-Agent':
-              'Mozilla/5.0 (Linux; Android 9; SM-N9700) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
+        //
+        // 直播频道的 UA 由调用方传入（见 [PlayerPage.userAgent]）：
+        // IPTV 源站会把「该用哪个 UA」写在自己的 m3u 里，不带就 404。
+        // 多线路时用 _playUa：备线路的 UA 可能和主线路不同。
+        httpHeaders: {
+          'User-Agent': _playUa.isNotEmpty
+              ? _playUa
+              : 'Mozilla/5.0 (Linux; Android 9; SM-N9700) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
         },
       );
       // 超时保护：源站半死不活时 initialize 可能挂几分钟，
@@ -992,10 +1117,36 @@ class _PlayerPageState extends State<PlayerPage> {
       // 已作废的流程不能把自己的失败写进界面：用户已经切到新线路了，
       // 这里再报一句错，等于把新线路的加载态冲掉。
       if (!mounted || gen != _playGen) return;
+
+      // 直播多线路：这条播不了就自动试下一条，用户不必自己去点「重新连接」。
+      //
+      // 为什么在**播放失败**这一层做，而不是在点开之前预探测一遍：
+      //   · 预探测要串行打完全部线路才敢起播，3 条线路最坏多等 30 秒，
+      //     而多数情况下第一条就是好的 —— 为了少数坏线路惩罚全部用户；
+      //   · 构建期已经全量探活过（见 probe_live.py），线路在打包那一刻
+      //     是活的，坏掉是因为**此刻**源站限流/换流，只能在此时知道。
+      // 所以策略是「先试第一条，失败了再换」，代价只有真的坏掉时才付。
+      if (widget.isLive && _hasMoreLines) {
+        final (was, total) = _lineProgress;
+        _lineIdx++;
+        final (now, _) = _lineProgress;
+        // 提示要说清「第几条换成了第几条」，否则用户只看到画面黑一下
+        // 又好了，会以为是自己网络抖了。这条提示也解释了为什么
+        // 画质/延迟可能和上次不一样（换了源站）。
+        _showNotice('线路 $was 不可用，正在切到线路 $now/$total');
+        unawaited(_resolve());
+        return;
+      }
+
       setState(() {
         _ctrl = null;
         _playLoading = false;
-        _playErr = _humanPlayError(e);
+        // 全部线路都试过了还在直播：错误文案要说清"已经试完了"，
+        // 否则用户会一直点「重新连接」，而它只是把同样的链路再跑一遍。
+        final base = _humanPlayError(e);
+        _playErr = widget.isLive && _liveLines.length > 1
+            ? '$base（${_liveLines.length} 条线路都试过了）'
+            : base;
       });
     }
   }
@@ -1005,6 +1156,14 @@ class _PlayerPageState extends State<PlayerPage> {
   void _onPlayTick() {
     final c = _ctrl;
     if (c == null || !c.value.isInitialized) return;
+    // 直播永远不触发自动连播。
+    //
+    // 直播流没有"播完"这回事，但**部分解码器会给 HLS 直播上报一个
+    // duration**（等于当前窗口长度），于是 position 一旦走到 total 就被
+    // 判成 ended，3 秒后自动跳到下一个台 —— 用户正在看春晚，突然变成
+    // 另一个频道，还找不到原因。这条必须在这里拦，不能指望
+    // `total <= Duration.zero` 那个判断兜住。
+    if (widget.isLive) return;
     if (_autoNextHandled) return;
     if (_pendingNext != null) return; // 倒计时中
 
@@ -1108,6 +1267,17 @@ class _PlayerPageState extends State<PlayerPage> {
     await _resolve(video: v);
   }
 
+  /// 直播「重新连接」：把线路从头再试一遍。
+  ///
+  /// 为什么不直接用 `_resolve()`：那时 `_lineIdx` 停在**上一条失败的位置**，
+  /// 用户点了「重新连接」，播放器又去试同一条已经确认坏掉的线路，
+  /// 结果还是失败 —— 界面上看起来就是「按钮点了没反应」。
+  /// 归零之后重连才有意义：它代表「把全部线路按顺序重新过一遍」。
+  Future<void> _reconnectLive() async {
+    _lineIdx = 0;
+    await _resolve();
+  }
+
   Future<void> _switchToSource(String name) async {
     final list = widget.sources[name];
     if (list == null || list.isEmpty) {
@@ -1158,6 +1328,12 @@ class _PlayerPageState extends State<PlayerPage> {
   Future<void> _loadDanmaku(int gen) async {
     final ep = _cur.episode;
     final id = widget.dramaId;
+    // 直播频道没有弹幕池，也没有剧集 id。这里必须提前返回，
+    // 否则会拿一条 m3u8 的地址去问「第 0 集」的弹幕，白跑一次请求。
+    if (widget.isLive) {
+      if (mounted) setState(() => _dmLoaded = true);
+      return;
+    }
     // 该源根本没有弹幕池（kanju），不必发请求、也不该显示「暂无弹幕」。
     // 这个能力位原来只在 DataSource 里定义、没人读，导致切到 kanju 后
     // 播放页仍会挂一个永远点不出东西的弹幕开关。
@@ -1221,6 +1397,17 @@ class _PlayerPageState extends State<PlayerPage> {
     final c = _ctrl;
     if (c == null || !c.value.isInitialized) return;
     if (widget.dramaName.isEmpty) return;
+    // 直播不写观看历史。
+    //
+    // 不是因为"写不进去"，而是写了会**污染别的功能**：
+    //   1. 「最近观看」里会出现「CCTV1直播 03:12」，点回去要么从头
+    //      放（用户以为进度丢了），要么 seek 到一个早就滚出直播窗口的
+    //      时间点（直接播不出来）。
+    //   2. 直播的 positionSec 是"开播至今"，每次看都不同，把它当进度
+    //      没有任何意义。
+    //   3. 详情页的「继续观看 · 第N集 03:12」文案对频道完全说不通。
+    // 直播的"继续看"应该是收藏，不是进度 —— 直播页有自己的收藏入口。
+    if (widget.isLive) return;
     final pos = c.value.position.inSeconds;
     final dur = c.value.duration.inSeconds;
     if (pos <= 0) return;
@@ -1955,6 +2142,7 @@ class _PlayerPageState extends State<PlayerPage> {
                       child: PlayerControlBar(
                         ctrl: c,
                         fullscreen: true,
+                        isLive: widget.isLive,
                         onToggleFullscreen: _toggleFullscreen,
                         extraActions: [
                           // 弹幕开关：全屏是最常用的看弹幕场景，
@@ -2949,17 +3137,105 @@ class _PlayerPageState extends State<PlayerPage> {
           // 技术信息已移到标题栏的信息按钮里（见 AppBar 的 actions）。
           // 它只是排障用，常驻一块面板既占竖直空间、又因为固定黑底
           // 在浅色主题下突兀地切成一条黑带，是竖屏页里最"碍眼"的一行。
-          const SizedBox(height: 18),
-          _portraitSectionTitle('来源', trailing: '${_sourceNames.length} 个可用'),
-          const SizedBox(height: 10),
-          _portraitSourceChips(),
-          const SizedBox(height: 18),
-          _portraitSectionTitle('选集', right: _portraitEpisodeNav()),
-          const SizedBox(height: 10),
-          _portraitEpisodeChips(),
+          if (widget.isLive) ...[
+            // 直播没有「线路」和「选集」这两个概念，硬渲染只会出现
+            // 「来源 · 0 个可用」和一条写着「第1集」的假选集。
+            const SizedBox(height: 18),
+            _portraitSectionTitle('频道信息'),
+            const SizedBox(height: 10),
+            _liveInfoBlock(),
+          ] else ...[
+            const SizedBox(height: 18),
+            _portraitSectionTitle('来源', trailing: '${_sourceNames.length} 个可用'),
+            const SizedBox(height: 10),
+            _portraitSourceChips(),
+            const SizedBox(height: 18),
+            _portraitSectionTitle('选集', right: _portraitEpisodeNav()),
+            const SizedBox(height: 10),
+            _portraitEpisodeChips(),
+          ],
         ],
       ),
     );
+  }
+
+  /// 直播频道信息块：栏目 / 流类型 / 地址。
+  ///
+  /// 展示地址是有意为之：直播源失效很常见，用户反馈「点开黑屏」时
+  /// 唯一能自己排查的就是「这条地址还用不用」。只显示域名不显示完整
+  /// 路径，既够用又不会把一屏塞满。
+  ///
+  /// [dark] 只有宽屏右栏用：那块区域底色钉死 `kVideoBg`（纯黑），
+  /// 不随主题走，若沿用主题色 `p.bg`，浅色主题下会是一块**白底卡片
+  /// 压在纯黑上**——正是这个文件里已经踩过一次的坑（见宽屏右栏外层
+  /// 套 `kVideoTheme` 的注释）。
+  Widget _liveInfoBlock({bool dark = false}) {
+    final p = context.palette;
+    final labelColor = dark ? kOnVideoDim : p.textDim;
+    final valueColor = dark ? Colors.white : p.onSurface;
+    final bg = dark ? kVideoCard : p.bg;
+    final ch = widget.liveChannel;
+    final (li, ln) = _lineProgress;
+    final rows = <(String, String)>[
+      ('栏目', ch?.section.isNotEmpty == true ? ch!.section : '未分组'),
+      ('类型', ch?.kind.isNotEmpty == true ? ch!.kind : '未知'),
+      // 地址优先取**已解析出来的真实地址** _realUrl，其次当前线路。
+      //
+      // 为什么要这个顺序：
+      //   · 详情页进来的直播（橘汁）没有 directUrl，地址要调接口才换出来，
+      //     直接读 directUrl 会显示空白；
+      //   · 而多线路频道切换后地址会变，读固定值又会给出错信息；
+      //   · 刚进页面还没解析完时 _realUrl 是空的，回落到线路地址，
+      //     这样这一行任何时刻都不会是空白。
+      ('地址', _hostOf(_realUrl.isNotEmpty ? _realUrl : _playSrcUrl)),
+      // 只有真的有多条线路才显示这一行：单线路的台把「线路 1/1」
+      // 摆出来只会让用户以为还有别的可选，点又没有。
+      if (ln > 1) ('线路', '$li / $ln'),
+    ];
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(R.card),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = 0; i < rows.length; i++) ...[
+            if (i > 0) const SizedBox(height: 7),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 40,
+                  child: Text(rows[i].$1,
+                      style: TextStyle(fontSize: Ts.bodySm, color: labelColor)),
+                ),
+                Expanded(
+                  child: Text(
+                    rows[i].$2,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: Ts.bodySm, color: valueColor),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 宽屏右栏用的深色信息块。见 [_liveInfoBlock] 的 [dark] 参数说明。
+  Widget _liveInfoBlockDark() => _liveInfoBlock(dark: true);
+
+  /// 从地址里取 `host:port`，取不到就原样返回（本地文件路径也能显示）。
+  String _hostOf(String url) {
+    final u = Uri.tryParse(url);
+    if (u == null || u.host.isEmpty) return url;
+    return u.hasPort ? '${u.host}:${u.port}' : u.host;
   }
 
   Widget _portraitBadge(String s) => Container(
@@ -3000,6 +3276,22 @@ class _PlayerPageState extends State<PlayerPage> {
   /// 图标 + 文字竖排，与参考设计的五个功能入口一致。
   /// 只放我们真实有的能力，不摆「一起看」这类点了没反应的假按钮。
   Widget _portraitActions() {
+    // 直播：只留「重新连接」（流断了要重连）和「投屏」（投到电视看直播
+    // 才是这个功能的主场景）。下载与选集在直播下没有意义，见
+    // [_actionButtons] 里同样的取舍说明。
+    if (widget.isLive) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          // 直播重连走 _reconnectLive：归零线路后重试全部，直接用
+          // _resolve 会在上一条已失效的线路上原地打转。
+          _portraitAction(
+              Icons.refresh_rounded, '重新连接', () => _reconnectLive()),
+          if (!isDesktop && _realUrl.isNotEmpty)
+            _portraitAction(Icons.cast_rounded, '投屏', () => _openCast()),
+        ],
+      );
+    }
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceAround,
       children: [
@@ -3313,6 +3605,7 @@ class _PlayerPageState extends State<PlayerPage> {
                     child: PlayerControlBar(
                       ctrl: c,
                       fullscreen: false,
+                      isLive: widget.isLive,
                       onToggleFullscreen: _toggleFullscreen,
                       extraActions: [
                         if (_dmOn) const DanmakuToggleButton(),
@@ -3374,30 +3667,61 @@ class _PlayerPageState extends State<PlayerPage> {
                   ),
                 ),
                 const Divider(height: 1, color: Color(0xFF23262F)),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
-                  child: Row(
-                    children: [
-                      Text(
-                        _isSeries ? '选集' : '播放源',
-                        style: const TextStyle(
-                            fontSize: Ts.body, fontWeight: FontWeight.w600),
+                if (widget.isLive)
+                  // 直播没有选集也没有播放源。原来这块会渲染成
+                  // 「播放源 · 0 个源」+ 一个空列表，看起来像加载失败。
+                  // 换成频道信息，把右栏这片空间用起来。
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '频道信息',
+                            style: TextStyle(
+                                fontSize: Ts.body,
+                                fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 10),
+                          _liveInfoBlockDark(),
+                          const SizedBox(height: 14),
+                          const Text(
+                            '直播源随时可能失效，播不出来时点「重新连接」再试一次。',
+                            style: TextStyle(
+                                fontSize: Ts.caption, color: kOnVideoDim),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        _isSeries
-                            ? '共 ${_curEpisodes.length} 集'
-                            : '${_sourceNames.length} 个源',
-                        style: const TextStyle(fontSize: Ts.caption, color: kOnVideoDim),
-                      ),
-                    ],
+                    ),
+                  )
+                else ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+                    child: Row(
+                      children: [
+                        Text(
+                          _isSeries ? '选集' : '播放源',
+                          style: const TextStyle(
+                              fontSize: Ts.body, fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _isSeries
+                              ? '共 ${_curEpisodes.length} 集'
+                              : '${_sourceNames.length} 个源',
+                          style: const TextStyle(
+                              fontSize: Ts.caption, color: kOnVideoDim),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                Expanded(
-                  child: _isSeries
-                      ? _episodeGrid(crossAxisCount: 5)
-                      : _sourceList(),
-                ),
+                  Expanded(
+                    child: _isSeries
+                        ? _episodeGrid(crossAxisCount: 5)
+                        : _sourceList(),
+                  ),
+                ],
               ],
             ),
           ),
@@ -3583,6 +3907,7 @@ class _PlayerPageState extends State<PlayerPage> {
         child: PlayerControlBar(
           ctrl: c,
           fullscreen: false,
+          isLive: widget.isLive,
           onToggleFullscreen: _toggleFullscreen,
           extraActions: [
             if (_dmOn) const DanmakuToggleButton(),
@@ -3648,6 +3973,26 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   Widget _actionButtons() {
+    // 直播只有「重试」这一个有意义的操作：
+    //   - 「下载本集」：直播流是无限长的，FFmpeg 拉不到结尾，必然失败；
+    //   - 「换源」：直播的线路不走 _canSwitch（那套是"数据源"维度），
+    //     多线路切换由 [_reconnectLive] + 播放失败自动切换负责；
+    //   - 「重新解析」：地址是打包时定死的，重解析拿到同一条，白等。
+    // 流断了的时候用户真正要的是「重新连一次」，所以只留这一个，
+    // 并且按钮文案说清是重连而不是解析。
+    if (widget.isLive) {
+      return Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: () => _reconnectLive(),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('重新连接'),
+            ),
+          ),
+        ],
+      );
+    }
     final row = Row(
       children: [
         Expanded(

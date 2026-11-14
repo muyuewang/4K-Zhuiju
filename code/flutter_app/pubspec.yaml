@@ -1,7 +1,7 @@
 name: zhuiju
 description: 4K追剧 — 高清影视聚合客户端（Android / Windows）
 publish_to: 'none'
-version: 1.11.5+30
+version: 1.11.6+31
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -74,3 +74,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    # 直播频道清单（2553 个已探活频道）。由 tools/probe_live.py 生成：
+    # 先全量探活 4180 个 m3u 频道，只把当前可播的打包进来，
+    # 这样 App 打开直播页不用等任何网络探测。详见 live_tv_source.dart 顶部说明。
+    - assets/live_channels.json

@@ -47,6 +47,20 @@ import '../models.dart';
 import 'data_source.dart';
 import 'site_http.dart' show kSiteUserAgent;
 
+/// 采集接口的响应格式。
+///
+/// MacCMS 的 `provide/vod` 有**两套互不兼容的应答**，靠站点自己的
+/// `at=` 配置决定，客户端改不了：
+///
+/// | 格式 | 典型报文 | `ac=list` 带的分集 |
+/// | --- | --- | --- |
+/// | [json] | `{"code":1,"list":[{"vod_play_url":"…"}]}` | 视站而定 |
+/// | [xml]  | `<rss><list><video><dl><dd flag="x"><![CDATA[…]]>` | 一定不带 |
+///
+/// 走错格式的表现是「JSON 解析失败」或「一条都解析不出来」，
+/// 所以必须由配置显式声明，不能靠猜。
+enum MacCmsFormat { json, xml }
+
 /// 一条采集接口站的配置。加新站 = 加一份这个，不改任何解析代码。
 class MacCmsApiConfig {
   const MacCmsApiConfig({
@@ -59,6 +73,9 @@ class MacCmsApiConfig {
     this.searchViaPost = false,
     this.preferDirectLine = true,
     this.listNeedsDetail = false,
+    this.format = MacCmsFormat.json,
+    this.listNeedsBatchDetail = false,
+    this.derivePlayIndex = false,
   });
 
   final String id;
@@ -146,6 +163,46 @@ class MacCmsApiConfig {
   /// 只在「列表确实没封面」的站上单独打开。翻页语义已实测一致
   /// （`ac=detail&pg=2` 的首条与 `ac=list&pg=2` 相同），不会错位。
   final bool listNeedsDetail;
+
+  /// 应答格式。见 [MacCmsFormat]。
+  final MacCmsFormat format;
+
+  /// 是否「先按 [listNeedsDetail] 拿列表 id，再用 `ids=` 批量补全」。
+  ///
+  /// ## 为什么需要第三种策略（2026-11-14 优子资源实测）
+  ///
+  /// 优子资源（api.yzzyapi.com）是 XML 站，两个出口的能力**互补且互斥**：
+  ///
+  /// | 查询 | 排序 | 分集 `<dl>` | 封面 `<pic>` | 体积 |
+  /// | --- | --- | --- | --- | --- |
+  /// | `ac=list&pg=n` | **按更新时间倒序** ✅ | ❌ 只有 `<dt>` | ❌ | 5.7 KB |
+  /// | `ac=videolist&pg=n` | **按 id 升序**（全是 2022 年的老片）❌ | ✅ | ✅ | 16 KB |
+  ///
+  /// 也就是说：想要「新片」就得放弃封面和播放地址，想要「完整字段」
+  /// 就只能拿到一堆陈年旧片。`order=time` / `order=last` / `at=json`
+  /// 三种参数全试过，**服务端一律忽略**。
+  ///
+  /// 唯一可行的组合是：先用 `ac=list` 拿到「最新 20 个 id」，
+  /// 再用 `ac=videolist&ids=1,2,3…` 批量回查这 20 条。
+  /// 实测一次批量 20 条 = 424 KB，比 20 次单条详情（3 次往返都省不了）
+  /// 便宜得多，且比 `ac=detail` 的 460 KB / 全字段更小。
+  ///
+  /// 代价是一次列表要 **2 个串行请求**（中位 1.2s + 2.1s ≈ 3.3s），
+  /// 所以默认关闭，只在「XML 站且必需封面」时打开。
+  final bool listNeedsBatchDetail;
+
+  /// 是否尝试把 `/play/<token>` 纯壳播放页推导成 `/play/<token>/index.m3u8`。
+  ///
+  /// 金山资源的 `jsyun` 线路给的是 **1294 字节的 Vue 空壳页**，
+  /// 里面既没有 `var main` 也没有任何 m3u8 字符串，
+  /// [extractShareMainUrl] 抠不出东西，用户切过去就报「解析不出地址」。
+  ///
+  /// 但同剧的 `jsm3u8` 线路地址是 `…/play/<token>/index.m3u8`，
+  /// 只差尾部一段。实测 6/6 推导与直出**逐字符相同**、6/6 可播。
+  ///
+  /// **这条规则不能乱开**：优子的 `/share/<md5>` 加 `/index.m3u8`
+  /// 实测 404。所以默认关闭，只在验证过的站上打开。
+  final bool derivePlayIndex;
 }
 
 /// 一条采集线路的原始三元组（纯数据，方便离线测试）。
@@ -208,6 +265,181 @@ List<ApiLine> parseApiLines(
   return out;
 }
 
+/// 一个 XML 采集条目的解析结果。
+///
+/// 字段用 [Map] 而不是具名成员，是为了让 [MacCmsApiSource] 里
+/// 「JSON 条目 → Drama」那段复用同一套字段名（`vod_name` / `vod_pic`…），
+/// 不必为 XML 再写一遍映射。两套格式的语义本来就是同一份 schema，
+/// 只是序列化方式不同。
+class XmlVideo {
+  XmlVideo({required this.fields, required this.lines});
+
+  /// 采集字段，键名与 JSON 版对齐（`vod_id` / `vod_name` / `vod_pic` …）。
+  final Map<String, String> fields;
+
+  /// 已解析成 [ApiLine] 的线路，可直接交给 [sortDirectLinesFirst]。
+  final List<ApiLine> lines;
+}
+
+/// 取 `<tag>…</tag>` 的文本，**优先匹配 CDATA 形态**。
+///
+/// 必须优先 CDATA，原因很实际：优子资源的 `<des>` 是
+/// `<![CDATA[　　东北青年华志是一名东北军士兵…]]>`，正文里带
+/// 全角空格和中文标点。若先走普通形态的正则，遇到正文含 `<` 的
+/// 简介（比如「评分&lt;5」这种转义漏掉的脏数据）会从错误位置截断。
+///
+/// 返回的文本已剥离 CDATA 包裹并做实体反转义。
+String xmlTagText(String block, String tag) {
+  // ① CDATA 形态
+  final cdata = RegExp(
+    '<$tag>\\s*<!\\[CDATA\\[(.*?)\\]\\]>\\s*</$tag>',
+    dotAll: true,
+  ).firstMatch(block);
+  if (cdata != null) return cdata.group(1)!.trim();
+
+  // ② 普通形态
+  final plain =
+      RegExp('<$tag>(.*?)</$tag>', dotAll: true).firstMatch(block);
+  if (plain != null) return unescapeXml(plain.group(1)!.trim());
+
+  // ③ 属性形态（`<list page="1" …>` 这类，本函数不处理，留给调用方）
+  return '';
+}
+
+/// XML 实体反转义。采集站偶尔会在非 CDATA 字段里输出 `&amp;` 等形式，
+/// 不还原的话片名会显示成「Tom &amp; Jerry」。
+String unescapeXml(String s) {
+  if (!s.contains('&')) return s;
+  return s
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&apos;', "'")
+      // `&amp;` 必须最后换，否则 `&amp;lt;` 会被拆成 `<`（二次转义）
+      .replaceAll('&amp;', '&');
+}
+
+/// 解析 XML 采集应答里的 `<video>` 节点列表。
+///
+/// ## 报文形态（2026-11-14 优子资源实测，逐字节核对）
+///
+/// ```xml
+/// <?xml version="1.0" encoding="utf-8"?>
+/// <rss version="5.1">
+///   <list page="1" pagecount="5460" pagesize="20" recordcount="109192">
+///     <video>
+///       <last>2023-07-21 08:00:19</last><id>21</id><tid>11</tid>
+///       <name><![CDATA[冰雪狙击]]></name><type>战争片</type>
+///       <pic>https://pic3.yzzyimg.online/upload/vod/…jpg</pic>
+///       <lang>国语</lang><area>大陆</area><year>2022</year><state>0</state>
+///       <note><![CDATA[HD国语版]]></note>
+///       <actor><![CDATA[李东学,胡雪儿,…]]></actor>
+///       <director><![CDATA[林伟]]></director>
+///       <dl>
+///         <dd flag="zykyun"><![CDATA[HD国语版$https://…/share/2af1e9ea…]]></dd>
+///         <dd flag="1080zyk"><![CDATA[HD国语版$https://…/11747_44b07ed6/index.m3u8]]></dd>
+///       </dl>
+///       <des><![CDATA[　　东北青年华志…]]></des>
+///     </video>
+///   </list>
+/// </rss>
+/// ```
+///
+/// ## 三个必须遵守的点
+///
+/// 1. **CDATA 一定要剥**。`<dd>` 里是 `<![CDATA[集名$地址]]>`，
+///    不剥就会把尾巴的 `]]>` 粘在 m3u8 地址后面。这个错在 11-13 的
+///    探测脚本里踩过一次：所有地址都变成 `…/index.m3u8]]>`，
+///    实测 100% 404，而报错看起来像「源挂了」，极难定位。
+/// 2. **`<dl>` 内多条 `<dd>` 是同片的多条线路**，不是多集。
+///    每条 dd 内部才用 `#` 分集、`$` 分名与地址 —— 与 JSON 版的
+///    `vod_play_url` 完全同构，所以直接复用 [parseApiLines] 的拆法。
+/// 3. **同名 flag 可能重复出现**（少数站一季拆成两条 dd 都写 `1080zyk`），
+///    按 flag 归组累加分集，而不是后一条覆盖前一条。
+List<XmlVideo> parseXmlVideos(String xml) {
+  if (xml.isEmpty) return const <XmlVideo>[];
+
+  final blocks =
+      RegExp(r'<video>(.*?)</video>', dotAll: true).allMatches(xml);
+  final out = <XmlVideo>[];
+
+  for (final m in blocks) {
+    final block = m.group(1) ?? '';
+    if (block.trim().isEmpty) continue;
+
+    final id = xmlTagText(block, 'id');
+    final name = xmlTagText(block, 'name');
+    // 无 id 或无片名的条目一律丢弃：没有 id 就打不开详情，
+    // 没有片名在列表里是一张空白卡，留着只会让用户以为源坏了。
+    if (id.isEmpty || name.isEmpty) continue;
+
+    // 线路：按 flag 归组，保持首次出现的顺序
+    final order = <String>[];
+    final bodies = <String, List<String>>{};
+    final dl = RegExp(r'<dl>(.*?)</dl>', dotAll: true).firstMatch(block);
+    if (dl != null) {
+      for (final dd in RegExp(r'<dd\s+flag="([^"]*)"\s*>(.*?)</dd>',
+              dotAll: true)
+          .allMatches(dl.group(1) ?? '')) {
+        final flag = dd.group(1)!.trim();
+        var body = dd.group(2) ?? '';
+        // ← 关键：剥 CDATA，见上面第 1 点
+        body = body
+            .replaceAll('<![CDATA[', '')
+            .replaceAll(']]>', '')
+            .trim();
+        if (body.isEmpty) continue;
+        final key = flag.isEmpty ? 'line0' : flag;
+        if (!bodies.containsKey(key)) {
+          bodies[key] = <String>[];
+          order.add(key);
+        }
+        bodies[key]!.addAll(
+          body.split('#').where((e) => e.trim().isNotEmpty),
+        );
+      }
+    }
+
+    final lines = <ApiLine>[];
+    for (final flag in order) {
+      final segs = bodies[flag]!;
+      final eps = <ApiEpisode>[];
+      for (final seg in segs) {
+        final s = seg.trim();
+        final cut = s.indexOf(r'$');
+        var title = cut > 0 ? s.substring(0, cut).trim() : '';
+        final url = cut > 0 ? s.substring(cut + 1).trim() : s;
+        if (url.isEmpty) continue;
+        if (title.isEmpty) title = '第${eps.length + 1}集';
+        eps.add(ApiEpisode(title: title, url: url));
+      }
+      if (eps.isEmpty) continue;
+      lines.add(ApiLine(flag: flag, name: flag, eps: eps));
+    }
+
+    out.add(XmlVideo(
+      fields: <String, String>{
+        'vod_id': id,
+        'vod_name': name,
+        'vod_type_name': xmlTagText(block, 'type'),
+        'vod_pic': xmlTagText(block, 'pic'),
+        'vod_remarks': xmlTagText(block, 'note'),
+        'vod_actor': xmlTagText(block, 'actor'),
+        'vod_director': xmlTagText(block, 'director'),
+        'vod_area': xmlTagText(block, 'area'),
+        'vod_lang': xmlTagText(block, 'lang'),
+        'vod_year': xmlTagText(block, 'year'),
+        'vod_isend': xmlTagText(block, 'state'),
+        'vod_content': xmlTagText(block, 'des'),
+        'vod_pubdate': xmlTagText(block, 'last'),
+        'type_id': xmlTagText(block, 'tid'),
+      },
+      lines: lines,
+    ));
+  }
+  return out;
+}
+
 /// 从「分享页」HTML 里抠出真实播放地址。
 ///
 /// 量子源 `liangzi` 线路给的是 `https://v.cdnlz18.com/share/<md5>`，
@@ -224,6 +456,36 @@ String? extractShareMainUrl(String html, String pageUrl) {
   final lower = abs.toLowerCase();
   if (!lower.contains('.m3u8') && !lower.contains('.mp4')) return null;
   return abs;
+}
+
+/// 从「`/play/<token>`」这种**纯壳播放页**推导直出地址。
+///
+/// ## 为什么需要它（2026-11-14 金山资源实测）
+///
+/// 金山的 `jsyun` 线路给的是 `https://vv.jisuzyv.com/play/epYzjKpa`。
+/// 这个页面只有 1294 字节，是一个 **Vue 空壳**：没有 `var main`、
+/// 没有 `"url":`、没有任何 m3u8 字符串 —— [extractShareMainUrl] 必然返回
+/// null，于是用户切到「金山网页」线路就报「解析不出播放地址」。
+///
+/// 但同一部剧的 `jsm3u8` 线路给的是
+/// `https://vv.jisuzyv.com/play/epYzjKpa/index.m3u8`。
+/// 两者**除了尾部 `/index.m3u8` 完全一致**，是确定性的路径拼接，
+/// 不是巧合。实测抽 6 部片验证：6/6 推导结果与 `jsm3u8` 逐字符相同，
+/// 且 6/6 实拉返回 HTTP 200 + `#EXTM3U`。
+///
+/// 这条规则对其他站**不成立**（优子的 `/share/<md5>` 加 `/index.m3u8`
+/// 实测 404），所以只给需要它的站打开 [MacCmsApiConfig.derivePlayIndex]。
+String? derivePlayIndexUrl(String pageUrl) {
+  final u = Uri.tryParse(pageUrl.trim());
+  if (u == null || u.host.isEmpty) return null;
+  // 已经是直链就别再拼，否则会变成 `…/index.m3u8/index.m3u8`
+  final p = u.path.toLowerCase();
+  if (p.contains('.m3u8') || p.contains('.mp4')) return null;
+  // 只处理 `/play/<token>` 形态：`/play/` 后必须恰好一段且非空。
+  // 不加这个限制的话，`/play/a/b` 这种也可能被误拼成合法路径。
+  final segs = u.pathSegments.where((e) => e.isNotEmpty).toList();
+  if (segs.length != 2 || segs.first != 'play') return null;
+  return '${u.scheme}://${u.authority}/play/${segs[1]}/index.m3u8';
 }
 
 /// 把「直出 m3u8 / mp4」的线路排到最前，网页分享页线路保持原相对顺序沉到后面。
@@ -311,7 +573,13 @@ class MacCmsApiSource implements DataSource {
     final q = <String, dynamic>{
       // 用 detail 只是为了拿 vod_pic。翻页语义已实测与 list 一致
       // （`ac=detail&pg=2` 首条 == `ac=list&pg=2` 首条），不会错位。
-      'ac': cfg.listNeedsDetail ? 'detail' : 'list',
+      //
+      // XML 站不能走 detail：优子资源的 `ac=detail&ids=21` 实测返回的
+      // 是**随机 20 条最新**（id 110051/110050/…），把 ids 完全忽略，
+      // 详情页会打开成一部不相干的片子。所以 xml 格式一律锁死 list。
+      'ac': (cfg.format == MacCmsFormat.json && cfg.listNeedsDetail)
+          ? 'detail'
+          : 'list',
       'pg': page,
     };
     if (typeId != null && typeId.isNotEmpty) q['t'] = typeId;
@@ -326,9 +594,9 @@ class MacCmsApiSource implements DataSource {
     // 带关键词搜索且该站屏蔽了 GET 的 wd 参数时，改走 POST 表单。
     // 只有「真在搜索」才需要：空关键词（推荐位）走 GET 一直是好的。
     if (cfg.searchViaPost && k.isNotEmpty) {
-      return _cards(await _post(q));
+      return _cardsOfPost(q);
     }
-    return _cards(await _get(q));
+    return _cardsOf(q);
   }
 
   /// 分类列表。`categoryId` 支持「逗号串 = 多分类合并」。
@@ -360,18 +628,17 @@ class MacCmsApiSource implements DataSource {
         .toList(growable: false);
 
     if (ids.isEmpty) {
-      return _cards(await _get(_listQuery(page)));
+      return _cardsOf(_listQuery(page));
     }
     if (ids.length == 1) {
-      return _cards(await _get(_listQuery(page, typeId: ids.first)));
+      return _cardsOf(_listQuery(page, typeId: ids.first));
     }
 
     // 单个子分类失败不能拖垮整个栏目：某条分类临时挂了，
     // 其余分类照常出内容，总比整页报错强。
     final groups = await Future.wait(ids.map((id) async {
       try {
-        final d = await _get(_listQuery(page, typeId: id));
-        return _cards(d);
+        return await _cardsOf(_listQuery(page, typeId: id));
       } catch (_) {
         return const <Drama>[];
       }
@@ -409,12 +676,37 @@ class MacCmsApiSource implements DataSource {
 
   @override
   Future<DramaDetail> detail(String dramaId) async {
+    if (cfg.format == MacCmsFormat.xml) return _detailXml(dramaId);
     final d = await _get(<String, dynamic>{'ac': 'detail', 'ids': dramaId});
     final list = _list(d);
     if (list.isEmpty) {
       throw ApiException(404, '该影片在源站已下架，换源试试');
     }
     return _detail(dramaId, list.first);
+  }
+
+  /// XML 站的详情。
+  ///
+  /// 用 `ac=videolist&ids=<id>` 而不是 `ac=detail&ids=`：优子资源的
+  /// `ac=detail&ids=21` 实测**忽略 ids**、返回随机 20 条最新
+  /// （id 110051/110050/…），会把详情页打开成一部不相干的片子；
+  /// 而 `ac=videolist&ids=21` 精确返回 1 条、974 B、带 `<dl>` 分集。
+  Future<DramaDetail> _detailXml(String dramaId) async {
+    final body = await _fetchText(<String, dynamic>{
+      'ac': 'videolist',
+      'ids': dramaId,
+    });
+    final items = parseXmlVideos(body);
+    if (items.isEmpty) {
+      throw ApiException(404, '该影片在源站已下架，换源试试');
+    }
+    // 服务端理论上只回 1 条，但批量接口偶尔会带回邻近 id；
+    // 优先挑 id 精确相等的，挑不到才退回第一条。
+    final hit = items.firstWhere(
+      (e) => e.fields['vod_id'] == dramaId,
+      orElse: () => items.first,
+    );
+    return _detailFromXml(dramaId, hit);
   }
 
   @override
@@ -426,6 +718,15 @@ class MacCmsApiSource implements DataSource {
     final lower = p.toLowerCase();
     // 绝大多数线路（bfzym3u8 / lzm3u8 / 各类直链）到这一步就能直接播
     if (lower.contains('.m3u8') || lower.contains('.mp4')) return p;
+
+    // 「纯壳播放页」先按路径规则推导，**不必发请求**。
+    // 金山 jsyun 的页面是 1294 B 的 Vue 空壳，抓下来也抠不出地址，
+    // 白等一个来回（实测 1.3~1.9s）还可能被 CF 盾拦。
+    // 规则与验证见 [derivePlayIndexUrl]。
+    if (cfg.derivePlayIndex) {
+      final derived = derivePlayIndexUrl(p);
+      if (derived != null) return derived;
+    }
 
     // 剩下的是「分享页」线路：URL 指向一个 HTML 播放页，
     // 真正的地址写在页面里的 `var main = "/xxx/index.m3u8?sign=…"`。
@@ -576,6 +877,126 @@ class MacCmsApiSource implements DataSource {
     }
   }
 
+  /// 带退避重试的**纯文本**请求，供 XML 站使用。
+  ///
+  /// 不能复用 [_get]：它固定走 `ResponseType.json`，而 XML 站回的是
+  /// `<?xml …?><rss>`，dio 会先尝试 JSON 解码并抛格式异常
+  /// （抓到的就是 `FormatException: Unexpected character`），
+  /// 表现成「接口挂了」，其实报文是完整的。
+  ///
+  /// 重试与总期限逻辑刻意与 [_get] 逐行对齐（3 次、18s 总期限、
+  /// 每次独立 CancelToken、失败必 cancel），避免出现「XML 路径没有
+  /// 僵尸连接保护」这种只有某个源才会踩的坑。
+  Future<String> _fetchText(Map<String, dynamic> query) async {
+    const total = Duration(seconds: 18);
+    final deadline = DateTime.now().add(total);
+    Object? last;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        if (DateTime.now().isAfter(deadline)) break;
+        await Future<void>.delayed(Duration(milliseconds: 350 * attempt));
+      }
+      final token = CancelToken();
+      try {
+        final remain = deadline.difference(DateTime.now());
+        if (remain <= Duration.zero) break;
+        final r = await _dio
+            .get<String>(
+              cfg.apiUrl,
+              queryParameters: query,
+              options: Options(responseType: ResponseType.plain),
+              cancelToken: token,
+            )
+            .timeout(remain);
+        final code = r.statusCode ?? -1;
+        if (code != 200) {
+          throw ApiException(code, '采集接口返回 HTTP $code');
+        }
+        final body = r.data ?? '';
+        if (body.trim().isEmpty) {
+          throw ApiException(-1, '采集接口返回空报文');
+        }
+        return body;
+      } on ApiException catch (e) {
+        last = e;
+        if (e.code >= 500 || e.code == -1) continue;
+        rethrow;
+      } catch (e) {
+        if (!token.isCancelled) token.cancel('attempt ${attempt + 1} aborted: $e');
+        last = e;
+      }
+    }
+    if (last is ApiException) throw last;
+    if (last is TimeoutException) {
+      throw ApiException(-1, '采集接口 ${total.inSeconds} 秒无响应，请稍后重试');
+    }
+    throw ApiException(-1, '采集接口暂时不可用，请稍后重试');
+  }
+
+  /// 列表入口的统一出口：按 [MacCmsApiConfig.format] 分发。
+  ///
+  /// 之所以做成一个方法而不是在 4 个调用点各写一次 if：漏掉任何一处，
+  /// 表现都是「某个入口突然空白」，而不是崩溃，极难发现。
+  Future<List<Drama>> _cardsOf(Map<String, dynamic> query) async {
+    if (cfg.format == MacCmsFormat.json) {
+      return _cards(await _get(query));
+    }
+    final body = await _fetchText(query);
+    var items = parseXmlVideos(body);
+
+    // 「XML 站列表没封面」的补救：先拿 id，再批量回查。
+    // 适用条件见 [MacCmsApiConfig.listNeedsBatchDetail] 的注释。
+    if (cfg.listNeedsBatchDetail && items.isNotEmpty) {
+      final filled = await _fillXmlByBatchIds(
+        items.map((e) => e.fields['vod_id'] ?? '').toList(growable: false),
+      );
+      if (filled != null && filled.isNotEmpty) items = filled;
+    }
+    return items.map(_dramaFromXml).toList(growable: false);
+  }
+
+  /// 用 `ac=videolist&ids=a,b,c` 批量补齐封面与分集。
+  ///
+  /// 失败时返回 null 让调用方**保留原列表**：封面没有只是不好看，
+  /// 列表直接空掉才是事故。这里刻意不抛异常。
+  Future<List<XmlVideo>?> _fillXmlByBatchIds(List<String> ids) async {
+    final valid = ids.where((e) => e.isNotEmpty).toList(growable: false);
+    if (valid.isEmpty) return null;
+    try {
+      final body = await _fetchText(<String, dynamic>{
+        'ac': 'videolist',
+        'ids': valid.join(','),
+      });
+      final filled = parseXmlVideos(body);
+      if (filled.isEmpty) return null;
+
+      // 服务端可能乱序或漏条，按 id 建索引后**按原顺序**回填，
+      // 否则列表会突然变成另一套排序，用户翻页时会看到重复。
+      final byId = <String, XmlVideo>{};
+      for (final e in filled) {
+        final id = e.fields['vod_id'] ?? '';
+        if (id.isNotEmpty) byId[id] = e;
+      }
+      final out = <XmlVideo>[];
+      for (final id in valid) {
+        final hit = byId[id];
+        if (hit != null) out.add(hit);
+      }
+      return out.isEmpty ? null : out;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// POST 表单版 [_cardsOf]。目前只有 JSON 站用到（樱花那类），
+  /// XML 站暂时没有踩到 GET 被拦的情况，但仍然保留分发以免以后漏。
+  Future<List<Drama>> _cardsOfPost(Map<String, dynamic> form) async {
+    if (cfg.format == MacCmsFormat.json) {
+      return _cards(await _post(form));
+    }
+    return _cardsOf(form);
+  }
+
   List<Map<String, dynamic>> _list(Map<String, dynamic> d) {
     final raw = d['list'];
     if (raw is! List) return const [];
@@ -664,5 +1085,76 @@ class MacCmsApiSource implements DataSource {
     if (v == null) return '';
     if (v is String) return v.trim();
     return v.toString();
+  }
+
+  // ---------------- XML 解析（[MacCmsFormat.xml]） ----------------
+  //
+  // XML 站的字段名本来就和 JSON 版同源（`vod_name` / `vod_pic`…），
+  // 所以 [parseXmlVideos] 已经把结果规整成同一套键，这里直接复用
+  // [_drama] 的字段映射即可，不需要再写一份 Drama 构造。
+
+  Drama _dramaFromXml(XmlVideo v) {
+    final f = v.fields;
+    return Drama(
+      id: f['vod_id'] ?? '',
+      name: f['vod_name'] ?? '',
+      area: f['vod_area'] ?? '',
+      // XML 的 `<des>` 就是简介正文，没有 `vod_blurb` 这种短简介字段
+      brief: stripHtml(f['vod_content'] ?? ''),
+      director: f['vod_director'] ?? '',
+      actor: f['vod_actor'] ?? '',
+      remark: f['vod_remarks'] ?? '',
+      year: int.tryParse(f['vod_year'] ?? '') ?? 0,
+      cover: CoverImage(path: f['vod_pic'] ?? ''),
+      sourceId: cfg.id,
+    );
+  }
+
+  DramaDetail _detailFromXml(String dramaId, XmlVideo v) {
+    final f = v.fields;
+    var lines = v.lines
+        .map((l) => ApiLine(
+              flag: l.flag,
+              name: cfg.lineNameCn[l.flag] ??
+                  (l.flag.isEmpty ? '线路' : l.flag),
+              eps: l.eps,
+            ))
+        .toList(growable: false);
+    if (cfg.preferDirectLine) lines = sortDirectLinesFirst(lines);
+
+    final videos = <DramaVideo>[];
+    for (final line in lines) {
+      for (var e = 0; e < line.eps.length; e++) {
+        final ep = line.eps[e];
+        videos.add(DramaVideo(
+          id: '${cfg.id}_${dramaId}_${line.flag}_${e + 1}',
+          title: ep.title,
+          path: ep.url,
+          source: line.flag,
+          sourceCn: line.name,
+          episode: e + 1,
+          dramaId: dramaId,
+        ));
+      }
+    }
+
+    final name = f['vod_name'] ?? '';
+    return DramaDetail(
+      id: dramaId,
+      name: name.isEmpty ? dramaId : name,
+      area: f['vod_area'] ?? '',
+      brief: stripHtml(f['vod_content'] ?? ''),
+      intro: stripHtml(f['vod_content'] ?? ''),
+      director: f['vod_director'] ?? '',
+      actor: f['vod_actor'] ?? '',
+      remark: f['vod_remarks'] ?? '',
+      tag: f['vod_type_name'] ?? '',
+      year: int.tryParse(f['vod_year'] ?? '') ?? 0,
+      // XML 的 `<state>` 只有 0/1，1 = 完结
+      isEnd: (f['vod_isend'] ?? '') == '1',
+      cover: CoverImage(path: f['vod_pic'] ?? ''),
+      videos: videos,
+      sourceId: cfg.id,
+    );
   }
 }
