@@ -44,7 +44,7 @@ import 'plugin_loader.dart';
 import 'plugin_manifest.dart';
 import 'plugin_runtime.dart';
 
-class RemoteJsSource implements DataSource, SourceGrouped {
+class RemoteJsSource implements DataSource, SourceGrouped, SearchUnsupported {
   RemoteJsSource(this.plugin);
 
   final LoadedPlugin plugin;
@@ -96,6 +96,11 @@ class RemoteJsSource implements DataSource, SourceGrouped {
 
   @override
   Future<List<Drama>> search(String keyword, {int page = 1}) async {
+    // 站方把搜索接口拦死时，发出去也只会拿回一句「暂不支持搜索」。
+    // 与其让搜索页渲染成「没找到」，不如直接抛一句能解释原因的话。
+    if (manifest.searchUnsupported) {
+      throw PluginFetchException(searchUnsupportedHint);
+    }
     final req = manifest.searchRequest;
     if (req == null) {
       throw PluginFetchException('${manifest.name} 不支持搜索');
@@ -105,6 +110,12 @@ class RemoteJsSource implements DataSource, SourceGrouped {
       'keyword': keyword,
     });
   }
+
+  /// 空串 = 本源的搜索是好的（见 [SearchUnsupported] 的说明）。
+  @override
+  String get searchUnsupportedHint => manifest.searchUnsupported
+      ? '${manifest.name} 的站方没有开放搜索，换个源搜，或从它的分类里找'
+      : '';
 
   /// 分类列表。`categoryId` 支持「逗号串 = 多分类并发合并」。
   ///
@@ -262,6 +273,23 @@ class RemoteJsSource implements DataSource, SourceGrouped {
       }
     }
 
+    // 详情可能只给「一条占位线路 + 每集 token」（看剧这类站：线路清单
+    // 藏在 resolve 接口里）。清单声明 expandLines 时，先 resolve 第一集
+    // 拿线路模板，再把占位线路展开成多条——否则用户在选集面板只能看到
+    // 一条「默认线路」，而站点实际有几十条。
+    if (manifest.expandLines && parsed.isNotEmpty && manifest.resolveRequest != null) {
+      final expanded = await _expandLineTemplate(parsed, dramaId);
+      if (expanded != null) parsed..clear()..addAll(expanded);
+    }
+
+    // 无 resolve 能力的源，网页分享页线路永远播不了（要 JS 渲染）。
+    // 与其让用户在选线路面板里一条条试错，不如直接隐藏。
+    // 至少保留一条：全过滤掉会让详情页变成白板。
+    if (manifest.dropIndirectLines && manifest.resolveRequest == null && parsed.length > 1) {
+      final direct = parsed.where((l) => l.isDirect).toList();
+      if (direct.isNotEmpty) parsed..clear()..addAll(direct);
+    }
+
     // 直出线路顶前，网页分享页沉底（相对顺序各自保持不变）。
     // 这里手写两段拼接而不是 sort：Dart 的 List.sort 不保证稳定，
     // 同组内相对次序一旦被打乱，用户熟悉的「线路1/线路2」就变了。
@@ -355,6 +383,71 @@ class RemoteJsSource implements DataSource, SourceGrouped {
       throw PluginFetchException('${manifest.name} 没能解析出播放地址');
     }
     return url;
+  }
+
+  /// 把「单条占位线路」按 resolve 接口返回的线路模板展开成多条。
+  ///
+  /// 返回 null 表示没能展开（接口失败 / 脚本没给模板），调用方保留原样。
+  /// 只 resolve **第一集**：线路清单跨集稳定，逐集 resolve 会把详情页
+  /// 拖成几十次请求。
+  Future<List<_ParsedLine>?> _expandLineTemplate(
+      List<_ParsedLine> parsed, String dramaId) async {
+    // 找到第一集里可用的 token
+    String token = '';
+    for (final line in parsed) {
+      for (final ep in line.episodes) {
+        if (ep.token.isNotEmpty) {
+          token = ep.token;
+          break;
+        }
+      }
+      if (token.isNotEmpty) break;
+    }
+    if (token.isEmpty) return null;
+
+    final req = manifest.resolveRequest!;
+    try {
+      final f = await _fetch(req, <String, String>{
+        'id': dramaId,
+        'url': parsed.first.episodes.first.url,
+        'token': token,
+        'token0': token.split('|').first,
+        'token1': token.contains('|') ? token.split('|').skip(1).join('|') : '',
+      });
+      final out = await _call('parseLines', <Object?>[f.body, _ctx(f)]);
+      final map = _asMap(out, 'parseLines');
+      final rawLines = map['lines'];
+      if (rawLines is! List || rawLines.isEmpty) return null;
+
+      final labels = <String>[];
+      for (final l in rawLines) {
+        if (l is Map) {
+          final name = _str(l['line'], '');
+          if (name.isNotEmpty) labels.add(name);
+        } else {
+          final name = _str(l, '');
+          if (name.isNotEmpty) labels.add(name);
+        }
+      }
+      if (labels.isEmpty) return null;
+
+      // 以原线路为模板，每条标签复制一份完整剧集。
+      // source 用标签本身：resolveUrl 时脚本按 ctx.line 选对应线路。
+      final result = <_ParsedLine>[];
+      for (final template in parsed) {
+        for (final label in labels) {
+          result.add(_ParsedLine(
+            flag: label,
+            nameCn: manifest.lineNameCn[label] ?? label,
+            episodes: template.episodes,
+          ));
+        }
+      }
+      return result;
+    } catch (e) {
+      debugPrint('[PLUGIN] ${manifest.id} expandLines 失败，保留原线路：$e');
+      return null;
+    }
   }
 
   // —— 内部 ——

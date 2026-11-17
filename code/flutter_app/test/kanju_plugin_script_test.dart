@@ -188,4 +188,31 @@ void main() {
     expect(out['url'], '');
     expect(out['error'], contains('换一条线路'));
   });
+
+  test('parseLines 只展开直出线路，跳过需二次换票的官方线', () async {
+    final out = await call('parseLines', [resolve, ctx]);
+    final lines = out['lines'] as List;
+    // resolve 夹具里 3 条：1 条官方线（resolve_required）+ 2 条直出
+    expect(lines.length, 2,
+        reason: '官方线要游客会话二次换票，插件不能展开成可播线路');
+    expect((lines.first as Map)['line'], '采集线A');
+    expect((lines[1] as Map)['line'], '采集线B');
+    expect((lines.first as Map)['direct'], isTrue);
+  });
+
+  test('parseResolve 按 ctx.line 精确选中用户点的那条线路', () async {
+    final picked = await call('parseResolve', [
+      resolve,
+      <String, dynamic>{...ctx, 'line': '采集线B'},
+    ]);
+    expect(picked['url'], 'https://cdn.example.com/b/index.m3u8',
+        reason: '展开多条线路后，每条必须播自己那条，不能全播第一条');
+
+    // 该集没有这条线时退回直出线，不让用户看到空白
+    final fallback = await call('parseResolve', [
+      resolve,
+      <String, dynamic>{...ctx, 'line': '已下线的线路'},
+    ]);
+    expect(fallback['url'], isNotEmpty);
+  });
 }

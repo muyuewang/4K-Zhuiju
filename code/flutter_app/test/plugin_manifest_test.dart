@@ -268,6 +268,8 @@ void main() {
       final j = minimalJson()
         ..['vars'] = <String, String>{'key': 'abcd'}
         ..['defaultHeaders'] = <String, String>{'Referer': 'https://a.com/'}
+        ..['batchDetail'] = true
+        ..['expandLines'] = true
         ..['resolve'] = <String, dynamic>{'path': '/play', 'query': {'id': '{id}'}};
       final m1 = PluginManifest.fromJson(j)!;
       final json2 = jsonDecode(jsonEncode(m1.toJson()));
@@ -280,6 +282,8 @@ void main() {
       expect(m2.categories.map((e) => e.id), m1.categories.map((e) => e.id));
       expect(m2.vars, m1.vars);
       expect(m2.defaultHeaders, m1.defaultHeaders);
+      expect(m2.batchDetail, isTrue, reason: 'batchDetail 开关不能被缓存吃掉');
+      expect(m2.expandLines, isTrue, reason: 'expandLines 开关不能被缓存吃掉');
       expect(m2.listRequest!.path, m1.listRequest!.path);
       expect(m2.listRequest!.query, m1.listRequest!.query);
       expect(m2.resolveRequest!.path, '/play');

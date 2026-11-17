@@ -12,7 +12,6 @@ config/plugins/
 ├── jisu.js           极速追剧：HTML + 独立取址接口，逐线路集数不同
 ├── kvm4k.js          4K影视：Go SSR + WASM 取址算法还原，signEntry 签名
 ├── kanju.js          看剧：HMAC 四行签名 + 分区榜单 + 线路 JSON
-├── zhuiju.js         橘汁：protobuf 请求/响应 + AES/RSA 签名
 ├── ddys.js           低调影视（ddys.io）：详情页直出 m3u8
 ├── signed-demo.js    签名/加密类源模板（HMAC / AES / RSA 三种写法）
 └── README.md         本文件
@@ -117,7 +116,10 @@ config/plugins/
 | `lineNameCn` | | 线路代号 → 中文名映射，如 `{"bfzym3u8": "暴风线路"}`。未命中的代号原样显示 |
 | `preferDirectLine` | | 是否把直出 m3u8/mp4 的线路排到最前。**默认 `true`**，见 3.3.2 |
 | `derivePlayIndex` | | 是否把 `/play/<token>` 推成 `/play/<token>/index.m3u8`。默认 `false` |
-| `batchDetail` | | 列表拿到 id 后是否再用 `detail` 的 `ids=` 批量回查补封面。默认 `false` |
+| `batchDetail` | | 列表拿到 id 后是否再用 `detail` 的 `ids=` 批量回查补封面。默认 `false`，见 3.3.5 |
+| `expandLines` | | 详情只给占位线路时，是否先 resolve 第一集拿线路模板再展开。默认 `false`，脚本需实现 `parseLines`，见 3.3.6 |
+| `dropIndirectLines` | | 无 `resolve` 时是否隐藏网页分享页线路（只留可播的直出线）。默认 `false` |
+| `searchUnsupported` | | 站方根本没开放搜索时标 `true`。搜索页直接给解释、不发请求，见 3.3.7 |
 | `signEntry` | | 签名钩子的函数名。配了就在每次请求前调它，见 3.6。不配 = 不需要签名 |
 | `bodyFormat` | | 请求体承载格式：`text`（默认）/ `hex` / `base64`。**二进制请求体必须显式声明**，见 3.3.4 |
 | `responseType` | | 响应形态：`text`（默认）/ `bin`。`bin` 时宿主把原始字节转 base64 交给脚本 |
@@ -157,6 +159,8 @@ config/plugins/
 
 排序实现是**手写两段拼接**而不是 `sort`：Dart 的 `List.sort` 不保证稳定，同组内相对次序一旦被打乱，用户熟悉的「线路1/线路2」就变了。
 
+2026-11-17 补充：`preferDirectLine` 只是排序，网页线仍在面板里，用户逐条试就会踩坑。对**没有 `resolve` 接口**的源，再开 `dropIndirectLines: true` 直接隐藏网页线——留着它们对播放器毫无价值。有 `resolve` 的源别开，网页线还能二次解析出地址。
+
 #### 3.3.3 `bodyType`：JSON body 必须显式声明
 
 采集接口的 POST 有两种截然不同的形态，混用一定失败：
@@ -189,9 +193,43 @@ config/plugins/
 }
 ```
 
-脚本侧用 `host.b64d(body, 'hex')` 拿回字节的 hex 表示，自己写 protobuf 阅读器（`zhuiju.js` 里有完整实现）。**别用 `JSON.parse` 去接二进制响应**。
+脚本侧用 `host.b64d(body, 'hex')` 拿回字节的 hex 表示，自己写 protobuf 阅读器（原 `zhuiju.js` 有完整实现，源已下线，脚本见 git 历史）。**别用 `JSON.parse` 去接二进制响应**。
 
 `bodyFormat` 在签名钩子改写 body 后**会重新解码一次**——橘汁的随机密文体就是这么进去的。
+
+#### 3.3.5 `batchDetail`：列表快 + 封面全，怎么兼得
+
+2026-11-17 实测电影天堂：
+
+| 方案 | 体积 | 耗时 | 封面 |
+| --- | --- | --- | --- |
+| `ac=detail&pg=1`（旧） | 885 KB | 12.6 秒 | 有 |
+| `ac=list&pg=1` | 6 KB | 0.7 秒 | **无** |
+| `ac=list` + 批量 `ac=detail&ids=a,b,c…` | 62 KB | 2.0 秒 | 20/20 补齐 |
+
+所以采集站列表统一用 `ac=list` + `batchDetail: true`。批量回查走宿主现成的 `_enrichByBatchDetail`（按原顺序回填，失败时保留无封面列表而不是让整页变空）。金鹰的批量接口实测超时，因此它保留 `ac=detail`。
+
+#### 3.3.6 `expandLines`：线路清单藏在 resolve 接口里的站
+
+看剧（kanju）的详情只给剧集 token，线路清单在 `/v1/playback/resolve/{token}` 的 `line_options[]`（实测 33 条、23 条直出）。不展开的话用户只能选一条「默认线路」。
+
+配 `expandLines: true` 后，宿主在详情阶段 resolve 第一集拿模板，调脚本的 `parseLines(body, ctx)` → `{lines:[{line:"线路名"}]}`，展开成多条线路。要点：
+
+- **只 resolve 第一集**：线路清单跨集稳定；逐集 resolve 会把详情页拖成几十次请求。
+- `parseLines` 应只返回**当前体系能播的**线路。看剧的官方线要游客会话二次换票（插件禁止注入 Cookie），所以脚本过滤掉 `resolve_required: true`，只给 23 条直出。
+- 展开后每条线路的 `sourceCn` 是线路名，`parseResolve` 用 `ctx.line` 精确选中对应那条；站点某集缺这条线时回退第一条直出，不让用户看到空白。
+
+#### 3.3.7 `searchUnsupported`：站方把搜索接口焊死的站
+
+索尼资源（suoni）实测：`?ac=list&wd=关键词` 恒返回 **18 字节纯文本「暂不支持搜索」**。换 UA、补 `Referer`/`Origin`、加 `X-Requested-With`、加 `Accept` 全试过，一字不差。而 `keyword=关键词` 虽然不回 403，返回的却是与关键词无关的默认列表——那不是搜索，不能拿来充数。
+
+这类源标 `searchUnsupported: true`：
+
+- 搜索页**一个请求都不发**，直接给「这个源搜不了 / 站方没有开放搜索，换个源搜，或从它的分类里找」。
+- 不走带「重试」按钮的错误页——这不是失败，重试一百次也是同一句话。
+- 该源的 `search` 端点配置留着即可（配置可读性），宿主会忽略它。
+
+**别拿它掩盖真实故障**：只有在「源站明确拒搜」时才开。请求超时、解析失败、接口改地址都该照常报错，标了反而是把故障说成限制。
 
 ### 3.4 请求里的占位符
 
@@ -375,12 +413,12 @@ function parseResolve(body, ctx) → { url: "http://..." }   // 配了 resolve �
 
 ```bash
 cd code/flutter_app
-# 19 个源的配置整体校验（id 重复 / 脚本路径 / signEntry / 死循环）
+# 18 个源的配置整体校验（id 重复 / 脚本路径 / signEntry / 死循环）
 flutter test test/plugin_index_validation_test.dart
 # 单个源的解析脚本（QuickJS 真实引擎 + 真实抓包夹具）
 flutter test test/maccms_html_plugin_test.dart test/jisu_plugin_script_test.dart \
             test/kvm4k_plugin_script_test.dart test/kanju_plugin_script_test.dart \
-            test/zhuiju_plugin_script_test.dart test/ddys_plugin_script_test.dart
+            test/ddys_plugin_script_test.dart
 ```
 
 真机验证：装 App → 设置 → 数据源 → 找「插件（在线更新）」分组。
@@ -398,15 +436,15 @@ flutter test test/maccms_html_plugin_test.dart test/jisu_plugin_script_test.dart
 
 | 场景 | 现状 |
 | --- | --- |
-| 跨请求 Cookie 会话（看剧的游客会话） | 宿主禁止脚本设置 `Cookie`/`Authorization`，也没有 Cookie jar。看剧插件只取直出线路（实测每集 26 条），**官方线暂不可用** |
+| 跨请求 Cookie 会话（看剧的游客会话） | 宿主禁止脚本设置 `Cookie`/`Authorization`，也没有 Cookie jar。看剧插件只展开直出线路（实测每集 23 条），**官方线暂不可用** |
+| 索尼资源搜索 | 站方对 `wd=` 参数直接回「暂不支持搜索」；改用 `keyword=` 虽绕过拦截但返回的是全量列表（测试三种关键词结果完全相同），等于没搜索。这是源站限制，插件层无解 |
 | 图形点选验证码（ddys.app 的第三层闸门） | 需要看图识别，客户端无感通过做不到。改用同系列无闸门的 `ddys.io`，内置源也是这么做的 |
-| 动态下发的接口域名（橘汁） | 清单的 `baseUrl` 是静态的。橘汁域名当前 502，官方可能已换域名——需要同步改 `index.json`（这是「改配置不发版」能解决的事，只是要有人改） |
-| 需要浏览器 DOM/JS 渲染的页面 | 插件只有字符串，没有 DOM |
+| 需要浏览器 DOM/JS 渲染的页面 | 插件只有字符串，没有 DOM。采集站的 `share/<md5>` 网页线属于这类，`dropIndirectLines: true` 会隐藏它们 |
 
 ## 八、已下线的源
 
 | 源 | 下线原因 |
 | --- | --- |
-| —— | —— |
+| 橘汁（`zhuiju`） | 2026-11-17 起主域名 `juziapp.hzhcbkj.cn` 整站 502，用户实测全部接口超时。按用户要求彻底移除：清单条目、`zhuiju.js` 脚本、专属联网探针一并删除。内置 `ZhuijuSource` 类保留供兼容旧收藏，但不再注册进源列表 |
 
-下线的源把 `enabled` 设为 `false`，不要直接删——删了之后老用户的本地缓存会一起消失，没法回溯「它当时配的是什么」。
+橘汁是**彻底删除**而非设 `enabled: false`：它依赖专属的 protobuf + AES/RSA 脚本，脚本删了之后留一个禁用的清单条目没有意义。其它源下线时仍优先用 `enabled: false`（保留可回溯的配置）。

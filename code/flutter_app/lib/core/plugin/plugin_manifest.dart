@@ -199,6 +199,9 @@ class PluginManifest {
     this.preferDirectLine = true,
     this.derivePlayIndex = false,
     this.batchDetail = false,
+    this.expandLines = false,
+    this.dropIndirectLines = false,
+    this.searchUnsupported = false,
     this.vars = const <String, String>{},
     this.defaultHeaders = const <String, String>{},
     this.homeRequest,
@@ -305,6 +308,37 @@ class PluginManifest {
   ///
   /// 回查失败时**保留原列表**：封面没有只是不好看，列表直接空掉才是事故。
   final bool batchDetail;
+
+  /// 详情阶段是否先 resolve 第一集、把线路清单展开成多条线路。默认关。
+  ///
+  /// ## 什么时候需要（看剧 kanju，2026-11-17 实测）
+  ///
+  /// 这类站详情页只给剧集列表（每集一个 token），真正的线路清单在
+  /// `/v1/playback/resolve/{token}` 的 `line_options[]` 里——实测一部剧
+  /// 有 33 条线路。不展开的话用户只能在选集面板看到一条「默认线路」，
+  /// 而之前的内置实现是先 resolve 第一集拿模板、再按模板给每集铺线路。
+  ///
+  /// 展开需要额外一次请求；失败时**退回单条占位线路**，不让详情页空掉。
+  ///
+  /// 脚本需实现 `parseLines(body, ctx)` → `{lines:[{line:"线路名"}]}`。
+  /// 宿主只取 `line` 当线路名，剧集复用的是 `parseDetail` 已经给出的那份
+  /// （线路清单跨集稳定，逐集由脚本重铺反而容易错位）。名字的粗细程度
+  /// 由脚本决定——它在解析现场，最清楚哪条线当前真的能播。
+  final bool expandLines;
+
+  /// 没有 resolve 接口的源，是否丢掉「网页分享页」线路，只留直出 m3u8。默认关。
+  ///
+  /// 采集站常给同一部剧两条线：`share/<md5>` 网页页 + 直出 m3u8。
+  /// 网页页靠 JS 渲染，播放器抓不到地址，用户点开就是「当前源无法播放」。
+  /// 有 resolve 接口的源留着它们还有救（能二次解析），没有的就该在
+  /// 选线路面板里直接隐藏——留着只会让用户一条条试错。
+  final bool dropIndirectLines;
+
+  /// 站方是否**根本不提供**站内搜索。默认关。
+  ///
+  /// 开了之后搜索页直接给提示，不再发那次注定被拦的请求；同时本源的
+  /// `search` 端点配置会被忽略（留着只为配置可读）。见 [SearchUnsupported]。
+  final bool searchUnsupported;
 
   /// 所有请求默认带的头（如 UA / Referer）。单个请求可覆盖。
   final Map<String, String> defaultHeaders;
@@ -537,6 +571,9 @@ class PluginManifest {
           ? raw['derivePlayIndex'] as bool
           : false,
       batchDetail: raw['batchDetail'] is bool ? raw['batchDetail'] as bool : false,
+      expandLines: raw['expandLines'] is bool ? raw['expandLines'] as bool : false,
+      dropIndirectLines: raw['dropIndirectLines'] is bool ? raw['dropIndirectLines'] as bool : false,
+      searchUnsupported: raw['searchUnsupported'] is bool ? raw['searchUnsupported'] as bool : false,
       vars: PluginRequest._strMap(raw['vars']),
       defaultHeaders: PluginRequest._strMap(raw['defaultHeaders']),
       listRequest: PluginRequest.fromJson(raw['list']),
@@ -570,6 +607,9 @@ class PluginManifest {
         if (!preferDirectLine) 'preferDirectLine': preferDirectLine,
         if (derivePlayIndex) 'derivePlayIndex': derivePlayIndex,
         if (batchDetail) 'batchDetail': batchDetail,
+        if (expandLines) 'expandLines': expandLines,
+        if (dropIndirectLines) 'dropIndirectLines': dropIndirectLines,
+        if (searchUnsupported) 'searchUnsupported': searchUnsupported,
         'categories': categories
             .map((c) => <String, dynamic>{'id': c.id, 'name': c.name})
             .toList(),

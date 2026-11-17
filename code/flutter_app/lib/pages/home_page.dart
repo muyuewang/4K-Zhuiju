@@ -556,6 +556,12 @@ class _SearchPageState extends State<SearchPage> {
   bool _searched = false;
   String? _err;
 
+  /// 当前源站方没开放搜索时的解释文案（空串 = 正常可搜）。
+  ///
+  /// 与 [_err] 分开：这不是失败，重试一百次也是同一句话，所以不该
+  /// 走带「重试」按钮的错误页，也不该被用户当成网络问题。
+  String _blocked = '';
+
   /// 请求序号：只认最后一次发起的搜索。
   ///
   /// 没有它会出两种错：
@@ -583,6 +589,20 @@ class _SearchPageState extends State<SearchPage> {
     final q = (kw ?? _input.text).trim();
     if (q.isEmpty) return;
     _input.text = q;
+    // 站方没开放搜索时，一次请求都不用发：直接给解释 + 可点的替代动作。
+    final src = SourceRegistry.instance.now;
+    final blocked =
+        src is SearchUnsupported ? (src as SearchUnsupported).searchUnsupportedHint : '';
+    if (blocked.isNotEmpty) {
+      setState(() {
+        _blocked = blocked;
+        _result = const [];
+        _loading = false;
+        _searched = true;
+        _err = null;
+      });
+      return;
+    }
     // 落一条搜索历史：用户下次进搜索页直接点，不用重打
     SearchHistory.instance.add(q);
     final seq = ++_seq;
@@ -590,6 +610,7 @@ class _SearchPageState extends State<SearchPage> {
       _loading = true;
       _searched = true;
       _err = null;
+      _blocked = '';
     });
     try {
       // 走当前数据源：两个源的搜索接口、签名、返回结构完全不同，
@@ -618,6 +639,7 @@ class _SearchPageState extends State<SearchPage> {
       _searched = false;
       _loading = false;
       _err = null;
+      _blocked = '';
     });
   }
 
@@ -662,6 +684,24 @@ class _SearchPageState extends State<SearchPage> {
     if (_loading) return const Loading();
     if (_err != null) {
       return ErrorView(message: _err!, onRetry: () => _doSearch());
+    }
+    if (_blocked.isNotEmpty) {
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: EmptyView(
+          text: '这个源搜不了',
+          hint: _blocked,
+          // 空屏必须给出路：用户此刻唯一的动作是「返回」，但那需要他自己
+          // 想到「回去换源」。这里直接把这一步写成按钮。
+          action: ActionChip(
+            label: const Text('返回首页换个源',
+                style: TextStyle(fontSize: Ts.bodySm)),
+            backgroundColor: context.palette.card,
+            side: BorderSide.none,
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+        ),
+      );
     }
     if (!_searched) {
       return _hotWords();

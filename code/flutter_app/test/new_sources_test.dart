@@ -346,12 +346,37 @@ void main() {
       expect(declaredEntry('yzzyapi')!['batchDetail'], isTrue,
           reason: '优子的 ac=list 没封面，必须批量回查');
 
-      // 反过来也要守住：别的站乱开只会多打一次没用的请求
+      // 反过来也要守住：derivePlayIndex 只对金山有意义
       for (final id in ['dytt', 'guangsu', 'feifan', 'maoyan']) {
         expect(declaredEntry(id)!.containsKey('derivePlayIndex'), isFalse,
             reason: '$id 没有 /play/<token> 目录约定，开了只会拼出 404');
-        expect(declaredEntry(id)!.containsKey('batchDetail'), isFalse,
-            reason: '$id 的 ac=list 本来就带封面，批量回查纯属浪费');
+      }
+
+      // 2026-11-17 实测修正：这批站 ac=list 只给 id/名字（6 KB），
+      // 封面只在 ac=detail 里。列表改 ac=list 后必须批量回查补封面，
+      // 否则用户看到的就是一整页灰图。885 KB 的单页 ac=detail 太慢，
+      // 62 KB 的 list + batch 才是正解。
+      for (final id in ['dytt', 'guangsu', 'feifan', 'maoyan']) {
+        expect(declaredEntry(id)!['batchDetail'], isTrue,
+            reason: '$id 的 ac=list 无封面，必须批量回查');
+        expect(
+          (declaredEntry(id)!['list'] as Map)['query']['ac'],
+          'list',
+          reason: '$id 列表不该再用 885 KB 的 ac=detail',
+        );
+      }
+    });
+
+    test('站方不开放搜索的源要显式标记（否则用户只看到空列表）', () {
+      // 索尼资源对任何 `wd=` 请求都硬回一句「暂不支持搜索」（18 字节纯文本，
+      // 换 UA / Referer / Accept / XHR 头都一样）。这不是网络问题，也不是
+      // 「没搜到」，不标记的话搜索页渲染成「没找到 xx」，用户会以为 App 坏了。
+      expect(declaredEntry('suoni')!['searchUnsupported'], isTrue);
+
+      // 反过来守住：能搜的源别被误标，标了就等于把搜索功能关掉。
+      for (final id in ['dytt', 'guangsu', 'feifan', 'maoyan', 'bofeng']) {
+        expect(declaredEntry(id)!.containsKey('searchUnsupported'), isFalse,
+            reason: '$id 的 wd= 搜索实测可用，标了会白丢一个功能');
       }
     });
 

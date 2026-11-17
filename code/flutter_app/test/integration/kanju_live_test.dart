@@ -109,7 +109,10 @@ void main() {
       print('${c.name}（${c.id}）→ ${list.length} 条');
       // 不强制非空：冷门分类（纪录片）确实可能空，但请求本身不能报错
     }
-  });
+    // 7 个 content_kind 串行请求，单个遇站点抖动就要吃满 25s 的 receive
+    // 超时（实测 anime 偶发），累计必然超过 flutter_test 默认的 30s。
+    // 放宽是为了让它跑完自己「成功/跳过」的判断，而不是把抖动算成回归。
+  }, timeout: const Timeout(Duration(minutes: 2)));
 
   // 8 条线路串行取址，每条遇站点拒绝都要等网络超时；无插件通道时
   // session 建不起来会走满超时，累计轻松超过 flutter_test 默认的 30s。

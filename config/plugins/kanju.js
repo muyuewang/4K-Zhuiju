@@ -193,18 +193,73 @@ function parseDetail(body, ctx) {
   };
 }
 
+// ==================== 线路清单（expandLines） ====================
+
+/**
+ * 详情只给剧集 token，线路清单藏在 resolve 接口里。
+ * 宿主在详情阶段 resolve 第一集后调这里，拿到线路名清单，
+ * 再把占位线路展开成 N 条——否则用户只能看到一条「默认线路」。
+ *
+ * 实测：一部 24 集的剧，第一集 resolve 返回 33 条 line_options，
+ * 其中 23 条是直出 m3u8，其余是需要游客会话二次换票的官方线。
+ * 插件框架没有「取址时再发一次请求」的能力，所以这里只展开直出线——
+ * 给用户 23 条能播的，好过给 33 条里 10 条点开就失败。
+ */
+function parseLines(body, ctx) {
+  var d = unwrap(body);
+  if (!d) return { lines: [] };
+  var opts = arr(d.line_options);
+  var lines = [];
+  var seen = {};
+  for (var i = 0; i < opts.length; i++) {
+    var o = opts[i];
+    if (!o || typeof o !== 'object') continue;
+    // 只要直出线：resolve_required 的官方线要二次换票，插件做不到
+    if (o.resolve_required === true) continue;
+    var url = s(o.url);
+    if (url.indexOf('http') !== 0) continue;
+    var label = s(o.display_label || o.label).trim();
+    if (label === '' || seen[label]) continue;
+    seen[label] = 1;
+    lines.push({
+      line: label,
+      label: label,
+      playFrom: s(o.play_from),
+      direct: true
+    });
+  }
+  return { lines: lines };
+}
+
 // ==================== 取址 ====================
 
 /**
  * body 是 `/v1/playback/resolve/{token}` 的应答，含 line_options[]。
- * 只挑**直出**线路：!resolve_required && url 以 http 开头。
- * 优先 selected，其次保持站点原顺序（直出线路跨集稳定为 26 条）。
+ *
+ * ctx.line 是选中的线路名（parseLines 给的 label）。先看站点是否按
+ * 「官方线」返回了换线路的 ticket：带 ctx.line 时能精确选中用户点的
+ * 那条；没带（老调用路径）就退回原来的「选第一个直出」。
  */
 function parseResolve(body, ctx) {
   var d = unwrap(body);
   if (!d) return { url: '', error: '线路接口没有返回数据' };
 
   var opts = arr(d.line_options);
+  var wanted = s(ctx && ctx.line).trim();
+
+  // 用户点了具体线路（expandLines 展开出的 23 条直出线之一）：
+  // 按线路名精确取那一条，避免所有线路都播同一条。
+  if (wanted !== '') {
+    for (var j = 0; j < opts.length; j++) {
+      var t = opts[j];
+      if (!t || t.resolve_required === true) continue;
+      var name = s(t.display_label || t.label).trim();
+      var tu = s(t.url).trim();
+      if (name === wanted && tu.indexOf('http') === 0) return { url: tu };
+    }
+    // 该集恰好没有这条线（线路按集浮动）：退回第一条直出线
+  }
+
   var picked = null;
   for (var i = 0; i < opts.length; i++) {
     var o = opts[i];

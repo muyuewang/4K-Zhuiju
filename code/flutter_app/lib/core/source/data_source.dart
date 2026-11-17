@@ -125,6 +125,24 @@ abstract class SourceGrouped {
   String get group;
 }
 
+/// 可选能力：**站方本身不提供站内搜索**。
+///
+/// 有的采集站把 `/api.php?ac=list&wd=关键词` 直接拦死，恒返回一句
+/// 「暂不支持搜索」（实测索尼资源：18 字节纯文本，换任何 UA/Referer/
+/// Accept 都一样）。这种源不是请求失败，也不是「没搜到」——用户看到
+/// 空列表只会以为 App 坏了。
+///
+/// 与 [SourceGrouped] 同一套做法：只有这类源才实现，页面据此给出明确
+/// 提示，且不再发那次注定无效的请求。
+///
+/// [searchUnsupportedHint] 返回**空串**表示本实例其实支持搜索——插件源
+/// 是同一套代码实例化的，没法按清单开关决定 `implements` 哪个接口，
+/// 所以用「空串 = 不拦」表达。
+abstract class SearchUnsupported {
+  /// 给用户看的解释。返回空串表示用页面默认文案。
+  String get searchUnsupportedHint;
+}
+
 /// 分类项。与页面原有的 Category 结构一致，但归属数据源。
 class SourceCategory {
   final String id;
