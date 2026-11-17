@@ -1,0 +1,89 @@
+{
+  "_comment": "远程插件源索引。改完推到 main 分支，用户下次启动 App 自动生效，无需发版。格式说明见 config/plugins/README.md。",
+  "schema": 1,
+  "plugins": [
+    {
+      "id": "js_bdzy",
+      "name": "白杜 · 影视",
+      "baseUrl": "https://api.apibdzy.com",
+      "script": "config/plugins/maccms-json.js",
+      "description": "远程插件源，配置可在线更新；直出 m3u8",
+      "version": 1,
+      "enabled": true,
+      "categories": [
+        { "id": "1", "name": "电影" },
+        { "id": "2", "name": "电视剧" },
+        { "id": "3", "name": "综艺" },
+        { "id": "4", "name": "动漫" },
+        { "id": "13", "name": "大陆剧" },
+        { "id": "14", "name": "欧美剧" },
+        { "id": "30", "name": "日韩动漫" },
+        { "id": "54", "name": "AI短剧" }
+      ],
+      "list": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "videolist",
+          "t": "{category}",
+          "pg": "{page}"
+        }
+      },
+      "search": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "videolist",
+          "wd": "{keyword}",
+          "pg": "{page}"
+        }
+      },
+      "detail": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "ids": "{id}"
+        }
+      }
+    },
+    {
+      "id": "js_bdzy_xml",
+      "name": "白杜 · 影视（XML 版）",
+      "baseUrl": "https://api.apibdzy.com",
+      "script": "config/plugins/maccms-xml.js",
+      "description": "远程插件源，走 XML 接口；用来验证 XML 脚本",
+      "version": 1,
+      "enabled": false,
+      "categories": [
+        { "id": "1", "name": "电影" },
+        { "id": "2", "name": "电视剧" },
+        { "id": "13", "name": "大陆剧" },
+        { "id": "30", "name": "日韩动漫" }
+      ],
+      "list": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "videolist",
+          "t": "{category}",
+          "pg": "{page}",
+          "at": "xml"
+        }
+      },
+      "search": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "videolist",
+          "wd": "{keyword}",
+          "pg": "{page}",
+          "at": "xml"
+        }
+      },
+      "detail": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "ids": "{id}",
+          "at": "xml"
+        }
+      }
+    }
+  ]
+}

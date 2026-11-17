@@ -212,6 +212,17 @@ class _HomePageState extends State<HomePage>
   /// [padding] 只对网格生效——榜单要贴边横向滚动，左右留白由
   /// FeedView 内部给每一行单独加，塞进外层 padding 会把滚动截断。
   Widget _tabBody(int i, {required EdgeInsets padding}) {
+    // 错误页的出路：重试 + 换源。
+    //
+    // 为什么列表页必须给「换源」：重试只对瞬时抖动有效。整个源站下线时
+    // （2026-11-17 橘汁主域名整站 502），用户点多少次重试都是同一个错，
+    // 而能真正解决问题的一步就是换源。原来这一步藏在「我的 → 数据源」
+    // 三层菜单后面，等于让用户自己想办法。
+    final errorAction = FilledButton(
+      onPressed: _pickSource,
+      child: const Text('换个数据源'),
+    );
+
     if (_isFeedTab(i)) {
       final key = _feedKeys.putIfAbsent(i, () => GlobalKey<FeedViewState>());
       return FeedView(
@@ -219,6 +230,9 @@ class _HomePageState extends State<HomePage>
         loader: feedLoaderOf(SourceRegistry.instance.now),
         onTap: _open,
         autoFocusFirst: i == _tabIndex,
+        errorAction: errorAction,
+        errorHint: '如果重试多次都失败，可能是这个源站暂时下线了。'
+            '换一个数据源通常立刻就能用。',
       );
     }
     final key = _keys.putIfAbsent(i, () => GlobalKey<PagedGridState>());
@@ -228,7 +242,22 @@ class _HomePageState extends State<HomePage>
       onTap: _open,
       autoFocusFirst: i == _tabIndex,
       padding: padding,
+      errorAction: errorAction,
+      errorHint: '如果重试多次都失败，可能是这个源站暂时下线了。'
+          '换一个数据源通常立刻就能用。',
     );
+  }
+
+  /// 弹出数据源切换面板并应用选择。
+  ///
+  /// 抽出来是因为有两条入口：顶部胶囊、以及列表错误页的「换个数据源」。
+  /// 两处逻辑必须一致（都要走 `select` 触发 `_onSourceChanged` 重建
+  /// TabController），分开写迟早分叉。
+  Future<void> _pickSource() async {
+    final picked = await showSourceSwitcher(context);
+    if (picked == null) return;
+    if (identical(picked, SourceRegistry.instance.now)) return;
+    await SourceRegistry.instance.select(picked);
   }
 
   @override
@@ -295,14 +324,9 @@ class _HomePageState extends State<HomePage>
           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
           child: InkWell(
             borderRadius: BorderRadius.circular(R.pill),
-            onTap: () async {
-              final picked = await showSourceSwitcher(context);
-              if (picked == null) return;
-              // 由 HomePage 自己 apply：切源要重建 TabController 并丢弃
-              // 所有旧网格，这在 _onSourceChanged 里已集中处理，
-              // 这里只负责发起（select 会触发 current 的监听）。
-              await SourceRegistry.instance.select(picked);
-            },
+            // 统一走 _pickSource：切源要重建 TabController 并丢弃所有旧网格，
+            // 这在 _onSourceChanged 里已集中处理，这里只负责发起。
+            onTap: _pickSource,
             child: Container(
               constraints: const BoxConstraints(maxWidth: 132),
               padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),

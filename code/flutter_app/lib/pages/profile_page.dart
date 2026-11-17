@@ -17,6 +17,8 @@ import '../core/favorites.dart';
 import '../core/history.dart';
 import '../core/layout.dart';
 import '../core/playback_prefs.dart';
+import '../core/plugin/plugin_loader.dart';
+import '../core/plugin/plugin_sync.dart';
 import '../core/source/data_source.dart';
 import '../core/source/registry.dart';
 import '../core/theme_settings.dart';
@@ -629,6 +631,20 @@ class ProfilePage extends StatelessWidget {
             ),
           ),
           Divider(height: 1, color: context.palette.divider),
+          // 插件源刷新。
+          //
+          // 为什么需要这个手动入口：远端配置是 App 启动时后台拉的，
+          // 用户看到「源坏了」时不会想到「要我重启一次才生效」。
+          // 有了这个按钮，改完配置的人可以立刻确认，不用反复杀进程。
+          //
+          // 和下面「清理缓存」一样抽成 StatefulWidget：刷新要等网络，
+          // 期间得显示「刷新中…」，完成后 trailing 的「N 个源」也得跟着变。
+          // 塞回这个 StatelessWidget 就只能停在刷新前的样子。
+          //
+          // 显示条件收在 widget 内部自己判断，不放在这里的 if 里：
+          // 条件是「加载过插件」，而这个状态恰恰会被本行改写，
+          // 写在外面的话刷新成功后整行会突然从有变无、再变有。
+          const PluginRefreshRow(),
           // 线路优先级：kanju 一部剧 14~28 条线路，分官方线与采集线两类，
           // 画质和稳定性完全相反。用户实测「普通源很卡」，
           // 所以默认官方优先，但要留一个能退回去的开关（弱网下多一跳反而慢）。
@@ -1093,6 +1109,98 @@ class _CacheSettingRowState extends State<CacheSettingRow> {
         ],
       ),
       onTap: _onTap,
+    );
+  }
+}
+
+/// 设置页里的「刷新插件配置」一行
+///
+/// 为什么需要手动入口：远端配置是 App 启动时后台拉的，用户看到「源坏了」
+/// 时不会想到「得重启一次才生效」。有了这一行，改完配置的人能立刻确认，
+/// 不用反复杀进程试。
+///
+/// 单独做成 StatefulWidget 的原因和 [CacheSettingRow] 一样：刷新要等网络
+/// （最长 10 秒 × 镜像数），期间 trailing 得显示「刷新中…」，完成后
+/// 「N 个源」也要跟着变。塞在 `_settings()` 那个 StatelessWidget 里就只能
+/// 停在刷新前的样子。
+///
+/// 显示条件也收在这里，而不是放调用处的 `if`：条件之一是「至少有插件」，
+/// 而这个状态恰恰会被本行改写。写在外面的话，第一次刷新成功的那一刻
+/// 整行会先消失一帧再出现，看起来像闪了一下。
+class PluginRefreshRow extends StatefulWidget {
+  const PluginRefreshRow({super.key});
+
+  @override
+  State<PluginRefreshRow> createState() => _PluginRefreshRowState();
+}
+
+class _PluginRefreshRowState extends State<PluginRefreshRow> {
+  /// 正在拉远端。
+  ///
+  /// 必须挡住连点：一次刷新最多等 10 秒 × 镜像数，期间再点会并发起多轮
+  /// 请求，SnackBar 还会排队一条条弹出来，看着像卡死了。
+  bool _busy = false;
+
+  Future<void> _onTap() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+
+    // messenger 必须在 await 之前取好：await 结束后用户可能已经退出设置页，
+    // 这时 context 对应的 element 已经卸载，再 of(context) 会抛异常。
+    final messenger = ScaffoldMessenger.of(context);
+    final r = await PluginSync.refresh();
+    if (!mounted) return;
+    setState(() => _busy = false);
+
+    messenger.showSnackBar(SnackBar(
+      content: Text(r.display, style: const TextStyle(fontSize: Ts.bodySm)),
+      // 失败信息比成功信息更需要时间读完（通常带着具体原因）
+      duration: Duration(seconds: r.ok ? 2 : 4),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 没插件、也没报过错 → 这一行毫无意义。显出来反而让人以为
+    // 「这里本该有东西却没加载出来」。
+    final relevant = SourceRegistry.pluginCount > 0 ||
+        PluginLoader.instance.lastError != null;
+    if (!relevant) return const SizedBox.shrink();
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ListTile(
+          dense: true,
+          leading: Icon(Icons.sync_rounded,
+              size: 20, color: context.palette.textDim),
+          title: const Text('刷新插件配置',
+              style: TextStyle(fontSize: Ts.bodyLg)),
+          // 副标题写清这个按钮到底干什么：光看「插件配置」四个字，
+          // 不知道是「检查更新」还是「重置」。
+          subtitle: Text(
+            '远程配置有更新时点这里，不用重启',
+            style:
+                TextStyle(fontSize: Ts.caption, color: context.palette.textDim),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _busy ? '刷新中…' : PluginSync.statusLine,
+                style: TextStyle(
+                    fontSize: Ts.bodySm, color: context.palette.textDim),
+              ),
+              const SizedBox(width: 4),
+              Icon(Icons.chevron_right_rounded,
+                  size: 18, color: context.palette.textDim),
+            ],
+          ),
+          onTap: _onTap,
+        ),
+        // 分隔线跟着这一行走：整行不显示时不能留一条悬空的线
+        Divider(height: 1, color: context.palette.divider),
+      ],
     );
   }
 }

@@ -41,12 +41,21 @@ class FeedView extends StatefulWidget {
   /// 界面层必须自己兜底，否则 `_loading` 永不复位就是永久转圈。
   final Duration requestDeadline;
 
+  /// 错误页上的额外出路（如「换源」）。理由同 [PagedGrid.errorAction]：
+  /// 通用组件不反向依赖业务单例，由调用方按上下文注入。
+  final Widget? errorAction;
+
+  /// 错误页的补充说明
+  final String? errorHint;
+
   const FeedView({
     super.key,
     required this.loader,
     required this.onTap,
     this.autoFocusFirst = false,
     this.requestDeadline = const Duration(seconds: 20),
+    this.errorAction,
+    this.errorHint,
   });
 
   @override
@@ -192,7 +201,12 @@ class FeedViewState extends State<FeedView>
     if (_sections.isEmpty) {
       if (_loading) return const Loading();
       if (_err != null) {
-        return ErrorView(message: _err!, onRetry: _retry);
+        return ErrorView(
+          message: _err!,
+          onRetry: _retry,
+          hint: widget.errorHint,
+          action: widget.errorAction,
+        );
       }
       return EmptyView(
         text: '榜单暂时没有内容',

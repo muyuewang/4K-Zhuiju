@@ -234,14 +234,42 @@ class Loading extends StatelessWidget {
 }
 
 /// 错误 + 重试
+///
+/// ## 为什么除了「重试」还要能放别的出路
+///
+/// 重试只对「瞬时故障」有效。当整个源站挂了（2026-11-17 橘汁主域名
+/// 整站 502，CDN 回源失败），用户点一百次重试都是同一个错误——
+/// 而橘汁又是默认源，开 App 第一屏就撞这里。原来的错误页只给一个
+/// 「重试」，等于把「那你换个源吧」这条唯一有用的出路藏起来，
+/// 让用户自己想起去「我的 → 数据源」翻。
+///
+/// 所以留出 [action]：调用方按自己的上下文决定给什么。
+/// 列表页给「换源」（源挂了就换源，这是真正能解决问题的一步），
+/// 播放页给「换个线路」，本地播放页则可能什么都不给。
 class ErrorView extends StatelessWidget {
   final String message;
   final VoidCallback? onRetry;
 
-  const ErrorView({super.key, required this.message, this.onRetry});
+  /// 主按钮之外的额外出路（如「换源」）。与 [onRetry] 并排展示。
+  final Widget? action;
+
+  /// 补充说明：解释这次失败**可能的原因**，以及下一步该做什么。
+  ///
+  /// 与 [message] 分开是因为两者的读者不同：[message] 是「哪里错了」，
+  /// 用户扫一眼就知道；[hint] 是「那怎么办」，只在需要多一句时才给。
+  final String? hint;
+
+  const ErrorView({
+    super.key,
+    required this.message,
+    this.onRetry,
+    this.action,
+    this.hint,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final hasButtons = onRetry != null || action != null;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(28),
@@ -255,11 +283,34 @@ class ErrorView extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(color: context.palette.textDim, fontSize: Ts.body),
             ),
-            if (onRetry != null) ...[
+            if (hint != null) ...[
+              const SizedBox(height: Sp.xs),
+              Text(
+                hint!,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: context.palette.textDim.withValues(alpha: 0.8),
+                  fontSize: Ts.bodySm,
+                  height: 1.4,
+                ),
+              ),
+            ],
+            if (hasButtons) ...[
               const SizedBox(height: 16),
-              FilledButton.tonal(
-                onPressed: onRetry,
-                child: const Text('重试'),
+              // 两个按钮并排。窄屏（TV 竖屏/小手机）放不下就换行，
+              // 不硬挤成一行半截字。
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: Sp.sm,
+                runSpacing: Sp.sm,
+                children: [
+                  if (onRetry != null)
+                    FilledButton.tonal(
+                      onPressed: onRetry,
+                      child: const Text('重试'),
+                    ),
+                  if (action != null) action!,
+                ],
               ),
             ],
           ],
@@ -366,6 +417,17 @@ class PagedGrid extends StatefulWidget {
   /// 到点必然退出加载态并给出可重试的错误。
   final Duration requestDeadline;
 
+  /// 错误页上的额外出路（如「换源」）。
+  ///
+  /// 做成注入而不是在这里直接依赖 `SourceRegistry`：common.dart 是纯 UI
+  /// 组件库，一旦它反向依赖某个业务单例，就没法在别的场景复用（比如
+  /// 详情页里的剧集列表并不想给「换源」）。调用方知道自己在什么上下文，
+  /// 由它决定给什么按钮。
+  final Widget? errorAction;
+
+  /// 错误页的补充说明（如「源站可能已下线」）
+  final String? errorHint;
+
   const PagedGrid({
     super.key,
     required this.loader,
@@ -374,6 +436,8 @@ class PagedGrid extends StatefulWidget {
     this.aspect = 0.56,
     this.autoFocusFirst = false,
     this.requestDeadline = const Duration(seconds: 20),
+    this.errorAction,
+    this.errorHint,
   });
 
   @override
@@ -496,7 +560,12 @@ class PagedGridState extends State<PagedGrid>
     if (_items.isEmpty) {
       if (_loading) return const Loading();
       if (_err != null) {
-        return ErrorView(message: _err!, onRetry: _retry);
+        return ErrorView(
+          message: _err!,
+          onRetry: _retry,
+          hint: widget.errorHint,
+          action: widget.errorAction,
+        );
       }
       // 分类空屏给「刷新」：源站偶尔会短时空返回，用户干等不如自己催一下。
       // 顺带说明这不是出错——「暂无内容」容易被读成「加载失败」。

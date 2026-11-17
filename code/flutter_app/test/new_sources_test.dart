@@ -331,9 +331,26 @@ void main() {
       }
     });
 
-    test('分组顺序固定：默认 → 常用 → 采集站（直连）→ 需系统代理', () {
-      expect(SourceRegistry.groupOrder,
-          ['默认', '常用', '采集站（直连）', '需系统代理']);
+    test('分组顺序固定：默认 → 常用 → 采集站（直连）→ 需系统代理 → 插件', () {
+      // 插件组是 2026-11-17 加的第五组。放最后的原因是：它的可用性取决于
+      // 远端配置能不能拉到，不该占据用户第一眼的注意力。
+      expect(SourceRegistry.groupOrder, [
+        '默认',
+        '常用',
+        '采集站（直连）',
+        '需系统代理',
+        '插件（在线更新）',
+      ]);
+    });
+
+    test('内置源不会被归到插件组（分组按 id 查表，不靠猜）', () {
+      // 插件组只对运行时注册的 RemoteJsSource 生效。内置的 19 个源
+      // 全部编译在包里，把它们误标成「插件」会让用户以为它们能在线更新。
+      for (final s in SourceRegistry.all) {
+        if (s.id.startsWith('js_')) continue;
+        expect(SourceRegistry.groupOf(s), isNot('插件（在线更新）'),
+            reason: '${s.id} 是内置源，不该被归到插件组');
+      }
     });
   });
 }

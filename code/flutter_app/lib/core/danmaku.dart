@@ -29,6 +29,8 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
+import 'api.dart';
+
 /// 一条弹幕
 class DanmakuItem {
   /// 文本内容
@@ -79,7 +81,13 @@ class DanmakuApi {
   Future<List<DanmakuItem>> fetch({
     required String dramaId,
     required int episode,
-    String host = 'http://juziapp.hzhcbkj.cn',
+    /// 留 null 表示「跟随当前接口地址」。
+    ///
+    /// 不能把默认值写成 `ZhuijuApi.baseUrl`：Dart 的默认参数必须是编译期
+    /// 常量，而 baseUrl 是可变的（远端配置会覆盖它）。写成
+    /// `const 'http://juziapp.hzhcbkj.cn'` 又会把域名重新锁死在第二个地方——
+    /// 主域名一换，接口通了但弹幕全静默失效，且现象极难归因。
+    String? host,
   }) async {
     // 弹幕池是按「橘汁的数字 movieId」索引的。
     // kanju 的 id 是 `av_xxx` 长串，换成数字必然拿不到，直接跳过，
@@ -87,7 +95,8 @@ class DanmakuApi {
     final mid = int.tryParse(dramaId);
     if (mid == null || mid <= 0 || episode <= 0) return const [];
 
-    final key = '$host|$mid|$episode';
+    final h = (host == null || host.isEmpty) ? ZhuijuApi.baseUrl : host;
+    final key = '$h|$mid|$episode';
     final cached = _cache[key];
     if (cached != null) {
       debugPrint('[DM] cache hit $mid/$episode (${cached.length})');
@@ -96,7 +105,7 @@ class DanmakuApi {
 
     try {
       final resp = await _dio.post<String>(
-        '$host$_path',
+        '$h$_path',
         // 一次拉全量：danmuEnd 给足够大的值，避免按 10 分钟分段请求。
         // 实测一集 41 分钟的弹幕总量也就几十条，全量拉取完全可接受。
         queryParameters: {

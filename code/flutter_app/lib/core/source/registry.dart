@@ -95,17 +95,31 @@ class SourceRegistry {
   /// 集中在一处维护，加源时只要在这里补一行。
   ///
   /// 分组的意义：现在有 15 个源，平铺成一个列表用户根本挑不动。
-  /// 分成「默认 / 常用 / 采集站（直连）/ 需代理」四组后，
+  /// 分成「默认 / 常用 / 采集站（直连）/ 需代理 / 插件」后，
   /// 用户能立刻明白「为什么这 4 个要开代理」「哪几个是新的」。
+  ///
+  /// **插件组必须单独一组**：这些源的配置来自远端、域名随时可能变，
+  /// 而且随时可能新增/消失。混进「采集站」里会让用户以为它们是
+  /// 随版本固化的，出问题时会去等发版而不是去刷新配置。
   static String groupOf(DataSource s) {
     if (_groupProxy.contains(s.id)) return '需系统代理';
     if (_groupDefault.contains(s.id)) return '默认';
     if (_groupBuiltin.contains(s.id)) return '常用';
+    if (_pluginIds.contains(s.id)) return '插件（在线更新）';
     return '采集站（直连）';
   }
 
   /// 分组展示顺序。界面上按这个顺序渲染分组标题。
-  static const List<String> groupOrder = ['默认', '常用', '采集站（直连）', '需系统代理'];
+  ///
+  /// 插件组放最后：它们的可用性取决于远端配置是否拉得到，
+  /// 不该占据用户第一眼的注意力。
+  static const List<String> groupOrder = <String>[
+    '默认',
+    '常用',
+    '采集站（直连）',
+    '需系统代理',
+    '插件（在线更新）',
+  ];
 
   static const Set<String> _groupDefault = {'zhuiju'};
   static const Set<String> _groupBuiltin = {
@@ -126,19 +140,63 @@ class SourceRegistry {
     'ddys',
   };
 
+  /// 当前已注册的插件源 id（只有这一组是运行时可变的）
+  static final Set<String> _pluginIds = <String>{};
+
   /// 该源是否依赖系统代理。用于在切换面板上打标记。
   static bool needsProxy(DataSource s) => _groupProxy.contains(s.id);
 
   /// 运行时登记一个数据源（幂等）。
   ///
-  /// 编译期写死在 [_all] 已经够用，留这个入口是为了以后做「自定义源
-  /// 导入」时不必再改注册表：从配置读出来直接 register 即可。
-  static void register(DataSource s) {
+  /// 编译期写死在 [_all] 已经够用，留这个入口是为了「自定义源导入」
+  /// 不必再改注册表：从配置读出来直接 register 即可。
+  static void register(DataSource s, {bool asPlugin = false}) {
+    if (asPlugin) _pluginIds.add(s.id);
     if (_all.any((e) => e.id == s.id)) return;
     _all.add(s);
   }
 
+  /// 用一批插件源**替换**当前所有插件源。
+  ///
+  /// 为什么是「替换」而不是「逐个追加」：远端配置里删掉一个插件后，
+  /// 用户手机上的旧源必须跟着消失，否则会留下一个永远打不开的条目
+  /// （配置里已经没有它的域名了）。追加式注册做不到这点。
+  ///
+  /// 内置源完全不受影响——这是必须的，插件配置拉失败、拉成空、
+  /// 甚至整个仓库被误清空，都不能让用户丢掉本机已有的 19 个源。
+  static void replacePlugins(List<DataSource> plugins) {
+    final oldIds = Set<String>.from(_pluginIds);
+    final newIds = plugins.map((e) => e.id).toSet();
+
+    // ① 摘掉已经不存在的插件源
+    _all.removeWhere((e) => oldIds.contains(e.id) && !newIds.contains(e.id));
+    _pluginIds
+      ..clear()
+      ..addAll(newIds);
+
+    // ② 加新的（幂等，已存在的跳过）
+    for (final p in plugins) {
+      if (!_all.any((e) => e.id == p.id)) _all.add(p);
+    }
+
+    // ③ 当前选中的源如果刚被摘掉，必须回退到默认源。
+    //    不回退的话，current 会指向一个已经不在列表里的对象，
+    //    界面标题显示它的名字，但任何请求都会打到已失效的域名上——
+    //    这种「看着有源、其实全是错」的状态最难排查。
+    final nowId = instance.current.value.id;
+    if (!_all.any((e) => e.id == nowId)) {
+      instance.current.value = _all.first;
+    }
+  }
+
+  /// 当前已注册的插件源数量（设置页展示用）
+  static int get pluginCount => _pluginIds.length;
+
   /// 当前选中的数据源；未选择过时是第一个（橘汁）。
+  ///
+  /// 注意它是**实例**成员而 [replacePlugins] 是静态方法，所以那边要用
+  /// `instance.current` 访问。保持 `current` 为实例成员是因为页面里
+  /// 已有大量 `registry.current` 的用法，改成静态会牵动一堆无关代码。
   final ValueNotifier<DataSource> current =
       ValueNotifier<DataSource>(_all.first);
 
