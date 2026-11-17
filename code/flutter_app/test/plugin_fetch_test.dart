@@ -353,7 +353,7 @@ void main() {
     test('JSON body 里的关键词做转义，不能拼出非法 JSON', () {
       // 搜索 `"引号"` 这种词时，裸替换会拼出 {"key":""引号""} —— 非法 JSON。
       // 服务端报的是「参数缺失」，完全看不出是转义问题。
-      final req = const PluginRequest(
+      const req = PluginRequest(
         path: '/s',
         method: 'POST',
         body: '{"key":"{keyword}"}',

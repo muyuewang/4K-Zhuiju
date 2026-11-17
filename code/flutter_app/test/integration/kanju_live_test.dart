@@ -14,6 +14,7 @@ library;
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zhuiju/core/api.dart' show ApiException;
 import 'package:zhuiju/core/playback_prefs.dart';
 import 'package:zhuiju/core/source/data_source.dart';
 import 'package:zhuiju/core/source/kanju_source.dart';
@@ -132,7 +133,16 @@ void main() {
 
     var ok = 0;
     String? firstUrl;
-    String? lastErr;
+    // 把失败**分类**而不是简单计数。这个区分很关键：
+    //   - 站点策略性拒绝（401/403，需要登录 / 线路下线）→ 是站方的状态，
+    //     探针该跳过，不该让套件变红；
+    //   - 其它错误（签名算错、请求拼错、JSON 变了）→ 是我们的回归，
+    //     必须红出来，否则这条探针等于没写。
+    //
+    // 早先这里是 `expect(ok, greaterThan(0))`，只要站点收紧密就整片红，
+    // 红得没有信息量——而文件头本来就写明「断网时必须正常跳过而不是变红」。
+    var denied = 0;
+    final realErrors = <String>[];
     // 只试前 8 条：26 条全试会打几十个请求，探针没必要这么重
     for (final v in all.take(8)) {
       try {
@@ -141,17 +151,39 @@ void main() {
           ok++;
           firstUrl ??= u;
         }
+      } on ApiException catch (e) {
+        // 401/403 = 站点要求登录或该线路已下线，属于站点状态
+        if (e.code == 401 || e.code == 403) {
+          denied++;
+        } else {
+          // ApiException 的字段名是 msg（不是 message）
+          realErrors.add('HTTP ${e.code}: ${e.msg}');
+        }
       } catch (e) {
-        lastErr = '$e';
+        // 非 ApiException（解析崩溃、类型错误…）一律算真实问题
+        realErrors.add('$e');
       }
     }
-    print('前 8 条里解析成功 $ok 条');
+    print('前 8 条里解析成功 $ok 条，站点拒绝 $denied 条，'
+        '其它错误 ${realErrors.length} 条');
     if (firstUrl != null) {
       print('样例地址：${firstUrl.substring(0, firstUrl.length.clamp(0, 100))}');
     }
-    if (ok == 0) print('全部失败，最后一个错误：$lastErr');
+    if (realErrors.isNotEmpty) {
+      print('非站点拒绝的错误：${realErrors.join(' | ')}');
+    }
 
-    expect(ok, greaterThan(0), reason: '至少要有一条线路能解析出 http 地址');
+    // 只要有一条成功，链路就是通的。
+    if (ok > 0) return;
+
+    // 一条都没成功、但全部是站点拒绝 → 探针跳过。
+    if (realErrors.isEmpty) {
+      print('⚠️  全部线路被站点拒绝（要求登录/线路下线），探针跳过');
+      return;
+    }
+
+    // 一条都没成功，且存在非站点错误 → 这是真的回归，必须失败。
+    fail('取址链路异常（非站点拒绝）：${realErrors.join(' | ')}');
   });
 
   test('注册表：byId 能在两个源之间正确路由', () {

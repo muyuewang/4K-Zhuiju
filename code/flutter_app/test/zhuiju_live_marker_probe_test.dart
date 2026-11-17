@@ -58,7 +58,7 @@ void main() {
     for (final d in list.take(take)) {
       DramaDetail det;
       try {
-        det = await api.detail('${d.id}');
+        det = await api.detail(d.id);
       } catch (_) {
         continue;
       }
