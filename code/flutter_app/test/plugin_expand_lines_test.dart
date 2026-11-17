@@ -26,7 +26,8 @@ class _LineSite {
 
   String get baseUrl => 'http://127.0.0.1:${_server.port}';
 
-  static Future<_LineSite> start() async {
+  /// [lineOptions] 留空用默认三条（两条直出 + 一条官方线）。
+  static Future<_LineSite> start({List<Map<String, Object>>? lineOptions}) async {
     final s = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final site = _LineSite._(s);
     final detail = jsonEncode({
@@ -37,23 +38,24 @@ class _LineSite {
       ],
     });
     final resolve = jsonEncode({
-      'line_options': [
-        {
-          'label': '红牛资源', 'play_from': 'hn',
-          'url': 'https://cdn.example.com/hn/index.m3u8',
-          'resolve_required': false,
-        },
-        {
-          'label': '西瓜资源', 'play_from': 'xg',
-          'url': 'https://cdn.example.com/xg/index.m3u8',
-          'resolve_required': false,
-        },
-        {
-          // 官方线：需二次换票，不该被展开
-          'label': '官方V', 'play_from': 'huo',
-          'url': 'resolve://ticket', 'resolve_required': true,
-        },
-      ],
+      'line_options': lineOptions ??
+          [
+            {
+              'label': '红牛资源', 'play_from': 'hn',
+              'url': 'https://cdn.example.com/hn/index.m3u8',
+              'resolve_required': false,
+            },
+            {
+              'label': '西瓜资源', 'play_from': 'xg',
+              'url': 'https://cdn.example.com/xg/index.m3u8',
+              'resolve_required': false,
+            },
+            {
+              // 官方线：需二次换票，不该被展开
+              'label': '官方V', 'play_from': 'huo',
+              'url': 'resolve://ticket', 'resolve_required': true,
+            },
+          ],
     });
     s.listen((req) async {
       site.paths.add(req.uri.path);
@@ -162,6 +164,32 @@ function parseResolve(body, ctx) {
     final melon = d.videos.firstWhere((v) => v.sourceCn == '西瓜资源');
     expect(await src.resolveUrl(red), 'https://cdn.example.com/hn/index.m3u8');
     expect(await src.resolveUrl(melon), 'https://cdn.example.com/xg/index.m3u8');
+  });
+
+  test('expandLines 的线路顺序 = 站点 line_options 顺序，宿主不重排', () async {
+    // 用户原话：「线路按人家原版线路顺序 不要自己排序」。
+    // 站点把哪条排第一（哪怕它看起来不像直出 m3u8）就照哪条来。
+    final site = await _LineSite.start(lineOptions: [
+      for (var i = 1; i <= 6; i++)
+        <String, Object>{
+          'label': '线路$i',
+          'play_from': 'p$i',
+          'url': 'https://cdn.example.com/p$i/index.m3u8',
+          'resolve_required': false,
+        },
+    ]);
+    addTearDown(site.stop);
+    final src = RemoteJsSource(
+      LoadedPlugin(manifest: manifestOf(site.baseUrl), script: script),
+    );
+
+    final d = await src.detail('show1');
+    // 每条线路 2 集，线路是「整段连续」的：取每组第一次出现的顺序
+    final order = <String>[];
+    for (final v in d.videos) {
+      if (order.isEmpty || order.last != v.sourceCn) order.add(v.sourceCn);
+    }
+    expect(order, ['线路1', '线路2', '线路3', '线路4', '线路5', '线路6']);
   });
 
   test('dropIndirectLines 隐藏网页分享线，只留可播的直出线', () async {

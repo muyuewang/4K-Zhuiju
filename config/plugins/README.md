@@ -216,7 +216,8 @@ config/plugins/
 配 `expandLines: true` 后，宿主在详情阶段 resolve 第一集拿模板，调脚本的 `parseLines(body, ctx)` → `{lines:[{line:"线路名"}]}`，展开成多条线路。要点：
 
 - **只 resolve 第一集**：线路清单跨集稳定；逐集 resolve 会把详情页拖成几十次请求。
-- `parseLines` 应只返回**当前体系能播的**线路。看剧的官方线要游客会话二次换票（插件禁止注入 Cookie），所以脚本过滤掉 `resolve_required: true`，只给 23 条直出。
+- `parseLines` 应只返回**当前体系能播的**线路。看剧的官方线要游客会话二次换票（插件禁止注入 Cookie），所以脚本过滤掉 `resolve_required: true`，只给直出线。
+- **顺序照抄站点**：`parseLines` 返回的顺序就是面板顺序，宿主不再按"直出/网页"分区重排（`expandLines: true` 时 `preferDirectLine` 自动失效）。2026-11-17 用户明确要求「线路按人家原版线路顺序，不要自己排序」。
 - 展开后每条线路的 `sourceCn` 是线路名，`parseResolve` 用 `ctx.line` 精确选中对应那条；站点某集缺这条线时回退第一条直出，不让用户看到空白。
 
 #### 3.3.7 `searchUnsupported`：站方把搜索接口焊死的站

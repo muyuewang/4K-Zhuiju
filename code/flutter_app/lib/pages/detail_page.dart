@@ -15,6 +15,7 @@ import '../core/source/registry.dart';
 import '../core/source_picker.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/source_chip_bar.dart';
 import '../widgets/tv_focus.dart';
 import 'player_page.dart';
 import '../core/tokens.dart';
@@ -877,6 +878,17 @@ class _DetailPageState extends State<DetailPage> {
     return '$h';
   }
 
+  /// 播放源（线路）面板
+  ///
+  /// 2026-11-17 用户实机反馈（Windows）：看剧 26 条线路，面板只露出前 14 条，
+  /// 右边被切掉，鼠标滚轮推不动、也没有滚动条，后面 12 条**永远够不着**。
+  ///
+  /// 根因是这里原本用固定高度的横向 `ListView`：它只在触摸手势下能滑动，
+  /// 桌面端滚轮是纵向的（`dy`），横向 `ScrollView` 直接忽略；再加上没有
+  /// 画 `Scrollbar`，用户连"后面还有"都看不出来。现在交给 [SourceChipBar]
+  /// 用 `Wrap` 换行铺开，线路再多也全部可见。
+  ///
+  /// 顺序**原样沿用**传入的 names（站点原版线路顺序），这里不排序。
   Widget _sourceSelector(
       List<String> names, Map<String, List<DramaVideo>> map, String? cur) {
     final tv = isTv(context);
@@ -899,43 +911,11 @@ class _DetailPageState extends State<DetailPage> {
             ],
           ),
           const SizedBox(height: 8),
-          SizedBox(
-            // TV 下把可选源做成更高的胶囊，遥控器左右移动时更好瞄准
-            height: tv ? 46 : 34,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: names.length,
-              separatorBuilder: (_, __) => SizedBox(width: tv ? 12 : 8),
-              itemBuilder: (c, i) {
-                final n = names[i];
-                final active = n == cur;
-                final chip = GestureDetector(
-                  onTap: () => setState(() => _curSource = n),
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: tv ? 20 : 13),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: active ? kAccent : context.palette.card,
-                      borderRadius: BorderRadius.circular(tv ? 23 : 17),
-                    ),
-                    child: Text(
-                      n,
-                      style: TextStyle(
-                        fontSize: tv ? Ts.subtitle : Ts.bodySm,
-                        color: active ? Colors.white : context.palette.textDim,
-                        fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-                      ),
-                    ),
-                  ),
-                );
-                if (!tv) return chip;
-                return TvFocus(
-                  radius: tv ? 23 : 17,
-                  onActivate: () => setState(() => _curSource = n),
-                  child: chip,
-                );
-              },
-            ),
+          SourceChipBar(
+            names: names,
+            current: cur,
+            tv: tv,
+            onSelect: (n) => setState(() => _curSource = n),
           ),
         ],
       ),

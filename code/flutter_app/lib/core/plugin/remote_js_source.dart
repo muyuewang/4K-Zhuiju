@@ -293,7 +293,14 @@ class RemoteJsSource implements DataSource, SourceGrouped, SearchUnsupported {
     // 直出线路顶前，网页分享页沉底（相对顺序各自保持不变）。
     // 这里手写两段拼接而不是 sort：Dart 的 List.sort 不保证稳定，
     // 同组内相对次序一旦被打乱，用户熟悉的「线路1/线路2」就变了。
-    final ordered = manifest.preferDirectLine
+    //
+    // 两种情况**不能**再分区，否则就是「我们自己排的序」：
+    //   - `expandLines`：线路清单来自站点 resolve 的 line_options[]，
+    //     站点怎么排就怎么显示（看剧 20 多条线路，用户明确要求按原版顺序）；
+    //   - `dropIndirectLines`：播不了的网页线已经整条删掉，剩下的全是直出，
+    //     分区是恒等变换，不如不做。
+    final keepStationOrder = manifest.expandLines || manifest.dropIndirectLines;
+    final ordered = (manifest.preferDirectLine && !keepStationOrder)
         ? <_ParsedLine>[
             ...parsed.where((l) => l.isDirect),
             ...parsed.where((l) => !l.isDirect),
