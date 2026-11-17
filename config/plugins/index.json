@@ -895,6 +895,432 @@
           "videoInfoId": "{id}"
         }
       }
+    },
+    {
+      "id": "pianku",
+      "name": "片库 4K",
+      "baseUrl": "https://4k01.pianku.online",
+      "script": "config/plugins/maccms-html.js",
+      "version": 1,
+      "enabled": true,
+      "description": "网页模板站、无弹幕；分类齐全，网页源自动沉底",
+      "group": "网页模板（直连）",
+      "vars": {
+        "webLineNames": "腾讯,奇异,爱奇艺,优酷,B站,芒果,搜狐"
+      },
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "20",
+          "name": "电影"
+        },
+        {
+          "id": "37",
+          "name": "剧集"
+        },
+        {
+          "id": "43",
+          "name": "动漫"
+        },
+        {
+          "id": "45",
+          "name": "综艺"
+        },
+        {
+          "id": "47",
+          "name": "短剧"
+        }
+      ],
+      "home": {
+        "path": "/"
+      },
+      "list": {
+        "path": "/vodtype/{category}.html",
+        "query": {
+          "page": "{page}"
+        }
+      },
+      "search": {
+        "path": "/vodsearch/-------------.html",
+        "query": {
+          "wd": "{keyword}",
+          "page": "{page}"
+        }
+      },
+      "detail": {
+        "path": "/voddetail/{id}.html"
+      },
+      "resolve": {
+        "path": "{url}"
+      }
+    },
+    {
+      "id": "jisu",
+      "name": "极速追剧",
+      "baseUrl": "https://jisuzhuiju.com",
+      "script": "config/plugins/jisu.js",
+      "version": 1,
+      "enabled": true,
+      "description": "需系统代理；无弹幕；各线路集数不同",
+      "group": "需系统代理",
+      "defaultHeaders": {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+        "Referer": "https://jisuzhuiju.com/"
+      },
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "1",
+          "name": "电视剧"
+        },
+        {
+          "id": "2",
+          "name": "电影"
+        },
+        {
+          "id": "3",
+          "name": "动漫"
+        },
+        {
+          "id": "4",
+          "name": "综艺"
+        },
+        {
+          "id": "5",
+          "name": "短剧"
+        }
+      ],
+      "home": {
+        "path": "/"
+      },
+      "list": {
+        "path": "/filter",
+        "query": {
+          "channel": "{category}",
+          "sort": "hot",
+          "page": "{page}"
+        }
+      },
+      "search": {
+        "path": "/search",
+        "query": {
+          "keyword": "{keyword}"
+        }
+      },
+      "detail": {
+        "path": "/detail/{id}.html"
+      },
+      "resolve": {
+        "path": "/api/play-url",
+        "query": {
+          "vodId": "{id}",
+          "playFrom": "{token0}",
+          "index": "{token1}"
+        }
+      }
+    },
+    {
+      "id": "kvm4k",
+      "name": "4K影视",
+      "baseUrl": "https://www.4kvm.net",
+      "script": "config/plugins/kvm4k.js",
+      "version": 1,
+      "enabled": true,
+      "description": "需系统代理；无弹幕；4K 档需站点 VIP，自动降级到 1080P",
+      "group": "需系统代理",
+      "defaultHeaders": {
+        "Accept-Language": "zh-CN,zh;q=0.9",
+        "Referer": "https://www.4kvm.net/"
+      },
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "1",
+          "name": "电影"
+        },
+        {
+          "id": "2",
+          "name": "电视剧"
+        },
+        {
+          "id": "3",
+          "name": "动漫"
+        }
+      ],
+      "home": {
+        "path": "/"
+      },
+      "list": {
+        "path": "/filter",
+        "query": {
+          "classify": "{category}",
+          "page": "{page}"
+        }
+      },
+      "search": {
+        "path": "/search",
+        "query": {
+          "q": "{keyword}"
+        }
+      },
+      "detail": {
+        "path": "/play/{id}"
+      },
+      "resolve": {
+        "path": "/video/play",
+        "query": {
+          "p": "{token0}",
+          "v": "{id}",
+          "userlink": "{token1}",
+          "q": "1"
+        }
+      },
+      "signEntry": "sign"
+    },
+    {
+      "id": "kanju",
+      "name": "看剧（多线路）",
+      "baseUrl": "https://kanju.ai",
+      "script": "config/plugins/kanju.js",
+      "version": 1,
+      "enabled": true,
+      "description": "多线路、分区榜单；无弹幕；官方线需会话，插件仅用直出线路",
+      "group": "直连",
+      "defaultHeaders": {
+        "Accept": "application/json",
+        "Origin": "https://kanju.ai",
+        "Referer": "https://kanju.ai/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+      },
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "movie",
+          "name": "电影"
+        },
+        {
+          "id": "series",
+          "name": "电视剧"
+        },
+        {
+          "id": "variety",
+          "name": "综艺"
+        },
+        {
+          "id": "anime",
+          "name": "动漫"
+        },
+        {
+          "id": "short_drama",
+          "name": "短剧"
+        },
+        {
+          "id": "documentary",
+          "name": "纪录片"
+        }
+      ],
+      "home": {
+        "path": "/v1/feed/home",
+        "query": {
+          "scope": "public",
+          "mode": "page",
+          "sections": "3",
+          "cards": "12"
+        }
+      },
+      "list": {
+        "path": "/v1/browse/catalog",
+        "query": {
+          "page": "{page}",
+          "limit": "20",
+          "kind": "{category}"
+        }
+      },
+      "search": {
+        "path": "/v1/browse/catalog",
+        "query": {
+          "page": "{page}",
+          "limit": "20",
+          "q": "{keyword}"
+        }
+      },
+      "detail": {
+        "path": "/v1/catalog/{id}"
+      },
+      "resolve": {
+        "path": "/v1/playback/resolve/{token}"
+      },
+      "signEntry": "sign"
+    },
+    {
+      "id": "zhuiju",
+      "name": "橘汁（默认）",
+      "baseUrl": "http://juziapp.hzhcbkj.cn",
+      "script": "config/plugins/zhuiju.js",
+      "version": 1,
+      "enabled": true,
+      "description": "分类齐全、支持弹幕；protobuf 接口，域名由远端配置下发",
+      "group": "默认",
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "21",
+          "name": "电视剧"
+        },
+        {
+          "id": "20",
+          "name": "电影"
+        },
+        {
+          "id": "22",
+          "name": "综艺"
+        },
+        {
+          "id": "23",
+          "name": "动漫"
+        },
+        {
+          "id": "24",
+          "name": "短剧"
+        },
+        {
+          "id": "25",
+          "name": "直播"
+        },
+        {
+          "id": "26",
+          "name": "漫剧"
+        }
+      ],
+      "home": {
+        "path": "/api/proto/v5/drama/search",
+        "method": "POST",
+        "body": "",
+        "bodyFormat": "hex",
+        "responseType": "bin",
+        "query": {
+          "page": "1",
+          "pagesize": "20"
+        }
+      },
+      "list": {
+        "path": "/api/proto/v5/drama/category",
+        "method": "POST",
+        "body": "",
+        "bodyFormat": "hex",
+        "responseType": "bin",
+        "query": {
+          "typeId1": "{category}",
+          "page": "{page}",
+          "pagesize": "20"
+        }
+      },
+      "search": {
+        "path": "/api/proto/v5/drama/search",
+        "method": "POST",
+        "body": "",
+        "bodyFormat": "hex",
+        "responseType": "bin",
+        "query": {
+          "page": "{page}",
+          "pagesize": "20",
+          "searchKeys": "{keyword}"
+        }
+      },
+      "detail": {
+        "path": "/api/proto/v5/drama/getDetail",
+        "method": "POST",
+        "body": "",
+        "bodyFormat": "hex",
+        "responseType": "bin",
+        "query": {
+          "id": "{id}"
+        }
+      },
+      "resolve": {
+        "path": "/api/proto/v5/videoUsableUrl",
+        "method": "POST",
+        "body": "",
+        "bodyFormat": "hex",
+        "responseType": "bin",
+        "query": {
+          "vodPlayFrom": "{line}",
+          "playUrl": "{url}"
+        }
+      },
+      "signEntry": "sign"
+    },
+    {
+      "id": "ddys",
+      "name": "低调影视",
+      "baseUrl": "https://ddys.io",
+      "script": "config/plugins/ddys.js",
+      "version": 1,
+      "enabled": true,
+      "description": "需系统代理；无弹幕；在线播放直出，另有网盘资源",
+      "group": "需系统代理",
+      "defaultHeaders": {
+        "User-Agent": "Dart/3.5 (dart:io)",
+        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+        "Referer": "https://ddys.io/"
+      },
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "movie",
+          "name": "电影"
+        },
+        {
+          "id": "series",
+          "name": "剧集"
+        },
+        {
+          "id": "variety",
+          "name": "综艺"
+        },
+        {
+          "id": "anime",
+          "name": "动漫"
+        }
+      ],
+      "home": {
+        "path": "/"
+      },
+      "list": {
+        "path": "/{category}",
+        "query": {
+          "page": "{page}"
+        }
+      },
+      "search": {
+        "path": "/search",
+        "query": {
+          "q": "{keyword}"
+        }
+      },
+      "detail": {
+        "path": "/movie/{id}"
+      }
     }
   ]
 }

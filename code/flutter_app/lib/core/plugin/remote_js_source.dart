@@ -247,6 +247,14 @@ class RemoteJsSource implements DataSource, SourceGrouped {
           episodes.add(_ParsedEp(
             title: _str(ep['name'], '第${ei + 1}集'),
             url: url,
+            // 单集附加标识。kvm4k 要 `dataid` 去算 HMAC 签名，
+            // kanju 要 episode token 去换线路，两者都不在 URL 里。
+            //
+            // 之前宿主**完全丢弃**这个键（脚本算了也传不出来），
+            // 只能把标识拼进 url 再用正则抠回来——那种做法一旦站点
+            // 的 id 形态变化（含 `-`、含 `/`）就会抠错，而且错得无声无息。
+            token: _str(ep['token'], ''),
+            isLive: ep['isLive'] == true,
           ));
         }
         if (episodes.isEmpty) continue;
@@ -279,6 +287,10 @@ class RemoteJsSource implements DataSource, SourceGrouped {
           sourceCn: line.nameCn,
           episode: ei + 1,
           dramaId: dramaId,
+          // 单集标识原样带下去。取址时脚本用 `ctx.token` 拿它，
+          // 不必再从 url 里正则抠——站点 id 含 `-`/`/` 时抠错是静默的。
+          playToken: ep.token,
+          isLive: ep.isLive,
           // 清单配了 resolve 接口 → 这个 path 还要再换一次
           needsResolve: manifest.resolveRequest != null,
         ));
@@ -325,9 +337,18 @@ class RemoteJsSource implements DataSource, SourceGrouped {
       'url': video.path,
       'episode': '${video.episode}',
       'line': video.source,
+      // 单集标识（kvm4k 的 dataid / kanju 的 token）可以进 query 模板，
+      // 也能从 `ctx.token` 读到。
+      'token': video.playToken,
+      // 复合 token 用 `|` 分段时提供分段占位符（jisu 的 prefix|ep）。
+      // 不含 `|` 时 token0 就是原值、token1 为空，对其它源无副作用。
+      'token0': video.playToken.split('|').first,
+      'token1': video.playToken.contains('|')
+          ? video.playToken.split('|').skip(1).join('|')
+          : '',
     });
 
-    final out = await _call('parseResolve', <Object?>[f.body, _ctx(f)]);
+    final out = await _call('parseResolve', <Object?>[f.body, _ctx(f, video)]);
     final map = _asMap(out, 'parseResolve');
     final url = _str(map['url'], '');
     if (url.isEmpty) {
@@ -558,6 +579,21 @@ class RemoteJsSource implements DataSource, SourceGrouped {
       method: base.method,
       headers: <String, String>{...base.headers, ...extraHeaders},
       body: out['body'] is String ? out['body'] as String : base.body,
+      // 脚本改了 body 就以它的新值为准，且必须按声明的格式重新解码。
+      // 橘汁的 protobuf 体是签名钩子现算的，不重解码就会当文本发出去。
+      bodyBytes: out['body'] is String
+          ? (base.bodyFormat == 'hex'
+              ? Uint8List.fromList(hexDecode(out['body'] as String))
+              : base.bodyFormat == 'base64'
+                  ? Uint8List.fromList(base64.decode(out['body'] as String))
+                  : null)
+          : base.bodyBytes,
+      bodyFormat: base.bodyFormat,
+      // 重建请求时必须带走这三项。漏掉的话「签名 + JSON body」会
+      // 退化成表单（服务端报参数缺失），「签名 + 二进制」会拿到
+      // 乱码或空体——故障离签名代码很远，极难定位。
+      contentType: base.contentType,
+      binaryResponse: base.binaryResponse,
     );
   }
 
@@ -594,11 +630,22 @@ class RemoteJsSource implements DataSource, SourceGrouped {
   /// 传给插件的上下文对象。
   ///
   /// 用「对象」而不是散参数：将来加字段（比如 referer）不用改所有脚本。
-  Map<String, Object?> _ctx(FetchResult f) => <String, Object?>{
+  ///
+  /// [video] 只在取址（parseResolve）时给：那时脚本需要知道「这是哪一集、
+  /// 哪条线路、单集标识是什么」，才能拼出该集的取址参数。
+  /// 列表/详情的 ctx 里不含这些字段——它们对解析整页没有意义。
+  Map<String, Object?> _ctx(FetchResult f, [DramaVideo? video]) => <String, Object?>{
         'vars': manifest.vars,
         'baseUrl': manifest.baseUrl,
         'finalUrl': f.finalUrl,
         'sourceId': manifest.id,
+        if (video != null) ...<String, Object?>{
+          'dramaId': video.dramaId,
+          'path': video.path,
+          'episode': video.episode,
+          'line': video.source,
+          'token': video.playToken,
+        },
       };
 
   static Map _asMap(Object? o, String entry) {
@@ -692,8 +739,20 @@ class _ParsedLine {
 }
 
 class _ParsedEp {
-  const _ParsedEp({required this.title, required this.url});
+  const _ParsedEp({
+    required this.title,
+    required this.url,
+    this.token = '',
+    this.isLive = false,
+  });
 
   final String title;
   final String url;
+
+  /// 单集附加标识（kvm4k 的 `dataid`、kanju 的 episode token）。
+  /// 空串表示这个源不需要——绝大多数采集站都是这一类。
+  final String token;
+
+  /// 直播流标记（橘汁的直播分类）。普通采集站恒为 false。
+  final bool isLive;
 }

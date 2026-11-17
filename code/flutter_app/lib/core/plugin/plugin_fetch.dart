@@ -21,7 +21,9 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
@@ -55,7 +57,10 @@ class PreparedRequest {
     required this.method,
     required this.headers,
     this.body = '',
+    this.bodyBytes,
+    this.bodyFormat = 'text',
     this.contentType = '',
+    this.binaryResponse = false,
   });
 
   final String url;
@@ -63,23 +68,48 @@ class PreparedRequest {
   final Map<String, String> headers;
   final String body;
 
+  /// 非 null 时优先发送这里的原始字节，[body] 只保留给人看的形式。
+  ///
+  /// 二进制请求体（protobuf 帧）必须走这里：交给 Dio 一个 String 会被
+  /// UTF-8 重新编码，把 >=0x80 的字节展开成多字节。
+  final Uint8List? bodyBytes;
+
+  /// 请求体的承载格式，签名钩子改写 body 后要靠它重新解码。
+  final String bodyFormat;
+
   /// 请求体的 Content-Type。空串表示交给调用方按表单处理。
   ///
   /// 必须显式带着，不能靠 Dio 猜：Dio 的 `Options.contentType` 一旦给了
   /// `formUrlEncoded`，即使 body 是 JSON 字符串也会原样发出、只是标签错了，
   /// 服务端按表单解析就得到一个畸形字段，报的是「参数缺失」。
   final String contentType;
+
+  /// 响应是否为二进制（取回后转 base64 再交给插件）。
+  ///
+  /// 默认 false：绝大多数源是文本（HTML / JSON / XML），直接给字符串。
+  final bool binaryResponse;
 }
 
 /// 一次抓取结果。
 class FetchResult {
-  const FetchResult({required this.body, required this.finalUrl});
+  const FetchResult({
+    required this.body,
+    required this.finalUrl,
+    this.isBase64 = false,
+  });
 
+  /// 响应体。
+  ///
+  /// [isBase64] 为 true 时这里是**二进制内容的 base64 编码**，
+  /// 而不是原文——原因见 [PluginRequest.responseType]。
   final String body;
 
   /// 重定向之后的最终地址。插件里常有「相对地址补全」的需求，
   /// 补全基准必须是最终地址而不是原始地址，否则会拼错域名。
   final String finalUrl;
+
+  /// [body] 是否为 base64 编码的二进制。
+  final bool isBase64;
 }
 
 /// 抓取失败。消息都是给人看的中文，直接可以进错误页。
@@ -164,6 +194,17 @@ List<int>? _parseIPv4(String host) {
   return out;
 }
 
+/// 十六进制串 → 字节。dart:convert 没有 hex 解码器，这里只认偶数长度的
+/// 0-9a-fA-F；非法输入直接抛 FormatException，让配置错误当场暴露。
+List<int> hexDecode(String s) {
+  if (s.length.isOdd) throw const FormatException('hex 长度必须是偶数');
+  final out = List<int>.filled(s.length ~/ 2, 0);
+  for (var i = 0; i < out.length; i++) {
+    out[i] = int.parse(s.substring(i * 2, i * 2 + 2), radix: 16);
+  }
+  return out;
+}
+
 /// 拼装最终请求。
 ///
 /// [params] 提供占位符的取值：page / keyword / id / category / vars.x。
@@ -235,19 +276,35 @@ PreparedRequest prepareRequest({
     }
   }
 
+  final filledBody = !req.isPost
+      ? ''
+      // JSON body 里的占位符必须做 JS 字符串转义，不能和表单一样裸替换。
+      // 搜索「"引号」这种词时，裸替换会拼出 `{"key":""引号"}` 这样的
+      // 非法 JSON，服务端报的是「参数缺失」，完全看不出是转义问题。
+      : (req.isJsonBody ? _fillJson(req.body, params) : _fill(req.body, params));
+
+  // 二进制体的解码放在占位符替换**之后**：模板里的 hex 串本身没有
+  // 占位符，但保留这个顺序，将来往 protobuf 模板里塞 {page} 也能用。
+  Uint8List? bodyBytes;
+  if (req.isPost) {
+    if (req.bodyFormat == 'hex') {
+      bodyBytes = Uint8List.fromList(hexDecode(filledBody));
+    } else if (req.bodyFormat == 'base64') {
+      bodyBytes = Uint8List.fromList(base64.decode(filledBody));
+    }
+  }
+
   return PreparedRequest(
     url: finalUrl,
     method: req.method,
     headers: headers,
-    body: !req.isPost
-        ? ''
-        // JSON body 里的占位符必须做 JS 字符串转义，不能和表单一样裸替换。
-        // 搜索「"引号」这种词时，裸替换会拼出 `{"key":""引号"}` 这样的
-        // 非法 JSON，服务端报的是「参数缺失」，完全看不出是转义问题。
-        : (req.isJsonBody ? _fillJson(req.body, params) : _fill(req.body, params)),
+    body: filledBody,
+    bodyBytes: bodyBytes,
+    bodyFormat: req.bodyFormat,
     // 空串 = 用默认的表单类型；JSON 源（云影等）必须显式声明，
     // 否则 JSON 串会被当成表单整体塞进一个字段名里。
     contentType: req.isJsonBody ? Headers.jsonContentType : '',
+    binaryResponse: req.isBinaryResponse,
   );
 }
 
@@ -350,6 +407,7 @@ class PluginFetch {
     var url = req.url;
     var method = req.method;
     var body = req.body;
+    var bodyBytes = req.bodyBytes;
 
     for (var hop = 0; hop <= 3; hop++) {
       final reject = urlRejectionReason(url);
@@ -357,24 +415,60 @@ class PluginFetch {
         throw PluginFetchException('拒绝请求：$reject（$url）');
       }
 
-      final resp = await _client.request<String>(
-        url,
-        data: method == 'POST' ? body : null,
-        options: Options(
-          method: method,
-          headers: req.headers,
-          // 只在真带 body 时才设。301/302/303 会把方法降成 GET、
-          // body 清空，这时候还挂着 content-type 是错的（有些网关
-          // 见到 GET 带表单类型会拒）。
-          contentType: method == 'POST'
-              ? (req.contentType.isEmpty
-                  ? Headers.formUrlEncodedContentType
-                  : req.contentType)
-              : null,
-        ),
+      final options = Options(
+        method: method,
+        headers: req.headers,
+        // 只在真带 body 时才设。301/302/303 会把方法降成 GET、
+        // body 清空，这时候还挂着 content-type 是错的（有些网关
+        // 见到 GET 带表单类型会拒）。
+        contentType: method == 'POST'
+            ? (req.contentType.isEmpty
+                ? Headers.formUrlEncodedContentType
+                : req.contentType)
+            : null,
       );
 
-      final code = resp.statusCode ?? 0;
+      // 二进制和文本走两条独立的取数分支，**不是**都取 bytes 再解码。
+      //
+      // 为什么不能统一：Dio 的 `ResponseType.plain` 会按响应头里的
+      // charset 解码（部分采集站是 GB2312），换成 bytes + 强制 utf8
+      // 会让这些站的中文全变问号。文本路径必须保持原样。
+      final _Resp resp;
+      if (req.binaryResponse) {
+        final r = await _client.request<List<int>>(
+          url,
+          data: method == 'POST' ? (bodyBytes ?? body) : null,
+          options: Options(
+            method: options.method,
+            headers: options.headers,
+            contentType: options.contentType,
+            responseType: ResponseType.bytes,
+          ),
+        );
+        // 不看 content-type、不看状态码就先留着头，下面统一判
+        final bytes = r.data ?? const <int>[];
+        resp = _Resp(
+          statusCode: r.statusCode ?? 0,
+          headers: r.headers,
+          data: base64Encode(bytes),
+          byteLength: bytes.length,
+        );
+      } else {
+        final r = await _client.request<String>(
+          url,
+          data: method == 'POST' ? (bodyBytes ?? body) : null,
+          options: options,
+        );
+        final data = r.data ?? '';
+        resp = _Resp(
+          statusCode: r.statusCode ?? 0,
+          headers: r.headers,
+          data: data,
+          byteLength: data.length,
+        );
+      }
+
+      final code = resp.statusCode;
 
       if (code >= 300 && code < 400) {
         final loc = resp.headers.value('location');
@@ -387,6 +481,7 @@ class PluginFetch {
         if (code == 301 || code == 302 || code == 303) {
           method = 'GET';
           body = '';
+          bodyBytes = null;
         }
         continue;
       }
@@ -395,16 +490,43 @@ class PluginFetch {
         throw PluginFetchException('HTTP $code');
       }
 
-      final data = resp.data ?? '';
-      if (data.length > kPluginMaxBodyBytes) {
+      final data = resp.data;
+      if (resp.byteLength > kPluginMaxBodyBytes) {
         throw PluginFetchException(
-            '响应过大（${(data.length / 1024).round()}KB，'
+            '响应过大（${(resp.byteLength / 1024).round()}KB，'
             '上限 ${kPluginMaxBodyBytes ~/ 1024}KB）');
       }
-      return FetchResult(body: data, finalUrl: url);
+      return FetchResult(
+        body: data,
+        finalUrl: url,
+        isBase64: req.binaryResponse,
+      );
     }
     throw PluginFetchException('重定向次数过多');
   }
+}
+
+/// 两种取数分支归一后的中间结果。
+///
+/// 存在的理由：二进制走 `List<int>`、文本走 `String`，Dio 的泛型不同，
+/// 但下面的重定向/状态码/大小校验逻辑完全一样。不归一就得把那二十行
+/// 复制一份，而两份逻辑迟早会漂移（比如只在一处补了 3xx 处理）。
+class _Resp {
+  const _Resp({
+    required this.statusCode,
+    required this.headers,
+    required this.data,
+    required this.byteLength,
+  });
+
+  final int statusCode;
+  final Headers headers;
+
+  /// 文本响应是原文；二进制响应是 **base64**。
+  final String data;
+
+  /// 原始字节数（不是 base64 后的字符数），用于大小上限判断。
+  final int byteLength;
 }
 
 /// 给错误信息补上「人话」前缀。

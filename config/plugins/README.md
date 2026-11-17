@@ -7,7 +7,13 @@ config/plugins/
 ├── index.json        索引：有哪些源、域名是什么、接口长什么样
 ├── maccms-json.js    通用 MacCMS JSON 解析脚本（多个源共用）
 ├── maccms-xml.js     通用 MacCMS XML 解析脚本（老站，输出结构与 JSON 版一致）
+├── maccms-html.js    通用 MacCMS 网页模板脚本（片库 pianku）
 ├── yuny.js           云影：纯 App JSON 接口（POST JSON body，非 MacCMS）
+├── jisu.js           极速追剧：HTML + 独立取址接口，逐线路集数不同
+├── kvm4k.js          4K影视：Go SSR + WASM 取址算法还原，signEntry 签名
+├── kanju.js          看剧：HMAC 四行签名 + 分区榜单 + 线路 JSON
+├── zhuiju.js         橘汁：protobuf 请求/响应 + AES/RSA 签名
+├── ddys.js           低调影视（ddys.io）：详情页直出 m3u8
 ├── signed-demo.js    签名/加密类源模板（HMAC / AES / RSA 三种写法）
 └── README.md         本文件
 ```
@@ -61,7 +67,9 @@ config/plugins/
 | 标准 MacCMS **XML** 采集接口（`<rss><list><video>`） | ✅ 复用 `maccms-xml.js`，只写配置 |
 | 接口字段名不同（比如 `data.videos` 而不是 `list`） | ✅ 复制一份脚本改字段名 |
 | 需要摘要/AES/RSA 计算的私有接口 | ✅ **可以了**，见 3.6 与 `signed-demo.js` |
+| protobuf 请求/响应（橘汁） | ✅ `bodyFormat:"hex"` + `responseType:"bin"`，见 3.3.4 |
 | 详情页要跑 JS 渲染才能拿到数据 | ❌ 插件拿不到浏览器环境 |
+| 需要跨请求 Cookie 会话 / 图形点选验证码 | ❌ 见本文件末尾「已知边界」 |
 
 > **2026-11 修订**：此前这里写的是「需要 AES/RSA 签名的私有接口 ❌ 保持内置」，
 > 理由是 QuickJS 没有 crypto、没有二进制能力。**那个结论已经作废**——
@@ -111,6 +119,8 @@ config/plugins/
 | `derivePlayIndex` | | 是否把 `/play/<token>` 推成 `/play/<token>/index.m3u8`。默认 `false` |
 | `batchDetail` | | 列表拿到 id 后是否再用 `detail` 的 `ids=` 批量回查补封面。默认 `false` |
 | `signEntry` | | 签名钩子的函数名。配了就在每次请求前调它，见 3.6。不配 = 不需要签名 |
+| `bodyFormat` | | 请求体承载格式：`text`（默认）/ `hex` / `base64`。**二进制请求体必须显式声明**，见 3.3.4 |
+| `responseType` | | 响应形态：`text`（默认）/ `bin`。`bin` 时宿主把原始字节转 base64 交给脚本 |
 | `vars` | | 自定义变量，配置里用 `{vars.xxx}` 引用，解析脚本里用 `ctx.vars.xxx`，**签名脚本里用 `req.vars.xxx`** |
 | `defaultHeaders` | | 所有请求默认带的头（UA / Referer） |
 | `enabled` | | `false` = 下架这个源（比删掉好，用户本地缓存会一起清掉） |
@@ -160,6 +170,29 @@ config/plugins/
 
 配了 `json` 之后，占位符替换会**按 JSON 字符串规则转义**（`\` `"` 换行 制表符）。这不是过度设计：搜索 `"引号"` 这种词时裸替换会拼出 `{"key":""引号""}`，非法 JSON，而服务端报的仍然是「参数缺失」。
 
+#### 3.3.4 `bodyFormat` / `responseType`：二进制通道
+
+橘汁是 protobuf 接口，请求和响应都是二进制。两个方向各有一个坑：
+
+- **请求**：Dio 拿到 `String` 会按 UTF-8 编码，把 `>=0x80` 的字节展开成两三个字节，服务端收到的是被污染的帧；
+- **响应**：`ResponseType.plain` 按 UTF-8 解码，varint 与长度前缀会被替换成 U+FFFD；而且 `JsEvalResult.stringResult` 跨 FFI 是 C 字符串，中间的 `\u0000` 会截断内容。
+
+所以：
+
+```jsonc
+"search": {
+  "path": "/api/proto/v5/drama/search",
+  "method": "POST",
+  "body": "",              // 真正的体由 sign 钩子现算
+  "bodyFormat": "hex",     // 宿主把 hex 解码成原始字节发出
+  "responseType": "bin"    // 宿主把原始字节 base64 后交给脚本
+}
+```
+
+脚本侧用 `host.b64d(body, 'hex')` 拿回字节的 hex 表示，自己写 protobuf 阅读器（`zhuiju.js` 里有完整实现）。**别用 `JSON.parse` 去接二进制响应**。
+
+`bodyFormat` 在签名钩子改写 body 后**会重新解码一次**——橘汁的随机密文体就是这么进去的。
+
 ### 3.4 请求里的占位符
 
 | 占位符 | 含义 |
@@ -169,6 +202,8 @@ config/plugins/
 | `{id}` | 条目 id |
 | `{category}` | 分类 id |
 | `{vars.x}` | `vars` 里的变量 |
+| `{token}` | 单集标识（kvm4k 的 dataid、kanju 的 episode token、橘汁的 video id） |
+| `{token0}` / `{token1}` | 复合 token 按 `|` 拆出的段。极速追剧用它传 `prefix|ep` 给取址接口 |
 
 **不要自己拼 URL**。清单负责「请求什么」，脚本只负责「怎么解析」——这条分界让 90% 的失效（换域名、改接口路径）都不用碰脚本。
 
@@ -191,7 +226,8 @@ host.aesEcbDecrypt({key, cipherText, ...})
 host.aesCbcEncrypt({key, iv, plain, ...})
 host.aesCbcDecrypt({key, iv, cipherText, ...})
 host.rsaEncrypt({nHex, e?, data, ...})   // PKCS#1 v1.5 公钥加密
-host.b64e(s) / host.b64d(s) / host.hex(s) / host.unhex(s)
+host.b64e(s, fmt) / host.b64d(s, outFmt) // 注意是位置参数，fmt 如 'hex'/'utf8'
+host.hex(s, fmt) / host.unhex(s, outFmt)
 host.xml2json(xml)
 host.randomHex(n) / host.randomAlnum(n)
 host.available(name) / host.names()      // 自检，便于写降级
@@ -204,6 +240,17 @@ host.available(name) / host.names()      // 自检，便于写降级
 ```js
 try { var h = host.md5('x'); } catch (e) { /* e.message 是人话 */ }
 ```
+
+> **签名函数与编码函数是位置参数，加密函数是对象参数**：
+>
+> ```js
+> host.hmac('sha256', key, msg)   // ✅ 三个位置参数
+> host.b64e(hex, 'hex')           // ✅ 两个位置参数
+> host.hmac({ algo:'sha256', key:key, msg:msg })  // ❌ 算的是 "[object Object]"
+> host.b64e({ s:hex, fmt:'hex' })                 // ❌ 同上，且不报错
+> ```
+>
+> 这个坑是实测踩出来的：把对象传给 `hmac`，脚本照常返回 32 位 hex，看起来完全正常，只有和 Dart 实现**逐字段对拍**才会发现签名对不上。凡是签名类源，测试里都要有一条固定输入的对拍断言。
 
 #### 签名钩子的形态
 
@@ -328,7 +375,12 @@ function parseResolve(body, ctx) → { url: "http://..." }   // 配了 resolve �
 
 ```bash
 cd code/flutter_app
-flutter test test/plugin_manifest_test.dart
+# 19 个源的配置整体校验（id 重复 / 脚本路径 / signEntry / 死循环）
+flutter test test/plugin_index_validation_test.dart
+# 单个源的解析脚本（QuickJS 真实引擎 + 真实抓包夹具）
+flutter test test/maccms_html_plugin_test.dart test/jisu_plugin_script_test.dart \
+            test/kvm4k_plugin_script_test.dart test/kanju_plugin_script_test.dart \
+            test/zhuiju_plugin_script_test.dart test/ddys_plugin_script_test.dart
 ```
 
 真机验证：装 App → 设置 → 数据源 → 找「插件（在线更新）」分组。
@@ -342,7 +394,16 @@ flutter test test/plugin_manifest_test.dart
 
 ---
 
-## 七、已下线的源
+## 七、已知边界（当前插件体系做不到）
+
+| 场景 | 现状 |
+| --- | --- |
+| 跨请求 Cookie 会话（看剧的游客会话） | 宿主禁止脚本设置 `Cookie`/`Authorization`，也没有 Cookie jar。看剧插件只取直出线路（实测每集 26 条），**官方线暂不可用** |
+| 图形点选验证码（ddys.app 的第三层闸门） | 需要看图识别，客户端无感通过做不到。改用同系列无闸门的 `ddys.io`，内置源也是这么做的 |
+| 动态下发的接口域名（橘汁） | 清单的 `baseUrl` 是静态的。橘汁域名当前 502，官方可能已换域名——需要同步改 `index.json`（这是「改配置不发版」能解决的事，只是要有人改） |
+| 需要浏览器 DOM/JS 渲染的页面 | 插件只有字符串，没有 DOM |
+
+## 八、已下线的源
 
 | 源 | 下线原因 |
 | --- | --- |

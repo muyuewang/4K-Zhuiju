@@ -450,6 +450,18 @@ Object? dispatchHostCall(String fn, Map<String, Object?> a) {
           outFmt: '${a['outFmt'] ?? 'utf8'}',
         );
 
+      case 'rsaEncrypt':
+        // rsaEncrypt 早已在 kHostFunctions 里声明、JS 包装也已生成，
+        // 但这一路分派漏了——脚本调用只会得到「未知宿主函数」。
+        // 橘汁的 publicParams.sig 就靠它。
+        return rsaEncrypt(
+          nHex: '${a['nHex'] ?? ''}',
+          e: '${a['e'] ?? '65537'}',
+          data: '${a['data'] ?? ''}',
+          dataFmt: '${a['dataFmt'] ?? 'utf8'}',
+          outFmt: '${a['outFmt'] ?? 'base64'}',
+        );
+
       case 'b64e':
         return base64.encode(_decode('${a['s'] ?? ''}', '${a['fmt'] ?? 'utf8'}'));
       case 'b64d':

