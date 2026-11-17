@@ -5,12 +5,16 @@
 /// 且给出的那句话能解释原因（而不是复读「没找到 xx」）。
 library;
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuiju/core/plugin/plugin_fetch.dart';
 import 'package:zhuiju/core/plugin/plugin_loader.dart';
 import 'package:zhuiju/core/plugin/plugin_manifest.dart';
 import 'package:zhuiju/core/plugin/remote_js_source.dart';
 import 'package:zhuiju/core/source/data_source.dart';
+import 'package:zhuiju/core/source/registry.dart';
+import 'package:zhuiju/pages/home_page.dart';
+import 'package:zhuiju/theme.dart';
 
 /// 指向必然连不上的地址：只要宿主真的发了请求，抛出的就会是连接错误，
 /// 而不是我们要验证的那句解释——这样"没发请求"就被断言住了。
@@ -78,5 +82,33 @@ void main() {
     expect(PluginManifest.fromJson(m.toJson())!.searchUnsupported, isTrue);
     expect(_manifest(blocked: false).toJson().containsKey('searchUnsupported'), isFalse,
         reason: '没开的源不该在配置里留下噪音字段');
+  });
+
+  testWidgets('搜索页：不渲染成「没找到」，而是说明原因并给出路', (tester) async {
+    SourceRegistry.replacePlugins([
+      RemoteJsSource(
+        LoadedPlugin(
+          manifest: _manifest(blocked: true),
+          script: 'function parseList(){return [];}',
+        ),
+      ),
+    ]);
+    addTearDown(() => SourceRegistry.replacePlugins(const []));
+
+    await tester.pumpWidget(MaterialApp(
+      theme: buildTheme(Brightness.dark),
+      home: const SearchPage(),
+    ));
+    await tester.enterText(find.byType(TextField), '庆余年');
+    await tester.tap(find.text('搜索'));
+    await tester.pumpAndSettle();
+
+    // 关键：不能出现「没找到 xx」——那是「搜过但没有结果」的语义，
+    // 会让用户以为关键词打错了，而事实是这个源压根不提供搜索。
+    expect(find.textContaining('没找到'), findsNothing);
+    expect(find.text('这个源搜不了'), findsOneWidget);
+    expect(find.textContaining('没有开放搜索'), findsOneWidget);
+    // 空屏必须给出路，否则用户只能自己想到「返回去换源」。
+    expect(find.text('返回首页换个源'), findsOneWidget);
   });
 }
