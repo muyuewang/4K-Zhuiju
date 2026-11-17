@@ -119,16 +119,29 @@ class RemoteJsSource implements DataSource, SourceGrouped {
   /// 翻页语义天然正确——每个子分类都取第 [page] 页，不会重复也不会漏。
   @override
   Future<List<Drama>> category(String categoryId, {int page = 1}) async {
-    final req = manifest.listRequest;
-    if (req == null) {
-      throw PluginFetchException('${manifest.name} 不支持按分类浏览');
-    }
-
     final ids = categoryId
         .split(',')
         .map((e) => e.trim())
         .where((e) => e.isNotEmpty)
         .toList(growable: false);
+
+    // 「推荐」位优先用 home 端点。
+    //
+    // 有一类站（云影）把推荐和分类做成两个接口，连分页字段名都不同
+    // （`pageNo` vs `current`），一个 list 模板只能对上一边。
+    // 没配 home 的源退回 list 并传空分类——采集站的 `t` 为空
+    // 本来就是「全站最新」，语义正确。
+    if (ids.isEmpty) {
+      final home = manifest.homeRequest;
+      if (home != null) {
+        return _loadList(home, <String, String>{'page': '$page'});
+      }
+    }
+
+    final req = manifest.listRequest;
+    if (req == null) {
+      throw PluginFetchException('${manifest.name} 不支持按分类浏览');
+    }
 
     if (ids.length <= 1) {
       return _loadList(req, <String, String>{
@@ -282,6 +295,12 @@ class RemoteJsSource implements DataSource, SourceGrouped {
       remark: _str(map['remark'], ''),
       director: _str(map['director'], ''),
       actor: _str(map['actor'], ''),
+      // 标签（`现代 / 都市`这类）宿主一直没接，脚本给了也被静默丢弃。
+      // 云影这类站的 tagList 是筛选的主入口，缺了它详情页标签区是空的。
+      tag: _str(map['tag'], ''),
+      // 评分同理：宿主之前完全没读这个键，脚本算好的星星到不了界面。
+      // 云影的 score 大量为 null，此时 _double 给 0，界面按「无评分」显示。
+      stars: _double(map['stars']),
       cover: CoverImage(
         path: _str(map['pic'], ''),
         thumbnail: _str(map['pic'], ''),
@@ -356,6 +375,7 @@ class RemoteJsSource implements DataSource, SourceGrouped {
         remark: _str(raw['remark'], ''),
         year: _int(raw['year']),
         clazz: _str(raw['type'], ''),
+        stars: _double(raw['stars']),
         cover: CoverImage(path: pic, thumbnail: pic),
         sourceId: id,
       ));
@@ -602,6 +622,16 @@ class RemoteJsSource implements DataSource, SourceGrouped {
     if (v is int) return v;
     if (v is num) return v.toInt();
     if (v is String) return int.tryParse(v.trim()) ?? 0;
+    return 0;
+  }
+
+  /// 取浮点，带兜底。
+  ///
+  /// 评分在 JSON 里是 9 / 9.2 / "8.7" / null 四种形态都见过
+  /// （云影实测大量为 null），统一收敛到 double。
+  static double _double(Object? v) {
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v.trim()) ?? 0;
     return 0;
   }
 

@@ -40,6 +40,7 @@ class PluginRequest {
     this.method = 'GET',
     this.query = const <String, String>{},
     this.body = '',
+    this.bodyType = 'form',
     this.headers = const <String, String>{},
   });
 
@@ -68,10 +69,28 @@ class PluginRequest {
   /// POST 表单体的模板，占位符同上。仅 [method] 为 POST 时使用。
   final String body;
 
+  /// POST 的请求体类型。`form`（默认）或 `json`。
+  ///
+  /// ## 为什么需要区分
+  ///
+  /// 采集接口的 POST 有两种截然不同的形态，混用一定失败：
+  ///   - **表单**（`application/x-www-form-urlencoded`）：MacCMS 系
+  ///     `wd=关键词&pg=2` 那种，绝大多数站是这一类；
+  ///   - **JSON**（`application/json`）：云影这类自研 App 接口，
+  ///     要发的是 `{"current":1,"size":18,"type":"剧集"}`。
+  ///
+  /// 用表单发 JSON 的 body，服务端会收到一个键叫
+  /// `{"current":1,...}` 的畸形字段，返回 400 或「参数缺失」——
+  /// 而现象是「这个源永远搜不到东西」，看不出是编码问题。
+  final String bodyType;
+
   /// 附加请求头。**不允许**写 Host / Cookie —— 见 [PluginManifest.validate]。
   final Map<String, String> headers;
 
   bool get isPost => method.toUpperCase() == 'POST';
+
+  /// 请求体是否为 JSON。
+  bool get isJsonBody => bodyType == 'json';
 
   static PluginRequest? fromJson(Object? raw) {
     if (raw is! Map) return null;
@@ -90,6 +109,10 @@ class PluginRequest {
       method: method,
       query: _strMap(raw['query']),
       body: raw['body'] is String ? raw['body'] as String : '',
+      // 只认 form / json 两个值。写错成别的（比如 jsonp）
+      // 就退回表单——那是采集接口的绝大多数情况，
+      // 静默变成「能发出去但服务端不认」比直接失败更难查。
+      bodyType: raw['bodyType'] == 'json' ? 'json' : 'form',
       headers: _strMap(raw['headers']),
     );
   }
@@ -111,6 +134,8 @@ class PluginRequest {
         if (method != 'GET') 'method': method,
         if (query.isNotEmpty) 'query': query,
         if (body.isNotEmpty) 'body': body,
+        // 只写非默认值：绝大多数请求是表单，全写进缓存会让文件很吵
+        if (bodyType != 'form') 'bodyType': bodyType,
         if (headers.isNotEmpty) 'headers': headers,
       };
 }
@@ -131,6 +156,7 @@ class PluginManifest {
     this.batchDetail = false,
     this.vars = const <String, String>{},
     this.defaultHeaders = const <String, String>{},
+    this.homeRequest,
     this.listRequest,
     this.searchRequest,
     this.detailRequest,
@@ -238,6 +264,25 @@ class PluginManifest {
   /// 所有请求默认带的头（如 UA / Referer）。单个请求可覆盖。
   final Map<String, String> defaultHeaders;
 
+  /// 首页/「推荐」请求。null 表示复用 [listRequest]（采集站的常见情况：
+  /// 推荐位就是不带分类参数的列表）。
+  ///
+  /// ## 为什么需要一个独立端点（2026-11-17 实测，云影）
+  ///
+  /// 有一类站把「推荐」和「分类」做成了**两个完全不同的接口**：
+  ///   - 推荐：`POST /app/video-home/today-updates`，
+  ///     body 是 `{pageNo, pageSize, type}`；
+  ///   - 分类：`POST /app/video-search/label-v2`，
+  ///     body 是 `{current, size, type}`。
+  ///
+  /// 两者的**分页字段名都不一样**（`pageNo` vs `current`），
+  /// 用一个 `list` 模板无论怎么写都只能对上其中一边。
+  /// 早先只能退而求其次让「推荐」也走分类接口，代价是推荐页
+  /// 变成「最新入库」——内容对，但失去了站方人工编排的推荐位。
+  ///
+  /// 采集站没有这个需要（`t` 为空就是全站最新），所以该项可选。
+  final PluginRequest? homeRequest;
+
   /// 分类列表请求。null 表示该源不支持浏览分类。
   final PluginRequest? listRequest;
 
@@ -296,7 +341,11 @@ class PluginManifest {
   final int version;
 
   /// 该源是否声明了「能在首页浏览」（有分类且有列表请求）。
-  bool get canBrowse => categories.isNotEmpty && listRequest != null;
+  ///
+  /// [homeRequest] 也算：只有推荐位、没有分类列表的源（纯 App 接口站）
+  /// 同样能浏览，只是分类 tab 少。漏掉它会让这类源被判成「空白页」直接拒掉。
+  bool get canBrowse =>
+      categories.isNotEmpty && (listRequest != null || homeRequest != null);
 
   bool get canSearch => searchRequest != null;
 
@@ -361,8 +410,13 @@ class PluginManifest {
     return null;
   }
 
-  List<PluginRequest?> get _allRequests =>
-      [listRequest, searchRequest, detailRequest, resolveRequest];
+  List<PluginRequest?> get _allRequests => [
+        homeRequest,
+        listRequest,
+        searchRequest,
+        detailRequest,
+        resolveRequest,
+      ];
 
   /// baseUrl 校验。规则与 [RemoteEndpoints.isValidBase] 一致，但这里
   /// **允许带路径前缀**：部分站点的接口挂在 `https://cdn.example.com/api/`
@@ -441,6 +495,7 @@ class PluginManifest {
       vars: PluginRequest._strMap(raw['vars']),
       defaultHeaders: PluginRequest._strMap(raw['defaultHeaders']),
       listRequest: PluginRequest.fromJson(raw['list']),
+      homeRequest: PluginRequest.fromJson(raw['home']),
       searchRequest: PluginRequest.fromJson(raw['search']),
       detailRequest: PluginRequest.fromJson(raw['detail']),
       resolveRequest: PluginRequest.fromJson(raw['resolve']),
@@ -476,6 +531,7 @@ class PluginManifest {
         if (vars.isNotEmpty) 'vars': vars,
         if (defaultHeaders.isNotEmpty) 'defaultHeaders': defaultHeaders,
         if (listRequest != null) 'list': listRequest!.toJson(),
+        if (homeRequest != null) 'home': homeRequest!.toJson(),
         if (searchRequest != null) 'search': searchRequest!.toJson(),
         if (detailRequest != null) 'detail': detailRequest!.toJson(),
         if (resolveRequest != null) 'resolve': resolveRequest!.toJson(),

@@ -55,12 +55,20 @@ class PreparedRequest {
     required this.method,
     required this.headers,
     this.body = '',
+    this.contentType = '',
   });
 
   final String url;
   final String method;
   final Map<String, String> headers;
   final String body;
+
+  /// 请求体的 Content-Type。空串表示交给调用方按表单处理。
+  ///
+  /// 必须显式带着，不能靠 Dio 猜：Dio 的 `Options.contentType` 一旦给了
+  /// `formUrlEncoded`，即使 body 是 JSON 字符串也会原样发出、只是标签错了，
+  /// 服务端按表单解析就得到一个畸形字段，报的是「参数缺失」。
+  final String contentType;
 }
 
 /// 一次抓取结果。
@@ -231,7 +239,15 @@ PreparedRequest prepareRequest({
     url: finalUrl,
     method: req.method,
     headers: headers,
-    body: req.isPost ? _fill(req.body, params) : '',
+    body: !req.isPost
+        ? ''
+        // JSON body 里的占位符必须做 JS 字符串转义，不能和表单一样裸替换。
+        // 搜索「"引号」这种词时，裸替换会拼出 `{"key":""引号"}` 这样的
+        // 非法 JSON，服务端报的是「参数缺失」，完全看不出是转义问题。
+        : (req.isJsonBody ? _fillJson(req.body, params) : _fill(req.body, params)),
+    // 空串 = 用默认的表单类型；JSON 源（云影等）必须显式声明，
+    // 否则 JSON 串会被当成表单整体塞进一个字段名里。
+    contentType: req.isJsonBody ? Headers.jsonContentType : '',
   );
 }
 
@@ -250,6 +266,63 @@ String _fill(String tpl, Map<String, String> params) {
     out = out.replaceAll('{${e.key}}', e.value);
   }
   return out;
+}
+
+/// 替换 JSON body 里的占位符，**按 JSON 字符串规则转义**。
+///
+/// ## 为什么不能直接用 [_fill]
+///
+/// 表单不需要转义：`wd=关键词` 由 Dio 整体编码，值里有什么字符都不影响结构。
+/// 但 JSON 是有语法的：往 `{"key":"{keyword}"}` 里裸塞一个 `"引号"`，
+/// 拼出来是 `{"key":""引号""}`——不是合法 JSON。
+///
+/// 而服务端收到非法 JSON 的报错通常是「参数缺失」或 400，现象是
+/// **这个源搜不到东西**，从表象完全看不出问题出在转义上。这类问题
+/// 只有在用户搜到带引号/斜杠的词时才复现，最难排查。
+///
+/// ## 转义规则
+///
+/// 只做 JS 字符串转义（`\` `"` 换行 制表 回车 以及控制字符）。
+/// 不做 `jsonEncode` 那种「加引号」——占位符在模板里可能已经在引号内
+/// （`"key":"{keyword}"`），也可能裸着（`"current":{page}`）。
+/// 加引号会破坏后者的类型（数字变字符串，部分接口会因此判空）。
+String _fillJson(String tpl, Map<String, String> params) {
+  var out = tpl;
+  for (final e in params.entries) {
+    out = out.replaceAll('{${e.key}}', _jsonEscape(e.value));
+  }
+  return out;
+}
+
+/// 把任意字符串转成可以安全放进 JSON 双引号字符串里的形态。
+String _jsonEscape(String s) {
+  if (!s.contains(RegExp(r'[\\"\x00-\x1f]'))) return s;
+  final b = StringBuffer();
+  for (final rune in s.runes) {
+    switch (rune) {
+      case 0x22:
+        b.write(r'\"');
+      case 0x5C:
+        b.write(r'\\');
+      case 0x08:
+        b.write(r'\b');
+      case 0x0C:
+        b.write(r'\f');
+      case 0x0A:
+        b.write(r'\n');
+      case 0x0D:
+        b.write(r'\r');
+      case 0x09:
+        b.write(r'\t');
+      default:
+        if (rune < 0x20) {
+          b.write('\\u${rune.toRadixString(16).padLeft(4, '0')}');
+        } else {
+          b.writeCharCode(rune);
+        }
+    }
+  }
+  return b.toString();
 }
 
 /// 执行请求。
@@ -290,8 +363,13 @@ class PluginFetch {
         options: Options(
           method: method,
           headers: req.headers,
+          // 只在真带 body 时才设。301/302/303 会把方法降成 GET、
+          // body 清空，这时候还挂着 content-type 是错的（有些网关
+          // 见到 GET 带表单类型会拒）。
           contentType: method == 'POST'
-              ? Headers.formUrlEncodedContentType
+              ? (req.contentType.isEmpty
+                  ? Headers.formUrlEncodedContentType
+                  : req.contentType)
               : null,
         ),
       );

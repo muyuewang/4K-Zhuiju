@@ -9,6 +9,8 @@
 /// 而且看日志只看到 200 响应，很难往「URL 拼错了」上想。
 library;
 
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuiju/core/plugin/plugin_fetch.dart';
 import 'package:zhuiju/core/plugin/plugin_manifest.dart';
@@ -287,6 +289,113 @@ void main() {
       );
       // & 和 = 必须被编码，否则会被当成新的参数
       expect(p.url, contains('a%26b%3Dc+d'));
+    });
+  });
+
+  group('bodyType 决定请求体编码', () {
+    PluginManifest mkJson() => PluginManifest.fromJson(<String, dynamic>{
+          'id': 'js_j',
+          'name': 'j',
+          'baseUrl': 'https://www.yuny.app',
+          'script': 'config/plugins/x.js',
+          'categories': [
+            {'id': '', 'name': '推荐'},
+          ],
+          'list': {
+            'path': '/app/video-search/label-v2',
+            'method': 'POST',
+            'body': '{"current":{page},"size":18,"type":"{category}"}',
+            'bodyType': 'json',
+          },
+        })!;
+
+    test('json 源会声明 application/json（否则服务端按表单解析）', () {
+      final p = prepareRequest(
+        manifest: mkJson(),
+        req: const PluginRequest(
+          path: '/app/video-search/label-v2',
+          method: 'POST',
+          body: '{"current":{page},"size":18,"type":"{category}"}',
+          bodyType: 'json',
+        ),
+        params: {'page': '2', 'category': '电影'},
+      );
+      expect(p.contentType, contains('application/json'));
+      // 数字占位符不能加引号，否则会变成字符串，部分接口判空
+      expect(p.body, contains('"current":2'));
+      expect(p.body, contains('"type":"电影"'));
+    });
+
+    test('form 源不带 contentType（沿用默认表单）', () {
+      final p = prepareRequest(
+        manifest: PluginManifest.fromJson(<String, dynamic>{
+              'id': 'js_f',
+              'name': 'f',
+              'baseUrl': 'https://a.com',
+              'script': 's.js',
+              'list': {
+                'path': '/s',
+                'method': 'POST',
+                'body': 'wd={keyword}',
+              },
+            })!,
+        req: const PluginRequest(
+          path: '/s',
+          method: 'POST',
+          body: 'wd={keyword}',
+        ),
+        params: {'keyword': 'abc'},
+      );
+      expect(p.contentType, isEmpty);
+      expect(p.body, 'wd=abc');
+    });
+
+    test('JSON body 里的关键词做转义，不能拼出非法 JSON', () {
+      // 搜索 `"引号"` 这种词时，裸替换会拼出 {"key":""引号""} —— 非法 JSON。
+      // 服务端报的是「参数缺失」，完全看不出是转义问题。
+      final req = const PluginRequest(
+        path: '/s',
+        method: 'POST',
+        body: '{"key":"{keyword}"}',
+        bodyType: 'json',
+      );
+      final p = prepareRequest(
+        manifest: mkJson(),
+        req: req,
+        params: {'keyword': 'a"b\\c'},
+      );
+      // 拼出来的必须是能解析的 JSON
+      final decoded = jsonDecode(p.body) as Map<String, dynamic>;
+      expect(decoded['key'], 'a"b\\c');
+    });
+
+    test('JSON body 转义换行/制表符', () {
+      final p = prepareRequest(
+        manifest: mkJson(),
+        req: const PluginRequest(
+          path: '/s',
+          method: 'POST',
+          body: '{"key":"{keyword}"}',
+          bodyType: 'json',
+        ),
+        params: {'keyword': 'a\nb\tc'},
+      );
+      final decoded = jsonDecode(p.body) as Map<String, dynamic>;
+      expect(decoded['key'], 'a\nb\tc');
+    });
+
+    test('普通字符串不转义，保持可读', () {
+      final p = prepareRequest(
+        manifest: mkJson(),
+        req: const PluginRequest(
+          path: '/s',
+          method: 'POST',
+          body: '{"key":"{keyword}"}',
+          bodyType: 'json',
+        ),
+        params: {'keyword': '普通关键词'},
+      );
+      expect(p.body, '{"key":"普通关键词"}');
     });
   });
 }

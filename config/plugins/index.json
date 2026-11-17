@@ -829,6 +829,72 @@
           "ids": "{id}"
         }
       }
+    },
+    {
+      "id": "yuny",
+      "name": "云影",
+      "baseUrl": "https://www.yuny.app",
+      "script": "config/plugins/yuny.js",
+      "version": 1,
+      "enabled": true,
+      "description": "需系统代理；分类齐全；自动过滤站方自己都播不了的线路",
+      "group": "需系统代理",
+      "preferDirectLine": true,
+      "defaultHeaders": {
+        "Referer": "https://www.yuny.app/",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh;q=0.9"
+      },
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "电影",
+          "name": "电影"
+        },
+        {
+          "id": "剧集",
+          "name": "剧集"
+        },
+        {
+          "id": "动漫",
+          "name": "动漫"
+        },
+        {
+          "id": "综艺",
+          "name": "综艺"
+        },
+        {
+          "id": "短剧",
+          "name": "短剧"
+        }
+      ],
+      "home": {
+        "path": "/app/video-home/today-updates",
+        "method": "POST",
+        "body": "{\"pageNo\":{page},\"pageSize\":18,\"type\":\"剧集\"}",
+        "bodyType": "json"
+      },
+      "list": {
+        "path": "/app/video-search/label-v2",
+        "method": "POST",
+        "body": "{\"current\":{page},\"size\":18,\"type\":\"{category}\"}",
+        "bodyType": "json"
+      },
+      "search": {
+        "path": "/app/video-search/type-v2",
+        "method": "POST",
+        "body": "{\"current\":{page},\"key\":\"{keyword}\",\"size\":18,\"searchCode\":1,\"order\":\"desc\"}",
+        "bodyType": "json"
+      },
+      "detail": {
+        "path": "/app/video-interact/get-video-detail",
+        "query": {
+          "videoInfoId": "{id}"
+        }
+      }
     }
   ]
 }

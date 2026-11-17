@@ -192,6 +192,77 @@ void main() {
     });
   });
 
+  group('home 端点（推荐位独立接口）', () {
+    /// 云影这类纯 App 接口站：推荐和分类是两个端点，**连分页字段名都不同**
+    /// （`pageNo` vs `current`），一个 list 模板只能对上一边。
+    Map<String, dynamic> homeJson() => <String, dynamic>{
+          'id': 'js_home',
+          'name': '推荐位源',
+          'baseUrl': 'https://www.yuny.app',
+          'script': 'config/plugins/yuny.js',
+          'categories': [
+            {'id': '', 'name': '推荐'},
+          ],
+          // 必须显式写 <String, dynamic>：这个字面量的值全是字符串，
+          // Dart 会推断成 Map<String, String>。之后想往里塞一个 Map
+          // （测 headers 那条用例）会在运行期抛类型错误，
+          // 而报错指向的是赋值行，看起来像 DTO 的 bug。
+          'home': <String, dynamic>{
+            'path': '/app/video-home/today-updates',
+            'method': 'POST',
+            'body': '{"pageNo":{page},"pageSize":18}',
+            'bodyType': 'json',
+          },
+        };
+
+    test('home 能解析出来，bodyType 一并带上', () {
+      final m = PluginManifest.fromJson(homeJson())!;
+      expect(m.homeRequest, isNotNull);
+      expect(m.homeRequest!.isPost, isTrue);
+      expect(m.homeRequest!.isJsonBody, isTrue);
+      expect(m.homeRequest!.path, '/app/video-home/today-updates');
+    });
+
+    test('只有 home 没有 list 也算能浏览（否则这类源会被整条拒掉）', () {
+      // 这是最容易踩的一处：canBrowse 早先只看 listRequest，
+      // 纯 App 接口站（只有推荐位）会被判成「既不能浏览也不能搜索」
+      // → 整份清单作废 → 用户看到源列表里少了一个，且没有任何提示。
+      final m = PluginManifest.fromJson(homeJson())!;
+      expect(m.listRequest, isNull);
+      expect(m.canBrowse, isTrue);
+      expect(m.validate(), isNull);
+    });
+
+    test('什么都没配仍然拒绝', () {
+      final j = homeJson()..remove('home');
+      final m = PluginManifest.fromJson(j)!;
+      expect(m.canBrowse, isFalse);
+      expect(m.validate(), isNotNull);
+    });
+
+    test('home 走 toJson 往返不丢', () {
+      final m1 = PluginManifest.fromJson(homeJson())!;
+      final m2 = PluginManifest.fromJson(
+        jsonDecode(jsonEncode(m1.toJson())),
+      )!;
+      expect(m2.homeRequest, isNotNull);
+      expect(m2.homeRequest!.path, m1.homeRequest!.path);
+      expect(m2.homeRequest!.bodyType, 'json');
+      expect(m2.homeRequest!.body, m1.homeRequest!.body);
+      expect(m2.validate(), isNull);
+    });
+
+    test('home 的请求头同样受 Host/Cookie 限制', () {
+      final j = homeJson();
+      // 必须显式当成 Map<String, dynamic>：字面量会被推断成
+      // Map<String, String>，往里塞一个 Map 会在运行期抛类型错误，
+      // 看起来像 DTO 的 bug，实际是这个测试的写法问题。
+      (j['home'] as Map<String, dynamic>)['headers'] = {'Cookie': 'a=b'};
+      final m = PluginManifest.fromJson(j)!;
+      expect(m.validate(), isNotNull);
+    });
+  });
+
   group('toJson 往返', () {
     test('存进去再读出来完全等价', () {
       final j = minimalJson()
