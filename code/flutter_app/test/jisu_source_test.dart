@@ -16,7 +16,6 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuiju/core/source/jisu_source.dart';
-import 'package:zhuiju/core/source/registry.dart';
 
 // ==================== 真实样本（截自线上抓取，勿手改） ====================
 
@@ -329,24 +328,27 @@ void main() {
     });
   });
 
-  group('注册表登记', () {
-    final registry = SourceRegistry.instance;
+  // 2026-11-17 架构反转：注册表不内置任何源，`byId('jisu')` 在没装配置时
+  // 返回的是占位源。所以这里改成**直接断言源实例**——这些用例要守的是
+  // 「源自己的属性对不对」，本来就不该绕注册表中转。
+  // 装配链路是否正常，由 plugin_registry_test 单独覆盖。
+  group('源自身属性', () {
+    final s = JisuSource.instance;
 
-    test('jisu 已注册且能被 byId 找到', () {
-      final s = registry.byId('jisu');
+    test('id 与展示名', () {
       expect(s.id, 'jisu');
       expect(s.displayName, '极速追剧');
       expect(s.supportsDanmaku, isFalse);
     });
 
     test('分类齐全：推荐 + 5 个 channel', () {
-      final ids = registry.byId('jisu').categories.map((c) => c.id).toList();
+      final ids = s.categories.map((c) => c.id).toList();
       // channel 实测 1-5 全部有数据（不像某些源存在空分区）
       expect(ids, ['', '1', '2', '3', '4', '5']);
     });
 
     test('描述里写清了「需代理」（用户选源能看见）', () {
-      expect(registry.byId('jisu').description, contains('代理'));
+      expect(s.description, contains('代理'));
     });
   });
 

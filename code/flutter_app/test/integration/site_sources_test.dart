@@ -8,7 +8,6 @@ library;
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:zhuiju/core/source/registry.dart';
 import 'package:zhuiju/core/source/site_sources.dart';
 
 void main() {
@@ -24,13 +23,12 @@ void main() {
     }
   }
 
-  test('注册表包含两个新站，且默认源仍是橘汁', () {
-    final ids = SourceRegistry.all.map((e) => e.id).toList();
-    print('已注册数据源：$ids');
-    expect(ids, contains('zhuiju'));
-    expect(ids, contains('kanju'));
-    expect(ids, contains('pianku'));
-    expect(ids.first, 'zhuiju');
+  test('片库 4K 的源契约完好', () {
+    // 注册表不再内置源（2026-11-17），所以这里不再断言「在列表里」，
+    // 而是断言源自己的契约——这份文件本来就是联网探针，主体是下面的
+    // 真实请求，源是否被配置声明由 config 层单独保证。
+    expect(kPiankuSource.id, 'pianku');
+    expect(kPiankuSource.categories.isNotEmpty, isTrue);
     expect(kPiankuSource.lineOrderPolicy.name, 'sourceOrder');
   });
 

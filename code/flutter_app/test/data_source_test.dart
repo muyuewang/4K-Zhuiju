@@ -137,39 +137,55 @@ void main() {
   });
 
   group('源注册表', () {
-    setUp(() => SharedPreferences.setMockInitialValues({}));
+    // 2026-11-17 架构反转：注册表**不内置任何源**，所有源都由远程插件
+    // 配置装入。所以这里不能再说「开箱就有橘汁」——测试必须自己装入，
+    // 否则测的是已经不存在的行为。
+    setUp(() {
+      SharedPreferences.setMockInitialValues({});
+      SourceRegistry.replacePlugins(<DataSource>[
+        KanjuSource.instance,
+        ZhuijuSource.instance,
+      ]);
+    });
+    tearDown(() => SourceRegistry.replacePlugins(const <DataSource>[]));
 
-    test('至少注册了两个源，且 id 唯一', () {
+    test('装入的源 id 唯一', () {
       final ids = SourceRegistry.all.map((e) => e.id).toList();
       expect(ids.length, greaterThanOrEqualTo(2));
       expect(ids.toSet().length, ids.length, reason: 'id 重复会让持久化串源');
     });
 
-    test('默认源是橘汁（老用户升级后行为不变）', () {
-      expect(SourceRegistry.instance.now.id, 'zhuiju');
+    test('没有选中记录时，当前源是装入列表的第一个', () {
+      // 不再是「硬编码橘汁」：源由配置决定顺序，宿主不预设谁该是默认。
+      // 配置里第一个就是用户的默认源，这与切源面板里的排序一致。
+      expect(SourceRegistry.instance.now.id, 'kanju');
     });
 
-    test('空串 / null / 未知 id 一律退回橘汁', () {
-      // 这是升级兼容的唯一保证：老收藏没有 sourceId，读出来是空串
-      expect(SourceRegistry.instance.byId('').id, 'zhuiju');
-      expect(SourceRegistry.instance.byId(null).id, 'zhuiju');
-      expect(SourceRegistry.instance.byId('nonexistent').id, 'zhuiju');
+    test('空串 / null 退回第一个；未知 id 退回占位', () {
+      // 空串是「升级前的老收藏没有 sourceId」这种正常情况，
+      // 退到第一个源是唯一可行的兜底。
+      expect(SourceRegistry.instance.byId('').id, 'kanju');
+      expect(SourceRegistry.instance.byId(null).id, 'kanju');
+
+      // 未知 id 不退到某个真实源：拿已删源的 id 去请求另一个源，
+      // 多半取回一部不相干的片子，比明确报错更难查。
+      expect(SourceRegistry.instance.byId('nonexistent').id, '__offline');
     });
 
     test('按 id 能找回 kanju', () {
       expect(SourceRegistry.instance.byId('kanju').id, 'kanju');
     });
 
-    test('切换后 now 跟着变，且 switch 后持久化可读回', () async {
-      await SourceRegistry.instance.selectById('kanju');
-      expect(SourceRegistry.instance.now.id, 'kanju');
-
-      final sp = await SharedPreferences.getInstance();
-      expect(sp.getString('app.dataSourceId'), 'kanju');
-
-      // 切回来，避免影响同进程内的其它用例
+    test('切换后 now 跟着变，且 select 后持久化可读回', () async {
       await SourceRegistry.instance.selectById('zhuiju');
       expect(SourceRegistry.instance.now.id, 'zhuiju');
+
+      final sp = await SharedPreferences.getInstance();
+      expect(sp.getString('app.dataSourceId'), 'zhuiju');
+
+      // 切回来，避免影响同进程内的其它用例
+      await SourceRegistry.instance.selectById('kanju');
+      expect(SourceRegistry.instance.now.id, 'kanju');
     });
   });
 

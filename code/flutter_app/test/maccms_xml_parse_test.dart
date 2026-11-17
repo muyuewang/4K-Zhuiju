@@ -16,8 +16,9 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuiju/core/source/maccms_api_source.dart';
-import 'package:zhuiju/core/source/registry.dart';
 import 'package:zhuiju/core/source/site_sources.dart';
+
+import 'support/plugin_index.dart';
 
 /// 真实报文：`?ac=videolist&ids=21`，974 B，单条单集。
 /// 来源：api.yzzyapi.com，2026-11-14 抓取。
@@ -261,8 +262,12 @@ void main() {
           reason: 'ac=detail 会忽略 ids，详情页会打开成不相干的片子');
     });
 
-    test('已登记进注册表', () {
-      expect(SourceRegistry.all.any((s) => s.id == 'yzzyapi'), isTrue);
+    test('已在 index.json 里声明', () {
+      // 2026-11-17 起注册表不内置源，装配由远端配置决定。
+      // 这里断言配置里有它，而不是注册表的 `_all`。
+      expect(declaredSourceIds(), contains('yzzyapi'));
+      // 这批站都是国内直连，分组写错会被标成「需系统代理」
+      expect(declaredEntry('yzzyapi')!['group'], '采集站（直连）');
     });
 
     test('线路中文名：1080zyk 是直出、zykyun 是分享页', () {
@@ -294,8 +299,9 @@ void main() {
       expect(cfg().listNeedsBatchDetail, isFalse);
     });
 
-    test('已登记进注册表', () {
-      expect(SourceRegistry.all.any((s) => s.id == 'jszyapi'), isTrue);
+    test('已在 index.json 里声明', () {
+      expect(declaredSourceIds(), contains('jszyapi'));
+      expect(declaredEntry('jszyapi')!['group'], '采集站（直连）');
     });
 
     test('线路中文名：jsm3u8 直出、jsyun 网页', () {
@@ -327,10 +333,10 @@ void main() {
           reason: 'qdys2 是 JSON 站，批量补封面那是 XML 站才需要的路');
     });
 
-    test('已登记进注册表，且排在采集站组', () {
-      expect(SourceRegistry.all.any((s) => s.id == 'qdys2'), isTrue);
-      expect(SourceRegistry.groupOf(kQdys2Source), '采集站（直连）');
-      expect(SourceRegistry.needsProxy(kQdys2Source), isFalse);
+    test('已在 index.json 里声明，且归在采集站组', () {
+      expect(declaredSourceIds(), contains('qdys2'));
+      expect(declaredEntry('qdys2')!['group'], '采集站（直连）',
+          reason: '起点资源国内直连，不该被标成需系统代理');
     });
 
     test('线路中文名四条都要配（少一个界面上就有个裸露的英文 id）', () {

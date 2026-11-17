@@ -16,7 +16,6 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:zhuiju/core/source/data_source.dart';
-import 'package:zhuiju/core/source/registry.dart';
 import 'package:zhuiju/core/source/yuny_source.dart';
 
 // ------------------------------ 真实样本 ------------------------------
@@ -386,11 +385,12 @@ void main() {
     });
   });
 
-  group('注册表', () {
-    test('云影已登记在册', () {
-      final registry = SourceRegistry.instance;
-      expect(registry.byId('yuny').id, 'yuny');
-      expect(SourceRegistry.all.any((e) => e.id == 'yuny'), isTrue);
+  // 注册表不再内置源（2026-11-17）：改为直接断言源实例。
+  group('源自身属性', () {
+    test('id 与展示名', () {
+      final s = YunySource.instance;
+      expect(s.id, 'yuny');
+      expect(s.displayName.isNotEmpty, isTrue);
     });
   });
 

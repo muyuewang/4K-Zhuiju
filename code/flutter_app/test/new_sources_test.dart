@@ -13,10 +13,15 @@
 /// 所以在这里用纯离线断言把它们钉死。
 library;
 
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuiju/core/source/maccms_api_source.dart';
 import 'package:zhuiju/core/source/registry.dart';
 import 'package:zhuiju/core/source/site_sources.dart';
+
+import 'support/plugin_index.dart';
 
 /// 从 [DataSource] 取回采集接口配置，顺便断言它确实是采集站。
 MacCmsApiConfig cfgOf(Object source) {
@@ -37,17 +42,19 @@ void main() {
       'maoyan': kMaoyanSource,
     };
 
-    test('id 与注册表里登记的一致', () {
+    test('id 与 index.json 里声明的一致', () {
+      // 2026-11-17 起注册表不内置源，所以「是否登记」的答案在
+      // config/plugins/index.json 而不是 Dart 代码里。这个断言守的是
+      // **两份东西不能各说各话**：源文件里的 id 与配置里的 id 一旦不一致，
+      // 用户切到这个源时收藏/历史里的 sourceId 就对不上，表现为
+      // 「收藏还在，但点开是空的」。
+      final declared = declaredSourceIds();
       for (final entry in sources.entries) {
         final cfg = cfgOf(entry.value);
         expect(cfg.id, entry.key, reason: '${cfg.displayName} 的 id 被改过');
-        // SourceRegistry.byId 在查不到时会**静默回退到默认源**，
-        // 所以「id 没登记」不会报错，只会让用户点进去查到橘汁的片库。
-        expect(
-          SourceRegistry.all.any((s) => s.id == cfg.id),
-          isTrue,
-          reason: '${cfg.displayName} 没有在 registry.dart 里登记',
-        );
+        expect(declared, contains(cfg.id),
+            reason: '${cfg.displayName}（${cfg.id}）没有写进 '
+                'config/plugins/index.json，用户在切源面板里看不到它');
       }
     });
 
@@ -281,76 +288,92 @@ void main() {
     });
   });
 
-  group('注册表分组与排序', () {
-    test('4 个采集站归在「采集站（直连）」组', () {
-      for (final s in [
-        kDyttSource,
-        kGuangsuSource,
-        kFeifanSource,
-        kMaoyanSource,
-      ]) {
-        expect(SourceRegistry.groupOf(s), '采集站（直连）');
-        expect(SourceRegistry.needsProxy(s), isFalse,
-            reason: '${s.displayName} 国内直连可用，不该被标成需代理');
+  // 2026-11-17 架构反转后，这组断言的对象从「注册表里的内置源」换成了
+  // 「index.json 里的声明」。分组、顺序、是否需要代理，现在全是配置说了算：
+  // 宿主编译在包里，不可能预知远端会下发哪些源。
+  group('index.json 的分组与顺序', () {
+    test('4 个采集站都声明在「采集站（直连）」组', () {
+      for (final id in ['dytt', 'guangsu', 'feifan', 'maoyan']) {
+        final e = declaredEntry(id);
+        expect(e, isNotNull, reason: '$id 没写进 index.json');
+        expect(e!['group'], '采集站（直连）',
+            reason: '$id 国内直连可用，不该被标成需代理');
       }
     });
 
-    test('橘汁仍在第一位（用户指定的默认源）', () {
-      expect(SourceRegistry.all.first.id, 'zhuiju');
-      expect(SourceRegistry.groupOf(SourceRegistry.all.first), '默认');
+    test('每个源都显式声明了 group', () {
+      // 留空虽然会退回「采集站（直连）」，但那是**兜底**，不是语义。
+      // 采集站换域名是常态，一旦新站需要代理而作者忘了写 group，
+      // 用户点进去只看到「无法连接」，且完全看不出原因。
+      for (final id in declaredSourceIds()) {
+        final e = declaredEntry(id)!;
+        expect((e['group'] as String?)?.trim() ?? '', isNotEmpty,
+            reason: '$id 没声明 group，出问题时无从判断它该不该走代理');
+      }
     });
 
-    test('前 5 个的相对次序不变', () {
-      // 用户明确要求：默认橘汁，后面依次追剧 / 暴风 / 量子 / 片库。
-      // 可可影视原先排在第 6 位，2026-11-13 因「详情页选集为空、播放地址为
-      // 空串、签名 API 不可达」确定性失效而剔除。
-      const want = ['zhuiju', 'kanju', 'bofeng', 'liangzi', 'pianku'];
-      expect(SourceRegistry.all.take(5).map((e) => e.id).toList(), want);
-    });
-
-    test('采集站按实测速度升序：dytt < guangsu < feifan < maoyan', () {
-      const want = ['dytt', 'guangsu', 'feifan', 'maoyan'];
-      final ids = SourceRegistry.all.map((e) => e.id).toList();
-      final pos = want.map(ids.indexOf).toList();
-      expect(pos.every((i) => i >= 0), isTrue, reason: '有源没登记');
+    test('采集站按实测速度升序排（dytt < guangsu < feifan < maoyan）', () {
+      // 顺序即 index.json 里 plugins 数组的顺序——切源面板按它渲染。
+      // 快源排前面，用户点开就有内容；慢源（金山 3.4s、无尽 4.5s）沉底。
+      final want = ['dytt', 'guangsu', 'feifan', 'maoyan'];
+      final ordered = _declaredOrder();
+      final pos = [for (final id in want) ordered.indexOf(id)];
+      expect(pos.every((i) => i >= 0), isTrue, reason: '有源没写进 index.json');
       for (var i = 1; i < pos.length; i++) {
         expect(pos[i] > pos[i - 1], isTrue,
-            reason: '${want[i]} 应排在 ${want[i - 1]} 之后（实测更快）');
+            reason: '${want[i]} 应排在 ${want[i - 1]} 之后（实测更慢）');
       }
     });
 
-    test('需代理的源全部排在直连采集站之后', () {
-      final ids = SourceRegistry.all.map((e) => e.id).toList();
-      // 樱花剔除后，直连组最后一个是猫眼（264ms）
-      final lastDirect = ids.indexOf('maoyan');
-      for (final id in ['kvm4k', 'jisu', 'yuny', 'ddys']) {
-        final at = ids.indexOf(id);
-        expect(at, greaterThan(lastDirect),
-            reason: '$id 需要代理，必须沉到直连源后面');
-        expect(SourceRegistry.needsProxy(SourceRegistry.instance.byId(id)), isTrue);
+    test('每个采集站都配了线路中文名', () {
+      // 少了这个，选线路面板里显示的就是 `bfzym3u8` 这种天书，
+      // 而那个面板恰恰最需要「哪条能播」这个信息。
+      for (final id in ['bofeng', 'liangzi', 'dytt', 'guangsu',
+                        'feifan', 'maoyan', 'yzzyapi', 'jszyapi',
+                        'qdys2', 'suoni', 'wujin', 'jinying']) {
+        final map = declaredEntry(id)!['lineNameCn'];
+        expect(map, isA<Map>(), reason: '$id 缺 lineNameCn');
+        expect((map as Map).isNotEmpty, isTrue, reason: '$id 的 lineNameCn 是空的');
       }
     });
 
-    test('分组顺序固定：默认 → 常用 → 采集站（直连）→ 需系统代理 → 插件', () {
-      // 插件组是 2026-11-17 加的第五组。放最后的原因是：它的可用性取决于
-      // 远端配置能不能拉到，不该占据用户第一眼的注意力。
+    test('特殊能力只在需要的源上打开', () {
+      // 这两个开关一旦错开，现象都很隐蔽：
+      //   derivePlayIndex 错开 → 金山网页线路打开是 Vue 空壳，播放器报格式错误；
+      //   batchDetail 错开     → 优子资源整页无封面，用户以为源挂了。
+      expect(declaredEntry('jszyapi')!['derivePlayIndex'], isTrue,
+          reason: '金山的 jsyun 是空壳页，必须派生 /index.m3u8');
+      expect(declaredEntry('yzzyapi')!['batchDetail'], isTrue,
+          reason: '优子的 ac=list 没封面，必须批量回查');
+
+      // 反过来也要守住：别的站乱开只会多打一次没用的请求
+      for (final id in ['dytt', 'guangsu', 'feifan', 'maoyan']) {
+        expect(declaredEntry(id)!.containsKey('derivePlayIndex'), isFalse,
+            reason: '$id 没有 /play/<token> 目录约定，开了只会拼出 404');
+        expect(declaredEntry(id)!.containsKey('batchDetail'), isFalse,
+            reason: '$id 的 ac=list 本来就带封面，批量回查纯属浪费');
+      }
+    });
+
+    test('分组顺序固定：默认 → 常用 → 采集站（直连）→ 需系统代理', () {
+      // 「插件（在线更新）」这一组已随架构反转删掉：现在所有源都是从
+      // 远端配置装进来的，再单列一组会让所有源都落进同一组，等于没分组。
       expect(SourceRegistry.groupOrder, [
         '默认',
         '常用',
         '采集站（直连）',
         '需系统代理',
-        '插件（在线更新）',
       ]);
     });
-
-    test('内置源不会被归到插件组（分组按 id 查表，不靠猜）', () {
-      // 插件组只对运行时注册的 RemoteJsSource 生效。内置的 19 个源
-      // 全部编译在包里，把它们误标成「插件」会让用户以为它们能在线更新。
-      for (final s in SourceRegistry.all) {
-        if (s.id.startsWith('js_')) continue;
-        expect(SourceRegistry.groupOf(s), isNot('插件（在线更新）'),
-            reason: '${s.id} 是内置源，不该被归到插件组');
-      }
-    });
   });
+}
+
+/// index.json 里 plugins 数组声明的 id 顺序。
+List<String> _declaredOrder() {
+  final raw = jsonDecode(File(kIndexPath).readAsStringSync());
+  final list = (raw as Map)['plugins'] as List;
+  return [
+    for (final one in list)
+      if (one is Map && one['id'] is String) one['id'] as String,
+  ];
 }

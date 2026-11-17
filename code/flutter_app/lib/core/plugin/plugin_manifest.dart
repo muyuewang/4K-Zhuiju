@@ -124,6 +124,11 @@ class PluginManifest {
     required this.script,
     required this.categories,
     this.description = '',
+    this.group = '',
+    this.lineNameCn = const <String, String>{},
+    this.preferDirectLine = true,
+    this.derivePlayIndex = false,
+    this.batchDetail = false,
     this.vars = const <String, String>{},
     this.defaultHeaders = const <String, String>{},
     this.listRequest,
@@ -163,6 +168,72 @@ class PluginManifest {
   /// 典型用途：某个站的接口要带固定 `key=xxx`，或者分类 id 表是站方
   /// 自定义的一串数字。放这里就不用为每个站改脚本。
   final Map<String, String> vars;
+
+  /// 切换面板里的分组名，如「常用」「需系统代理」。
+  ///
+  /// ## 为什么由配置声明而不是宿主硬编码
+  ///
+  /// 源全在远端之后，宿主不可能预知会下发哪些 id。硬编码的 id 表
+  /// 一旦对不上，新源就会被静默归到「采集站」——而它实际可能需要
+  /// 系统代理，用户点进去只看到「无法连接」，且看不出原因。
+  ///
+  /// 空串表示不声明，宿主按「采集站（直连）」处理。
+  final String group;
+
+  /// 线路英文标识 → 中文名，如 `{'bfzym3u8': '暴风线路'}`。
+  ///
+  /// ## 为什么这个必须由配置声明而不是脚本硬编码
+  ///
+  /// MacCMS 的 `vod_play_from` 给的是 `bfzym3u8` / `lzm3u8` / `jsyun`
+  /// 这类站点内部代号。直接显示给用户就是「bfzym3u8」这种天书，
+  /// 而选线路面板里恰恰最需要「哪条能播」这个信息。
+  ///
+  /// 映射表放在清单里而不是脚本里，是因为**同一个代号在不同站上
+  /// 含义不同**：`dyttm3u8` 在电影天堂是本家线路，在起点资源却只是
+  /// 借用这个行业通用名（地址完全不同的 CDN）。脚本是多个源共用的，
+  /// 硬编码就会把 A 站的叫法套到 B 站上。
+  ///
+  /// 未命中的标识原样显示——比显示「线路3」有用，至少用户能看出
+  /// 两条线路是不是同一个来源。
+  final Map<String, String> lineNameCn;
+
+  /// 是否把「直出 m3u8/mp4」的线路排到最前。默认开。
+  ///
+  /// ## 为什么默认开而不是默认关
+  ///
+  /// 2026-11-13 实测：这批采集站给同一部剧常下发两条线路，第一条是
+  /// `…/share/<md5>` 的网页页，第二条才是直出 m3u8。播放器默认取第一条，
+  /// 而网页分享页靠 JS 渲染，抓下来连 m3u8 都抠不出来 —— 用户看到的是
+  /// 「点进去一直转圈」。
+  ///
+  /// 默认开 = 新接入的站不用摸清线路顺序也是好的；确实需要保留站点
+  /// 原始顺序的，显式写 `"preferDirectLine": false`。
+  final bool preferDirectLine;
+
+  /// 是否把 `/play/<token>` 派生为 `/play/<token>/index.m3u8`。默认关。
+  ///
+  /// 金山这类站的网页线路给的是 `vv.jisuzyv.com/play/epY8gOra`，
+  /// 抓下来是 1294 B 的 Vue 空壳（正文只有 `<div id="app">`），
+  /// 但同目录下的 `index.m3u8` 实测可播。默认关是因为绝大多数站
+  /// 没这个目录约定，盲目拼接会造出一堆 404 地址。
+  final bool derivePlayIndex;
+
+  /// 列表拿到 id 后，是否再用 [detailRequest] 的 `ids=` 批量回查一遍。默认关。
+  ///
+  /// ## 什么时候需要（优子资源，2026-11-14 实测）
+  ///
+  /// 这类站的两个出口能力互补且**互斥**，没有任何参数能同时满足：
+  ///   - `ac=list&pg=n` → 按更新时间倒序（最新片），但只有线路名、
+  ///     没有封面没有分集，5.7 KB；
+  ///   - `ac=videolist&pg=n` → 有封面有分集，但**按 id 升序**，
+  ///     第一页全是 2022 年的老片，用户打开就是「这源怎么这么旧」。
+  ///
+  /// `order=time` / `order=last` / `at=json` 三种参数实测**被服务端忽略**
+  /// （返回字节数与不加参数完全一致）。所以只能先拿 id 再批量回查。
+  /// 代价：1.2s + 2.1s ≈ 3.3s / 页，但它换来「最新且有封面」。
+  ///
+  /// 回查失败时**保留原列表**：封面没有只是不好看，列表直接空掉才是事故。
+  final bool batchDetail;
 
   /// 所有请求默认带的头（如 UA / Referer）。单个请求可覆盖。
   final Map<String, String> defaultHeaders;
@@ -330,8 +401,14 @@ class PluginManifest {
         if (c is Map) {
           final cid = c['id'];
           final cname = c['name'];
-          if (cid is String && cname is String && cid.isNotEmpty) {
-            cats.add(SourceCategory(cid, cname));
+          // **允许空 id**：它表示「不传分类参数」，也就是首页首屏的
+          // 「推荐」。采集站的推荐位不带 `t` 才是全站最新，带一个
+          // 具体 id 反而会变成某个子分类。
+          //
+          // 早先这里要求 `cid.isNotEmpty`，结果所有源的「推荐」tab
+          // 被静默丢掉——现象是「第一个 tab 不见了」，且没有任何日志。
+          if (cid is String && cname is String && cname.isNotEmpty) {
+            cats.add(SourceCategory(cid.trim(), cname));
           }
         } else if (c is String && c.isNotEmpty) {
           // 简写形式：直接给 id，名字用 id 顶替。
@@ -350,6 +427,17 @@ class PluginManifest {
       description: raw['description'] is String
           ? raw['description'] as String
           : '',
+      group: raw['group'] is String ? (raw['group'] as String).trim() : '',
+      lineNameCn: PluginRequest._strMap(raw['lineNameCn']),
+      // 默认值与构造函数保持一致：配置没写就是「开」，
+      // 写成 `raw[...] == true` 会让缺省变成关，与文档相反
+      preferDirectLine: raw['preferDirectLine'] is bool
+          ? raw['preferDirectLine'] as bool
+          : true,
+      derivePlayIndex: raw['derivePlayIndex'] is bool
+          ? raw['derivePlayIndex'] as bool
+          : false,
+      batchDetail: raw['batchDetail'] is bool ? raw['batchDetail'] as bool : false,
       vars: PluginRequest._strMap(raw['vars']),
       defaultHeaders: PluginRequest._strMap(raw['defaultHeaders']),
       listRequest: PluginRequest.fromJson(raw['list']),
@@ -375,6 +463,13 @@ class PluginManifest {
         'baseUrl': baseUrl,
         'script': script,
         if (description.isNotEmpty) 'description': description,
+        if (group.isNotEmpty) 'group': group,
+        if (lineNameCn.isNotEmpty) 'lineNameCn': lineNameCn,
+        // 只写非默认值：这两个开关绝大多数源用默认，
+        // 全写进缓存会让文件里塞满 `"preferDirectLine": true`
+        if (!preferDirectLine) 'preferDirectLine': preferDirectLine,
+        if (derivePlayIndex) 'derivePlayIndex': derivePlayIndex,
+        if (batchDetail) 'batchDetail': batchDetail,
         'categories': categories
             .map((c) => <String, dynamic>{'id': c.id, 'name': c.name})
             .toList(),

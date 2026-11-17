@@ -20,8 +20,9 @@ library;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:zhuiju/core/source/maccms_api_source.dart';
-import 'package:zhuiju/core/source/registry.dart';
 import 'package:zhuiju/core/source/site_sources.dart';
+
+import 'support/plugin_index.dart';
 
 /// 三站在实测中**确认 0 条**的父分类。
 ///
@@ -65,14 +66,20 @@ void main() {
       }
     });
 
-    test('都已登记进注册表，且归到「采集站（直连）」组、不需代理', () {
+    test('都已在 index.json 里声明，且归到「采集站（直连）」组', () {
+      // 2026-11-17 起注册表不内置源：「有没有这个源」由远端配置决定，
+      // 所以断言对象换成 index.json。漏声明的现象是「切源面板里根本
+      // 看不到这个源」，没有任何报错。
+      final declared = declaredSourceIds();
       for (final id in sources.keys) {
-        expect(SourceRegistry.all.any((s) => s.id == id), isTrue,
-            reason: '$id 没进 SourceRegistry._all，界面里根本看不到');
+        expect(declared, contains(id),
+            reason: '$id 没写进 config/plugins/index.json，用户看不到它');
       }
-      for (final e in sources.entries) {
-        expect(SourceRegistry.groupOf(e.value as dynamic), '采集站（直连）');
-        expect(SourceRegistry.needsProxy(e.value as dynamic), isFalse);
+      // 这三个站都是国内直连（实测 1.0~4.5s，无需代理），
+      // 分组写错会让它们在面板里被标成「需系统代理」，误导用户。
+      for (final id in sources.keys) {
+        expect(declaredEntry(id)!['group'], '采集站（直连）',
+            reason: '$id 国内直连可用，不该被标成需代理');
       }
     });
 

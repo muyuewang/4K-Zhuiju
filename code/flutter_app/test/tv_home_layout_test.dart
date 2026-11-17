@@ -24,6 +24,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:zhuiju/core/models.dart';
+import 'package:zhuiju/core/source/data_source.dart';
+import 'package:zhuiju/core/source/registry.dart';
+import 'package:zhuiju/core/source/zhuiju_source.dart';
 import 'package:zhuiju/core/tv.dart';
 import 'package:zhuiju/pages/home_page.dart';
 import 'package:zhuiju/theme.dart';
@@ -41,9 +44,17 @@ void main() {
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    // 注册表不内置任何源之后，首页的分类来自「当前源」。不装一个源的话
+    // 分类数是 0，频道条渲染不出来、网格也一个都不建——测试会以
+    // 「期望 1 实际 0」的形式失败，看起来像布局 bug，其实是没有源。
+    //
+    // 这里装橘汁是因为本文件断言的就是它那套分类（kCategories 由
+    // kZhuijuCategories 派生）。分类内容本身不影响布局骨架的验证。
+    SourceRegistry.replacePlugins(<DataSource>[ZhuijuSource.instance]);
   });
 
   tearDown(() {
+    SourceRegistry.replacePlugins(const <DataSource>[]);
     // 测试之间必须复位，否则 TV 状态会漏到下一个用例
     TvMode.instance.override.value = TvOverride.auto;
     TvMode.instance.enabled.value = false;

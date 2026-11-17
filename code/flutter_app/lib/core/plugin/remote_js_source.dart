@@ -44,15 +44,32 @@ import 'plugin_loader.dart';
 import 'plugin_manifest.dart';
 import 'plugin_runtime.dart';
 
-class RemoteJsSource implements DataSource {
+class RemoteJsSource implements DataSource, SourceGrouped {
   RemoteJsSource(this.plugin);
 
   final LoadedPlugin plugin;
 
   PluginManifest get manifest => plugin.manifest;
 
+  /// 源 id 直接取清单里的 id，**不加任何前缀**。
+  ///
+  /// 早期版本这里返回 `js_${manifest.id}`，目的是让插件源和内建源
+  /// 在列表里一眼可分。但那个设计有个硬伤：同一个站在列表里会出现
+  /// 两次（`pianku` 和 `js_pianku`），用户会以为是两个不同的源。
+  ///
+  /// 现在的规范是「插件层就是源层」——一个站的配置换掉脚本即可整站
+  /// 换代，列表里始终只有一条。id 是收藏/历史持久化的键，因此它在
+  /// 配置里的值必须保持稳定，否则换版本就等于换了一个源。
   @override
-  String get id => 'js_${manifest.id}';
+  String get id => manifest.id;
+
+  /// 分组由清单声明，宿主不再维护 id 表。
+  ///
+  /// 源全在远端后，宿主不可能预知未来会有什么 id；硬编码的 id 表一旦
+  /// 对不上，新源就会被静默归到默认分组，而它实际可能需要系统代理——
+  /// 用户点进去只会看到「无法连接」，且完全看不出原因。
+  @override
+  String get group => manifest.group;
 
   @override
   String get displayName => manifest.name;
@@ -89,17 +106,84 @@ class RemoteJsSource implements DataSource {
     });
   }
 
+  /// 分类列表。`categoryId` 支持「逗号串 = 多分类并发合并」。
+  ///
+  /// ## 为什么需要逗号串（2026-11-13 实测结论）
+  ///
+  /// 采集站的父分类（`1` 电影 / `2` 电视剧）在 `ac=list` 下**恒返回 0 条**，
+  /// 内容全挂在子分类（`6` 动作片、`13` 国产剧…）上。而接口的 `t` 参数
+  /// **不支持逗号聚合**：实测 `t=6,7` 与 `t=6` 的 total 完全相同，
+  /// 返回条目的 type_id 里只有 `6` —— 逗号后面全被忽略，只取第一个。
+  ///
+  /// 所以聚合只能在客户端做：拆开、并发拉同一页码、再交错合并。
+  /// 翻页语义天然正确——每个子分类都取第 [page] 页，不会重复也不会漏。
   @override
   Future<List<Drama>> category(String categoryId, {int page = 1}) async {
     final req = manifest.listRequest;
     if (req == null) {
       throw PluginFetchException('${manifest.name} 不支持按分类浏览');
     }
-    return _loadList(req, <String, String>{
-      'page': '$page',
-      'category': categoryId,
-      'id': categoryId,
-    });
+
+    final ids = categoryId
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList(growable: false);
+
+    if (ids.length <= 1) {
+      return _loadList(req, <String, String>{
+        'page': '$page',
+        'category': ids.isEmpty ? '' : ids.first,
+        'id': ids.isEmpty ? '' : ids.first,
+      });
+    }
+
+    // 单个子分类失败不能拖垮整个栏目：某条分类临时挂了，
+    // 其余分类照常出内容，总比整页报错强。
+    final groups = await Future.wait(ids.map((id) async {
+      try {
+        return await _loadList(req, <String, String>{
+          'page': '$page',
+          'category': id,
+          'id': id,
+        });
+      } catch (e) {
+        debugPrint('[PLUGIN] ${manifest.id} 分类 $id 拉取失败：$e');
+        return const <Drama>[];
+      }
+    }));
+
+    // 全部子分类都失败才报错，让界面给出可重试的提示；
+    // 只判 page==1 是因为翻到后面本来就可能是空页
+    if (groups.every((g) => g.isEmpty) && page == 1) {
+      throw PluginFetchException('${manifest.name} 暂时取不到内容，请稍后重试');
+    }
+    return _interleave(groups);
+  }
+
+  /// 交错合并多组条目并去重。
+  ///
+  /// 不直接 `addAll`：第一个子分类往往有上千条，直接拼会让前几屏全是
+  /// 同一类（点「电影」连翻三屏都是动作片）。交错后每屏都是混合的，
+  /// 更接近「电影院线」的观感。
+  ///
+  /// 去重按 id：少数站跨分类重复收录同一部片，不去重会看到两张一样的卡。
+  static List<Drama> _interleave(List<List<Drama>> groups) {
+    var maxLen = 0;
+    for (final g in groups) {
+      if (g.length > maxLen) maxLen = g.length;
+    }
+    final out = <Drama>[];
+    final seen = <String>{};
+    for (var i = 0; i < maxLen; i++) {
+      for (final g in groups) {
+        if (i >= g.length) continue;
+        final d = g[i];
+        if (d.id.isEmpty || !seen.add(d.id)) continue;
+        out.add(d);
+      }
+    }
+    return out;
   }
 
   @override
@@ -121,31 +205,70 @@ class RemoteJsSource implements DataSource {
     final map = _asMap(out, 'parseDetail');
 
     final videos = <DramaVideo>[];
+    // 先把线路收成中间结构再展平：因为要按「直出优先」重排，
+    // 而重排必须发生在展平成扁平的 videos 之前。
+    // 如果边解析边 push，重排就得回头改已经算好的 li 索引，很容易错位。
+    final parsed = <_ParsedLine>[];
     final lines = map['lines'];
     if (lines is List) {
       for (var li = 0; li < lines.length; li++) {
         final line = lines[li];
         if (line is! Map) continue;
-        final lineName = _str(line['line'], '线路${li + 1}');
+        // 脚本给的是 `from` 里的原始代号（bfzym3u8 / jsyun…），
+        // 由清单的 lineNameCn 翻成中文。未命中就原样显示——
+        // 比显示「线路3」有用，至少能看出两条线是不是同一个来源。
+        final flag = _str(line['line'], '线路${li + 1}');
+        final nameCn = manifest.lineNameCn[flag] ?? flag;
+
         final eps = line['episodes'];
         if (eps is! List) continue;
+        final episodes = <_ParsedEp>[];
         for (var ei = 0; ei < eps.length; ei++) {
           final ep = eps[ei];
           if (ep is! Map) continue;
-          final url = _str(ep['url'], '');
+          var url = _str(ep['url'], '');
           if (url.isEmpty) continue;
-          videos.add(DramaVideo(
-            id: '${dramaId}_${li}_$ei',
+          if (manifest.derivePlayIndex) {
+            url = _derivePlayIndex(url) ?? url;
+          }
+          episodes.add(_ParsedEp(
             title: _str(ep['name'], '第${ei + 1}集'),
-            path: url,
-            source: lineName,
-            sourceCn: lineName,
-            episode: ei + 1,
-            dramaId: dramaId,
-            // 清单配了 resolve 接口 → 这个 path 还要再换一次
-            needsResolve: manifest.resolveRequest != null,
+            url: url,
           ));
         }
+        if (episodes.isEmpty) continue;
+        parsed.add(_ParsedLine(flag: flag, nameCn: nameCn, episodes: episodes));
+      }
+    }
+
+    // 直出线路顶前，网页分享页沉底（相对顺序各自保持不变）。
+    // 这里手写两段拼接而不是 sort：Dart 的 List.sort 不保证稳定，
+    // 同组内相对次序一旦被打乱，用户熟悉的「线路1/线路2」就变了。
+    final ordered = manifest.preferDirectLine
+        ? <_ParsedLine>[
+            ...parsed.where((l) => l.isDirect),
+            ...parsed.where((l) => !l.isDirect),
+          ]
+        : parsed;
+
+    for (var li = 0; li < ordered.length; li++) {
+      final line = ordered[li];
+      for (var ei = 0; ei < line.episodes.length; ei++) {
+        final ep = line.episodes[ei];
+        videos.add(DramaVideo(
+          id: '${dramaId}_${li}_$ei',
+          title: ep.title,
+          path: ep.url,
+          // source 保留原始代号：它是「同一线路」的身份标识，
+          // 切线路、续播恢复都靠它做等值比较。
+          source: line.flag,
+          // sourceCn 才是给人看的中文名。
+          sourceCn: line.nameCn,
+          episode: ei + 1,
+          dramaId: dramaId,
+          // 清单配了 resolve 接口 → 这个 path 还要再换一次
+          needsResolve: manifest.resolveRequest != null,
+        ));
       }
     }
 
@@ -209,8 +332,14 @@ class RemoteJsSource implements DataSource {
       throw PluginFetchException('${manifest.name} 返回的 items 不是数组');
     }
 
+    // 两阶段回查：列表接口只给 id 和名字（无封面），要再按 ids 批量补全。
+    // 必须在转成 Drama **之前**做，否则已经丢掉的封面字段没法补回来。
+    final enriched = manifest.batchDetail
+        ? await _enrichByBatchDetail(rawItems)
+        : rawItems;
+
     final list = <Drama>[];
-    for (final raw in rawItems) {
+    for (final raw in enriched) {
       if (raw is! Map) continue;
       final dramaId = _str(raw['id'], '');
       final name = _str(raw['name'], '');
@@ -232,6 +361,72 @@ class RemoteJsSource implements DataSource {
       ));
     }
     return list;
+  }
+
+  /// 用 `ids=a,b,c` 批量回查，把封面等信息补进刚拿到的列表。
+  ///
+  /// 失败时**原样返回入参**：封面没有只是不好看，列表直接空掉才是事故。
+  /// 所以这里刻意不抛异常，只记一条日志。
+  ///
+  /// 回填必须**按原顺序**：服务端批量接口可能乱序或漏条，直接采用返回
+  /// 顺序会让列表突然变成另一套排序，用户翻页时会看到重复条目。
+  Future<List<Object?>> _enrichByBatchDetail(List<Object?> rawItems) async {
+    final detailReq = manifest.detailRequest;
+    if (detailReq == null) return rawItems;
+
+    final ids = <String>[];
+    for (final raw in rawItems) {
+      if (raw is! Map) continue;
+      final one = _str(raw['id'], '');
+      if (one.isNotEmpty) ids.add(one);
+    }
+    if (ids.isEmpty) return rawItems;
+
+    try {
+      final f = await _fetch(detailReq, <String, String>{
+        'id': ids.join(','),
+        'ids': ids.join(','),
+      });
+
+      // 批量回查的响应是一屏**多条**，所以必须走 parseList——
+      // parseDetail 只返回第一条（单条详情语义），用它会把整页压成 1 条。
+      final filled = await _batchListOf(f);
+      if (filled.isEmpty) return rawItems;
+
+      final byId = <String, Map<Object?, Object?>>{};
+      for (final one in filled) {
+        if (one is Map) {
+          final k = _str(one['id'], '');
+          if (k.isNotEmpty) byId[k] = one;
+        }
+      }
+      if (byId.isEmpty) return rawItems;
+
+      final outItems = <Object?>[];
+      for (final raw in rawItems) {
+        if (raw is! Map) continue;
+        final k = _str(raw['id'], '');
+        outItems.add(byId[k] ?? raw);
+      }
+      // 一条都没匹配上说明 ids 参数没生效，保留原列表比返回空更安全
+      return outItems.isEmpty ? rawItems : outItems;
+    } catch (e) {
+      debugPrint('[PLUGIN] ${manifest.id} 批量回查失败，保留无封面列表：$e');
+      return rawItems;
+    }
+  }
+
+  /// 调 parseList 解析批量回查的响应，返回 items 数组。
+  Future<List<Object?>> _batchListOf(FetchResult f) async {
+    try {
+      final out = await _call('parseList', <Object?>[f.body, _ctx(f)]);
+      final map = _asMap(out, 'parseList');
+      final items = map['items'];
+      if (items is List) return items;
+    } catch (e) {
+      debugPrint('[PLUGIN] ${manifest.id} 批量回查 parseList 失败：$e');
+    }
+    return const <Object?>[];
   }
 
   Future<FetchResult> _fetch(
@@ -409,4 +604,66 @@ class RemoteJsSource implements DataSource {
     if (v is String) return int.tryParse(v.trim()) ?? 0;
     return 0;
   }
+
+  /// 把 `/play/<token>` 推成 `/play/<token>/index.m3u8`。
+  ///
+  /// 只对「纯壳播放页」有意义：金山这类站的网页线路给的是
+  /// `vv.jisuzyv.com/play/epY8gOra`，抓下来是 1294 B 的 Vue 空壳
+  /// （正文只有 `<div id="app">`），但同目录下的 `index.m3u8` 实测可播。
+  ///
+  /// 三条守卫缺一不可：
+  ///   - 已经是 `.m3u8`/`.mp4` 就返回 null，否则会拼成
+  ///     `…/index.m3u8/index.m3u8`；
+  ///   - 路径必须恰好是 `play/<一段>`，不加这个限制的话 `/play/a/b`
+  ///     也可能被误拼成一个看起来合法的路径；
+  ///   - 拼不出合法主机就返回 null，交给调用方退回原地址。
+  ///
+  /// 返回 null 表示「这条规则不适用」，由调用方保留原 URL。
+  static String? _derivePlayIndex(String pageUrl) {
+    final u = Uri.tryParse(pageUrl.trim());
+    if (u == null || u.host.isEmpty) return null;
+    final p = u.path.toLowerCase();
+    if (p.contains('.m3u8') || p.contains('.mp4')) return null;
+    final segs = u.pathSegments.where((e) => e.isNotEmpty).toList();
+    if (segs.length != 2 || segs.first != 'play') return null;
+    return '${u.scheme}://${u.authority}/play/${segs[1]}/index.m3u8';
+  }
+}
+
+/// 解析过程中的一条线路（尚未展平成 [DramaVideo]）。
+///
+/// 引入这个中间结构只为了一件事：**先收齐再排**。直出线路要顶到前面，
+/// 而重排必须发生在展平之前，否则展平时算好的 `li` 索引会全部错位，
+/// 表现为「切到第 2 条线路播的却是第 1 条」。
+class _ParsedLine {
+  const _ParsedLine({
+    required this.flag,
+    required this.nameCn,
+    required this.episodes,
+  });
+
+  /// `vod_play_from` 里的原始代号，如 `bfzym3u8`。
+  final String flag;
+
+  /// 给人看的中文名，如「暴风线路」。
+  final String nameCn;
+
+  final List<_ParsedEp> episodes;
+
+  /// 是否直出可播地址。
+  ///
+  /// 按**首集**判断：同一线路内各集形态一致，抽查首集足够，
+  /// 也避免为了判断去遍历几千集。
+  bool get isDirect {
+    if (episodes.isEmpty) return false;
+    final u = episodes.first.url.toLowerCase();
+    return u.contains('.m3u8') || u.contains('.mp4');
+  }
+}
+
+class _ParsedEp {
+  const _ParsedEp({required this.title, required this.url});
+
+  final String title;
+  final String url;
 }

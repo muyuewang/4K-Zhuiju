@@ -13,7 +13,6 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuiju/core/source/kvm4k_source.dart';
-import 'package:zhuiju/core/source/registry.dart';
 
 // ==================== 真实样本（截自线上抓取，勿手改） ====================
 
@@ -611,11 +610,12 @@ $_kEpTv
     });
   });
 
-  group('注册表登记', () {
-    final registry = SourceRegistry.instance;
+  // 注册表不再内置源（2026-11-17），`byId` 在没装配置时给占位源。
+  // 这几条本来验证的就是源实例自己的属性，直接断言实例更准确。
+  group('源自身属性', () {
+    final s = Kvm4kSource.instance;
 
-    test('kvm4k 已注册且能被 byId 找到', () {
-      final s = registry.byId('kvm4k');
+    test('id 与展示名', () {
       expect(s.id, 'kvm4k');
       expect(s.displayName, '4K影视');
       // 站点没有弹幕接口，开着开关只会让播放页等一个永远不来的响应。
@@ -623,12 +623,12 @@ $_kEpTv
     });
 
     test('分类齐全：推荐 + 电影 + 电视剧 + 动漫', () {
-      final ids = registry.byId('kvm4k').categories.map((c) => c.id).toList();
+      final ids = s.categories.map((c) => c.id).toList();
       expect(ids, ['', '1', '2', '3']);
     });
 
     test('描述里写清了「需代理」与「自动降级」（用户选源能看见）', () {
-      final desc = registry.byId('kvm4k').description;
+      final desc = s.description;
       expect(desc, contains('代理'));
       expect(desc, contains('1080'));
     });

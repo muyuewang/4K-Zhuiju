@@ -3,27 +3,58 @@
   "schema": 1,
   "plugins": [
     {
-      "id": "js_bdzy",
-      "name": "白杜 · 影视",
-      "baseUrl": "https://api.apibdzy.com",
+      "id": "bofeng",
+      "name": "大师兄 · 暴风",
+      "baseUrl": "https://bfzyapi.com",
       "script": "config/plugins/maccms-json.js",
-      "description": "远程插件源，配置可在线更新；直出 m3u8",
       "version": 1,
       "enabled": true,
+      "description": "直连采集接口，线路直出 m3u8，无弹幕；片库 17 万+",
+      "group": "采集站（直连）",
+      "lineNameCn": {
+        "bfzym3u8": "暴风线路",
+        "lzm3u8": "量子线路",
+        "liangzi": "量子分享",
+        "bfzy": "暴风线路"
+      },
       "categories": [
-        { "id": "1", "name": "电影" },
-        { "id": "2", "name": "电视剧" },
-        { "id": "3", "name": "综艺" },
-        { "id": "4", "name": "动漫" },
-        { "id": "13", "name": "大陆剧" },
-        { "id": "14", "name": "欧美剧" },
-        { "id": "30", "name": "日韩动漫" },
-        { "id": "54", "name": "AI短剧" }
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "26",
+          "name": "电影"
+        },
+        {
+          "id": "31",
+          "name": "国产剧"
+        },
+        {
+          "id": "32",
+          "name": "欧美剧"
+        },
+        {
+          "id": "41",
+          "name": "日韩动漫"
+        },
+        {
+          "id": "58",
+          "name": "短剧"
+        },
+        {
+          "id": "68",
+          "name": "AI漫剧"
+        },
+        {
+          "id": "51",
+          "name": "解说"
+        }
       ],
       "list": {
         "path": "/api.php/provide/vod/",
         "query": {
-          "ac": "videolist",
+          "ac": "list",
           "t": "{category}",
           "pg": "{page}"
         }
@@ -31,7 +62,7 @@
       "search": {
         "path": "/api.php/provide/vod/",
         "query": {
-          "ac": "videolist",
+          "ac": "list",
           "wd": "{keyword}",
           "pg": "{page}"
         }
@@ -45,43 +76,757 @@
       }
     },
     {
-      "id": "js_bdzy_xml",
-      "name": "白杜 · 影视（XML 版）",
-      "baseUrl": "https://api.apibdzy.com",
-      "script": "config/plugins/maccms-xml.js",
-      "description": "远程插件源，走 XML 接口；用来验证 XML 脚本",
+      "id": "liangzi",
+      "name": "大师兄 · 量子",
+      "baseUrl": "https://cj.lziapi.com",
+      "script": "config/plugins/maccms-json.js",
       "version": 1,
-      "enabled": false,
+      "enabled": true,
+      "description": "直连采集接口，短剧与解说资源极多；无弹幕，片库 16 万+",
+      "group": "采集站（直连）",
+      "lineNameCn": {
+        "lzm3u8": "量子线路",
+        "liangzi": "量子分享",
+        "bfzym3u8": "暴风线路"
+      },
       "categories": [
-        { "id": "1", "name": "电影" },
-        { "id": "2", "name": "电视剧" },
-        { "id": "13", "name": "大陆剧" },
-        { "id": "30", "name": "日韩动漫" }
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "7",
+          "name": "电影"
+        },
+        {
+          "id": "13",
+          "name": "国产剧"
+        },
+        {
+          "id": "16",
+          "name": "欧美剧"
+        },
+        {
+          "id": "30",
+          "name": "日韩动漫"
+        },
+        {
+          "id": "46",
+          "name": "短剧"
+        },
+        {
+          "id": "52",
+          "name": "AI漫剧"
+        },
+        {
+          "id": "35",
+          "name": "解说"
+        }
       ],
       "list": {
         "path": "/api.php/provide/vod/",
         "query": {
-          "ac": "videolist",
+          "ac": "list",
           "t": "{category}",
-          "pg": "{page}",
-          "at": "xml"
+          "pg": "{page}"
         }
       },
       "search": {
         "path": "/api.php/provide/vod/",
         "query": {
-          "ac": "videolist",
+          "ac": "list",
           "wd": "{keyword}",
-          "pg": "{page}",
-          "at": "xml"
+          "pg": "{page}"
         }
       },
       "detail": {
         "path": "/api.php/provide/vod/",
         "query": {
           "ac": "detail",
-          "ids": "{id}",
-          "at": "xml"
+          "ids": "{id}"
+        }
+      }
+    },
+    {
+      "id": "dytt",
+      "name": "电影天堂",
+      "baseUrl": "http://caiji.dyttzyapi.com",
+      "script": "config/plugins/maccms-json.js",
+      "version": 1,
+      "enabled": true,
+      "description": "直连采集接口、无弹幕；无水印，响应最快；片库 8.5 万+",
+      "group": "采集站（直连）",
+      "lineNameCn": {
+        "dyttm3u8": "天堂线路",
+        "dytt": "天堂网页"
+      },
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "11,7,6,10,8,20,9,12",
+          "name": "电影"
+        },
+        {
+          "id": "13,16,14,22,15,24,21,23",
+          "name": "剧集"
+        },
+        {
+          "id": "25,27,28,26",
+          "name": "综艺"
+        },
+        {
+          "id": "30,37,29,31,32",
+          "name": "动漫"
+        },
+        {
+          "id": "36",
+          "name": "短剧"
+        }
+      ],
+      "list": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "t": "{category}",
+          "pg": "{page}"
+        }
+      },
+      "search": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "wd": "{keyword}",
+          "pg": "{page}"
+        }
+      },
+      "detail": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "ids": "{id}"
+        }
+      }
+    },
+    {
+      "id": "guangsu",
+      "name": "光速资源",
+      "baseUrl": "https://api.guangsuapi.com",
+      "script": "config/plugins/maccms-json.js",
+      "version": 1,
+      "enabled": true,
+      "description": "直连采集接口、无弹幕；短剧极多，另有体育赛事；片库 11.8 万+",
+      "group": "采集站（直连）",
+      "lineNameCn": {
+        "gsm3u8": "光速线路",
+        "gsyun": "光速网页"
+      },
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "10,6,11,8,24,7,9,12",
+          "name": "电影"
+        },
+        {
+          "id": "13,14,21,16,23,22",
+          "name": "剧集"
+        },
+        {
+          "id": "37,38,39",
+          "name": "综艺"
+        },
+        {
+          "id": "42,52,43",
+          "name": "动漫"
+        },
+        {
+          "id": "45,47,44,49,50,46,48",
+          "name": "短剧"
+        },
+        {
+          "id": "33,34,35,36",
+          "name": "体育"
+        }
+      ],
+      "list": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "t": "{category}",
+          "pg": "{page}"
+        }
+      },
+      "search": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "wd": "{keyword}",
+          "pg": "{page}"
+        }
+      },
+      "detail": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "ids": "{id}"
+        }
+      }
+    },
+    {
+      "id": "feifan",
+      "name": "非凡资源",
+      "baseUrl": "http://cj.ffzyapi.com",
+      "script": "config/plugins/maccms-json.js",
+      "version": 1,
+      "enabled": true,
+      "description": "直连采集接口、无弹幕；老牌站，条目多带简介；片库 9.9 万+",
+      "group": "采集站（直连）",
+      "lineNameCn": {
+        "ffm3u8": "非凡线路",
+        "feifan": "非凡网页"
+      },
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "11,7,10,6,8,20,9,12",
+          "name": "电影"
+        },
+        {
+          "id": "13,16,14,22,15,24,21,23",
+          "name": "剧集"
+        },
+        {
+          "id": "25,26,27,28",
+          "name": "综艺"
+        },
+        {
+          "id": "30,29,31,33,32",
+          "name": "动漫"
+        },
+        {
+          "id": "36",
+          "name": "短剧"
+        }
+      ],
+      "list": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "t": "{category}",
+          "pg": "{page}"
+        }
+      },
+      "search": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "wd": "{keyword}",
+          "pg": "{page}"
+        }
+      },
+      "detail": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "ids": "{id}"
+        }
+      }
+    },
+    {
+      "id": "maoyan",
+      "name": "猫眼资源",
+      "baseUrl": "https://api.maoyanapi.top",
+      "script": "config/plugins/maccms-json.js",
+      "version": 1,
+      "enabled": true,
+      "description": "直连采集接口、无弹幕；分类最细，单线路直出最稳；片库 3.4 万+",
+      "group": "采集站（直连）",
+      "lineNameCn": {
+        "mym3u8": "猫眼线路"
+      },
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "11,7,6,8,20,24,25,9",
+          "name": "电影"
+        },
+        {
+          "id": "13,16,31,15,33,30,14",
+          "name": "剧集"
+        },
+        {
+          "id": "34,36",
+          "name": "综艺"
+        },
+        {
+          "id": "38,40,29,39",
+          "name": "动漫"
+        }
+      ],
+      "list": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "t": "{category}",
+          "pg": "{page}"
+        }
+      },
+      "search": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "wd": "{keyword}",
+          "pg": "{page}"
+        }
+      },
+      "detail": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "ids": "{id}"
+        }
+      }
+    },
+    {
+      "id": "yzzyapi",
+      "name": "优子资源",
+      "baseUrl": "https://api.yzzyapi.com",
+      "script": "config/plugins/maccms-xml.js",
+      "version": 1,
+      "enabled": true,
+      "description": "直连采集接口、无弹幕；片库 10.9 万+，线路直出 m3u8",
+      "group": "采集站（直连）",
+      "lineNameCn": {
+        "1080zyk": "优子线路",
+        "zykyun": "优子网页"
+      },
+      "batchDetail": true,
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "5,6,7,8,9,10,11",
+          "name": "电影"
+        },
+        {
+          "id": "12,14,15,18,16,17,13",
+          "name": "剧集"
+        },
+        {
+          "id": "62,64,65,63",
+          "name": "综艺"
+        },
+        {
+          "id": "41,66,67,68",
+          "name": "动漫"
+        },
+        {
+          "id": "95,97,103,117",
+          "name": "短剧"
+        },
+        {
+          "id": "20",
+          "name": "纪录片"
+        }
+      ],
+      "list": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "list",
+          "t": "{category}",
+          "pg": "{page}"
+        }
+      },
+      "search": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "list",
+          "wd": "{keyword}",
+          "pg": "{page}"
+        }
+      },
+      "detail": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "videolist",
+          "ids": "{id}"
+        }
+      }
+    },
+    {
+      "id": "jszyapi",
+      "name": "金山资源",
+      "baseUrl": "https://jszyapi.com",
+      "script": "config/plugins/maccms-json.js",
+      "version": 1,
+      "enabled": true,
+      "description": "直连采集接口、无弹幕；片库 11.6 万+，线路直出 m3u8；响应稍慢",
+      "group": "采集站（直连）",
+      "lineNameCn": {
+        "jsm3u8": "金山线路",
+        "jsyun": "金山网页"
+      },
+      "derivePlayIndex": true,
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "9,11,10,14,13,12,15,35,36",
+          "name": "电影"
+        },
+        {
+          "id": "20,3,5,6,4,28,7",
+          "name": "剧集"
+        },
+        {
+          "id": "30,31,33,32",
+          "name": "综艺"
+        },
+        {
+          "id": "23,24,25,26",
+          "name": "动漫"
+        },
+        {
+          "id": "46,48,50,45,47,52,49,54",
+          "name": "短剧"
+        },
+        {
+          "id": "40,41,42,43",
+          "name": "体育"
+        },
+        {
+          "id": "16",
+          "name": "纪录片"
+        }
+      ],
+      "list": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "t": "{category}",
+          "pg": "{page}"
+        }
+      },
+      "search": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "wd": "{keyword}",
+          "pg": "{page}"
+        }
+      },
+      "detail": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "ids": "{id}"
+        }
+      }
+    },
+    {
+      "id": "qdys2",
+      "name": "起点资源",
+      "baseUrl": "https://www.qdys2.cc",
+      "script": "config/plugins/maccms-json.js",
+      "version": 1,
+      "enabled": true,
+      "description": "直连采集接口、无弹幕；片库 23 万+（当前最大），4 条线路全直出 m3u8",
+      "group": "采集站（直连）",
+      "lineNameCn": {
+        "dyttm3u8": "电影天堂",
+        "bfzym3u8": "暴风线路",
+        "okm3u8": "OK 线路",
+        "1080zyk": "优子线路"
+      },
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "1",
+          "name": "电影"
+        },
+        {
+          "id": "2",
+          "name": "电视剧"
+        },
+        {
+          "id": "39",
+          "name": "短剧"
+        },
+        {
+          "id": "4",
+          "name": "动漫"
+        },
+        {
+          "id": "3",
+          "name": "综艺"
+        },
+        {
+          "id": "7",
+          "name": "纪录片"
+        },
+        {
+          "id": "53",
+          "name": "体育"
+        }
+      ],
+      "list": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "t": "{category}",
+          "pg": "{page}"
+        }
+      },
+      "search": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "wd": "{keyword}",
+          "pg": "{page}"
+        }
+      },
+      "detail": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "ids": "{id}"
+        }
+      }
+    },
+    {
+      "id": "suoni",
+      "name": "索尼资源",
+      "baseUrl": "https://suoniapi.com",
+      "script": "config/plugins/maccms-json.js",
+      "version": 1,
+      "enabled": true,
+      "description": "直连采集接口、无弹幕；片库 14.9 万+，单线路直出 m3u8",
+      "group": "采集站（直连）",
+      "lineNameCn": {
+        "snm3u8": "索尼线路"
+      },
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "6,7,8,9,10,11,12",
+          "name": "电影"
+        },
+        {
+          "id": "13,14,15,16,17,18,19,23",
+          "name": "剧集"
+        },
+        {
+          "id": "25,26,27,28",
+          "name": "综艺"
+        },
+        {
+          "id": "29,30,31,39,44,45",
+          "name": "动漫"
+        },
+        {
+          "id": "64,65,66,67,68,69,73",
+          "name": "短剧"
+        },
+        {
+          "id": "49,50",
+          "name": "体育"
+        },
+        {
+          "id": "20",
+          "name": "纪录片"
+        },
+        {
+          "id": "53",
+          "name": "解说"
+        }
+      ],
+      "list": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "t": "{category}",
+          "pg": "{page}"
+        }
+      },
+      "search": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "wd": "{keyword}",
+          "pg": "{page}"
+        }
+      },
+      "detail": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "ids": "{id}"
+        }
+      }
+    },
+    {
+      "id": "wujin",
+      "name": "无尽资源",
+      "baseUrl": "https://api.wujinapi.com",
+      "script": "config/plugins/maccms-json.js",
+      "version": 1,
+      "enabled": true,
+      "description": "直连采集接口、无弹幕；片库 12.5 万+，单线路直出 m3u8；响应稍慢",
+      "group": "采集站（直连）",
+      "lineNameCn": {
+        "wjm3u8": "无尽线路"
+      },
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "6,7,8,9,10,11,12,32,34,35",
+          "name": "电影"
+        },
+        {
+          "id": "13,14,15,16,22,23,24,37",
+          "name": "剧集"
+        },
+        {
+          "id": "25,26,27,28",
+          "name": "综艺"
+        },
+        {
+          "id": "29,31,33,42,43",
+          "name": "动漫"
+        },
+        {
+          "id": "54,55,56,57,58,59,62",
+          "name": "短剧"
+        },
+        {
+          "id": "39,45",
+          "name": "体育"
+        },
+        {
+          "id": "21",
+          "name": "纪录片"
+        },
+        {
+          "id": "40",
+          "name": "解说"
+        }
+      ],
+      "list": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "t": "{category}",
+          "pg": "{page}"
+        }
+      },
+      "search": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "wd": "{keyword}",
+          "pg": "{page}"
+        }
+      },
+      "detail": {
+        "path": "/api.php/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "ids": "{id}"
+        }
+      }
+    },
+    {
+      "id": "jinying",
+      "name": "金鹰资源",
+      "baseUrl": "https://jyzyapi.com",
+      "script": "config/plugins/maccms-json.js",
+      "version": 1,
+      "enabled": true,
+      "description": "直连采集接口、无弹幕；片库 11.8 万+，短剧与国剧更新快",
+      "group": "采集站（直连）",
+      "lineNameCn": {
+        "jinyingm3u8": "金鹰线路",
+        "jinyingyun": "金鹰网页"
+      },
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "9,10,11,12,13,14,15",
+          "name": "电影"
+        },
+        {
+          "id": "3,4,5,6,7,20,28",
+          "name": "剧集"
+        },
+        {
+          "id": "36,37,38,39",
+          "name": "综艺"
+        },
+        {
+          "id": "24,25,26,23",
+          "name": "动漫"
+        },
+        {
+          "id": "40,41,42,43,44,45,46,48",
+          "name": "短剧"
+        },
+        {
+          "id": "32,33,34,35",
+          "name": "体育"
+        },
+        {
+          "id": "16",
+          "name": "纪录片"
+        }
+      ],
+      "list": {
+        "path": "/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "t": "{category}",
+          "pg": "{page}"
+        }
+      },
+      "search": {
+        "path": "/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "wd": "{keyword}",
+          "pg": "{page}"
+        }
+      },
+      "detail": {
+        "path": "/provide/vod/",
+        "query": {
+          "ac": "detail",
+          "ids": "{id}"
         }
       }
     }

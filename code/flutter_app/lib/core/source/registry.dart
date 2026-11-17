@@ -1,22 +1,41 @@
 /// 数据源注册表：运行时切换 + 记住选择。
 ///
-/// 页面不再直接持有某个具体数据源，统一从这里取当前源。这样：
-///   1. 加源只要在 [_all] 里登记，界面自动多一个选项；
-///   2. 收藏/历史记住条目的 `sourceId`，回详情页时按条目自己的源去取，
-///      而不是按「当前全局源」——否则用户切了源，旧收藏全都打不开。
+/// ## 所有源都来自远程配置
+///
+/// 这个类**不内置任何源**。所有源都由 `config/plugins/*.js` 提供，
+/// 启动时从远端拉取后调 [replacePlugins] 装进来。
+///
+/// ### 为什么改成这样
+///
+/// 源的域名、分类 id、接口路径是最容易变的东西。它们被编译进安装包，
+/// 就意味着**改一个域名要发一次版**。2026-11-17 橘汁主域名整站 502 时，
+/// 官方已在换服务器，而用户手里是旧包、旧包里是旧域名，只能吃一整片
+/// 「连接失败」——这类问题不该再发生。
+///
+/// 反过来，只要源是远端配置，改域名、改分类、甚至整个换掉解析方式，
+/// 推一次仓库就生效，不用等发版。
+///
+/// ### 代价与应对
+///
+/// 「装上就有片看」变成了「装上先拉配置」。所以：
+///
+///   - 配置落本地缓存，第二次启动起立刻可用（`PluginLoader.restore`）；
+///   - 一个源都没有时返回 [OfflineSource] 占位，界面据此提示
+///     「正在获取源配置」，既不白屏也不崩；
+///   - 拉取失败**不清缓存**，用户手里的源照常可用。
+///
+/// ## 页面怎么用
+///
+/// 页面只从 [current] 取当前源、从 [all] 取全部源，永远不直接持有
+/// 某个具体实现。收藏/历史记住条目的 `sourceId`，回详情页时按条目
+/// 自己的源去取，而不是按「当前全局源」——否则切了源，旧收藏全打不开。
 library;
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'data_source.dart';
-import 'ddys_source.dart';
-import 'jisu_source.dart';
-import 'kanju_source.dart';
-import 'kvm4k_source.dart';
-import 'site_sources.dart';
-import 'yuny_source.dart';
-import 'zhuiju_source.dart';
+import 'offline_source.dart';
 
 class SourceRegistry {
   SourceRegistry._();
@@ -24,185 +43,105 @@ class SourceRegistry {
 
   static const String _prefKey = 'app.dataSourceId';
 
-  /// 全部可用数据源。顺序即设置页/快切面板的展示顺序，第一个是默认。
+  /// 当前生效的源。**空表示配置还没拉到**，这是合法的初始状态。
   ///
-  /// 加源的完整清单：
-  ///   1. MacCMS 类站点 → 在 `site_sources.dart` 加一条 [MacCmsConfig]；
-  ///   2. 自定义程序   → 新建一个 `implements DataSource` 的类，
-  ///      声明 id / displayName / categories / lineOrderPolicy /
-  ///      supportsDanmaku，实现 search / category / detail / resolveUrl；
-  ///   3. 在这里登记（或运行时调 [register]）。
-  /// 页面、收藏、历史、播放器都不需要改：它们只依赖 [DataSource] 契约。
-  ///
-  /// ## 排序规则（用户 2026-11-13 明确指定）
-  ///
-  ///   1. 橘汁（默认，恒第一）
-  ///   2. 追剧 / 暴风 / 量子 / 片库 —— 这 4 个相对次序不变
-  ///   3. 采集站 —— 按**实测首页响应中位数**从快到慢
-  ///   4. 需要代理的源 —— 全部沉到最后
-  ///
-  /// 为什么代理源必须垫底：它们的源站国内直连不通，没开代理时
-  /// 点进去只能看到「无法连接」。把不能用的源排在能用的源前面，
-  /// 等于每次换源都先让用户撞一次墙。
-  ///
-  /// ## 2026-11-13 剔除的两个源
-  ///
-  /// **可可影视**（keke1）：站是活的，但 App 侧拿不到数据。
-  /// 实测详情页的 `source-list-box-main` / `episode-list-box-main`
-  /// 两个容器是**空的**，播放页 `playSource.src` 是**硬编码空串**，
-  /// 选集与地址全部改由 `kkys.min.js` 通过 HmacSHA1 签名 API
-  /// （`43.248.100.69:51080`）异步取，而该 API 直连超时、
-  /// 经代理 https 握手失败 / http 502。浏览器能播是因为它跑得动那套 JS，
-  /// App 拿到的静态 HTML 里这两块就是空的 —— 确定性失效，不是偶发。
-  ///
-  /// **樱花资源**（yinghua）：用户反馈「大部分不能看、更新慢」，站方采集节奏问题，
-  /// 客户端无法解决。
-  static final List<DataSource> _all = <DataSource>[
-    // ① 默认
-    ZhuijuSource.instance,
-    // ② 既有 4 个，相对次序由用户指定，不要动
-    KanjuSource.instance,
-    kBofengSource,
-    kLiangziSource,
-    kPiankuSource,
-    // ③ 采集站，按实测首页耗时升序（数字为 2026-11-13 实测中位数）
-    kDyttSource, //  213ms
-    kGuangsuSource, //  224ms
-    kFeifanSource, //  228ms
-    kMaoyanSource, //  264ms
-    // ④ 2026-11-14 之后新增的 6 个站，耗时按「App 实际列表请求」量
-    //    （前四站是单次 ac=list，这批要多走一次 detail 换封面，
-    //      口径不同，所以单独成段、内部仍按耗时升序）
-    kSuoniSource, //   1.4s（detail 113 KB，片库 14.9 万，单线路直出）
-    kQdys2Source, //   1.5s（走 ac=detail 换封面，283 KB，片库 23 万）
-    kJinyingSource, // 2.6s（detail 236 KB，片库 11.8 万，双线路）
-    kWujinSource, //   2.9s（detail 269 KB，片库 12.5 万，单线路直出）
-    kYzzySource, //    3.3s（list 1.2s + 批量补 2.1s，两次串行）
-    kJszySource, //    4.4s（走 ac=detail 换封面，278 KB）
-    // ⑤ 需系统代理，国内直连不通，全部最后
-    Kvm4kSource.instance,
-    JisuSource.instance,
-    YunySource.instance,
-    DdysSource.instance,
-  ];
+  /// 用空列表而不是塞一个占位进去：占位混在真实源里，会让
+  /// 「现在能用哪些源」这个判断变得不可靠（数出来的 1 个其实是假的）。
+  /// 占位只在 [all] / [now] / [byId] 这几个对外的出口按需生成。
+  static final List<DataSource> _all = <DataSource>[];
 
-  static List<DataSource> get all => List.unmodifiable(_all);
+  /// 全部可用源。空列表时给一个占位，让界面有东西可渲染。
+  static List<DataSource> get all =>
+      _all.isEmpty ? const <DataSource>[OfflineSource.instance] : List.unmodifiable(_all);
+
+  /// 是否还没加载到任何源（配置未拉到 / 首次启动）
+  static bool get isEmpty => _all.isEmpty;
 
   /// 某个源属于哪一组（只用于界面分组展示，不参与任何逻辑）。
   ///
-  /// 为什么不在 [DataSource] 上加一个 `group` 字段：那要求每个源实现类
-  /// 都提供 getter，改一遍 15 个类，且以后加源容易漏。这里按 id 查表，
-  /// 集中在一处维护，加源时只要在这里补一行。
+  /// 分组信息现在**由清单自己声明**（`group` 字段），不再在这里维护
+  /// 一张 id 表。理由：源全在远端，注册表不可能知道未来会出现什么 id；
+  /// 硬编码的 id 表一旦对不上，新源就会被静默归到「采集站」，
+  /// 而它实际可能需要代理——用户点进去只会看到「无法连接」。
   ///
-  /// 分组的意义：现在有 15 个源，平铺成一个列表用户根本挑不动。
-  /// 分成「默认 / 常用 / 采集站（直连）/ 需代理 / 插件」后，
-  /// 用户能立刻明白「为什么这 4 个要开代理」「哪几个是新的」。
-  ///
-  /// **插件组必须单独一组**：这些源的配置来自远端、域名随时可能变，
-  /// 而且随时可能新增/消失。混进「采集站」里会让用户以为它们是
-  /// 随版本固化的，出问题时会去等发版而不是去刷新配置。
+  /// 走可选能力（[SourceGrouped]）而不是写进 [DataSource] 必选契约：
+  /// 后者要求每个实现类都补一行 getter，而绝大多数源就是「采集站」，
+  /// 加一个恒返回同一个值的成员只是噪音。与 [SectionedFeed] 同一套做法。
   static String groupOf(DataSource s) {
-    if (_groupProxy.contains(s.id)) return '需系统代理';
-    if (_groupDefault.contains(s.id)) return '默认';
-    if (_groupBuiltin.contains(s.id)) return '常用';
-    if (_pluginIds.contains(s.id)) return '插件（在线更新）';
-    return '采集站（直连）';
+    final g = s is SourceGrouped ? (s as SourceGrouped).group : '';
+    return g.isEmpty ? '采集站（直连）' : g;
   }
+
+  /// 该源是否依赖系统代理。用于在切换面板上打标记。
+  ///
+  /// 由分组推导，不再维护一张 id 表：源全在远端，id 表迟早会漏。
+  /// 「需系统代理」这个分组本身就是配置声明的，两者语义完全一致。
+  static bool needsProxy(DataSource s) => groupOf(s) == '需系统代理';
 
   /// 分组展示顺序。界面上按这个顺序渲染分组标题。
   ///
-  /// 插件组放最后：它们的可用性取决于远端配置是否拉得到，
-  /// 不该占据用户第一眼的注意力。
+  /// 顺序有语义：能用的、常用的在前面，需要额外条件（代理）的沉底。
   static const List<String> groupOrder = <String>[
     '默认',
     '常用',
     '采集站（直连）',
     '需系统代理',
-    '插件（在线更新）',
   ];
 
-  static const Set<String> _groupDefault = {'zhuiju'};
-  static const Set<String> _groupBuiltin = {
-    'kanju',
-    'bofeng',
-    'liangzi',
-    'pianku',
-  };
-
-  /// 源站国内直连不通、必须走系统代理的源。
-  ///
-  /// 与各源 description 里写的「需系统代理」必须一致；这里独立维护是因为
-  /// 界面要在**不发请求**的前提下就知道谁需要代理（不能靠探测）。
-  static const Set<String> _groupProxy = {
-    'kvm4k',
-    'jisu',
-    'yuny',
-    'ddys',
-  };
-
-  /// 当前已注册的插件源 id（只有这一组是运行时可变的）
-  static final Set<String> _pluginIds = <String>{};
-
-  /// 该源是否依赖系统代理。用于在切换面板上打标记。
-  static bool needsProxy(DataSource s) => _groupProxy.contains(s.id);
-
   /// 运行时登记一个数据源（幂等）。
-  ///
-  /// 编译期写死在 [_all] 已经够用，留这个入口是为了「自定义源导入」
-  /// 不必再改注册表：从配置读出来直接 register 即可。
-  static void register(DataSource s, {bool asPlugin = false}) {
-    if (asPlugin) _pluginIds.add(s.id);
+  static void register(DataSource s) {
     if (_all.any((e) => e.id == s.id)) return;
     _all.add(s);
   }
 
-  /// 用一批插件源**替换**当前所有插件源。
+  /// 用一批源**整体替换**当前列表。
   ///
-  /// 为什么是「替换」而不是「逐个追加」：远端配置里删掉一个插件后，
-  /// 用户手机上的旧源必须跟着消失，否则会留下一个永远打不开的条目
-  /// （配置里已经没有它的域名了）。追加式注册做不到这点。
+  /// 为什么是整体替换而不是增量合并：配置里删掉一个源后，用户端必须
+  /// 跟着消失，否则会留下一个永远打不开的条目（域名已经不在配置里了）。
+  /// 增量合并做不到「消失」。
   ///
-  /// 内置源完全不受影响——这是必须的，插件配置拉失败、拉成空、
-  /// 甚至整个仓库被误清空，都不能让用户丢掉本机已有的 19 个源。
+  /// ## 当前选中的源怎么办
+  ///
+  /// 三种情况必须分开处理，混在一起会出现「标题显示 A、请求打到 B」：
+  ///
+  ///   1. 新列表里有同 id 的源 → 换成新实例（域可能变了），但保持选中；
+  ///   2. 没有同 id → 回退到新列表第一个；
+  ///   3. 新列表为空 → 回退到占位，界面提示「配置未就绪」。
   static void replacePlugins(List<DataSource> plugins) {
-    final oldIds = Set<String>.from(_pluginIds);
-    final newIds = plugins.map((e) => e.id).toSet();
-
-    // ① 摘掉已经不存在的插件源
-    _all.removeWhere((e) => oldIds.contains(e.id) && !newIds.contains(e.id));
-    _pluginIds
+    _all
       ..clear()
-      ..addAll(newIds);
+      ..addAll(plugins);
 
-    // ② 加新的（幂等，已存在的跳过）
-    for (final p in plugins) {
-      if (!_all.any((e) => e.id == p.id)) _all.add(p);
-    }
-
-    // ③ 当前选中的源如果刚被摘掉，必须回退到默认源。
-    //    不回退的话，current 会指向一个已经不在列表里的对象，
-    //    界面标题显示它的名字，但任何请求都会打到已失效的域名上——
-    //    这种「看着有源、其实全是错」的状态最难排查。
-    final nowId = instance.current.value.id;
-    if (!_all.any((e) => e.id == nowId)) {
+    final cur = instance.current.value;
+    final same = _all.where((e) => e.id == cur.id);
+    if (same.isNotEmpty) {
+      // 同 id 换实例：不能因为 identical 判断而跳过，否则用户还是
+      // 拿着旧对象、旧域名，刷新配置等于没生效。
+      instance.current.value = same.first;
+    } else if (_all.isNotEmpty) {
       instance.current.value = _all.first;
+    } else {
+      instance.current.value = OfflineSource.instance;
     }
   }
 
-  /// 当前已注册的插件源数量（设置页展示用）
-  static int get pluginCount => _pluginIds.length;
+  /// 当前已注册的源数量（设置页展示用）
+  static int get pluginCount => _all.length;
 
-  /// 当前选中的数据源；未选择过时是第一个（橘汁）。
+  /// 当前选中的数据源。
   ///
-  /// 注意它是**实例**成员而 [replacePlugins] 是静态方法，所以那边要用
-  /// `instance.current` 访问。保持 `current` 为实例成员是因为页面里
-  /// 已有大量 `registry.current` 的用法，改成静态会牵动一堆无关代码。
+  /// 初始值是占位而不是 `_all.first`——后者在空列表上会直接
+  /// `Bad state: No element`，而首次启动必然是空的。
   final ValueNotifier<DataSource> current =
-      ValueNotifier<DataSource>(_all.first);
+      ValueNotifier<DataSource>(OfflineSource.instance);
 
   bool _loaded = false;
 
   /// 启动时读回上次的选择。失败一律退回默认，不让 App 起不来。
+  ///
+  /// 注意它的调用时机：必须在源装进注册表**之后**。
+  /// 反过来的话，用户选的源此刻还不在列表里，会被判成「已失效」
+  /// 而退回第一个——表现就是「我明明选了 A，每次重启都变回默认」。
   Future<void> restore() async {
     if (_loaded) return;
     _loaded = true;
@@ -220,6 +159,9 @@ class SourceRegistry {
   /// 切换数据源并持久化。
   Future<void> select(DataSource s) async {
     if (identical(current.value, s)) return;
+    // 占位源不写进持久化：它不是一个真的源，存下来只会在下次启动时
+    // 变成一个「找不到」的 id，白白多一条日志。
+    if (s is OfflineSource) return;
     current.value = s;
     try {
       final sp = await SharedPreferences.getInstance();
@@ -234,14 +176,17 @@ class SourceRegistry {
     if (hit.isNotEmpty) await select(hit.first);
   }
 
-  /// 按 id 找源。未知 id（含空串 = 老数据）一律按橘汁处理。
+  /// 按 id 找源。找不到时返回占位，**不**返回某个真实源。
   ///
-  /// 这就是「收藏/历史里的老条目在升级后仍能打开」的兜底：
-  /// 它们存的 sourceId 是空串，而空串必然来自升级前的橘汁。
+  /// 这里刻意不做「找不到就当默认源」的兜底：那会让一条来自已删源的
+  /// 收藏记录，悄悄用另一个源的 id 去请求详情——多半取回一部不相干的
+  /// 片子，比明确报错更难查。返回占位则会让界面如实说「这个源不可用」。
   DataSource byId(String? id) {
-    if (id == null || id.isEmpty) return ZhuijuSource.instance;
+    if (id == null || id.isEmpty) {
+      return _all.isEmpty ? OfflineSource.instance : _all.first;
+    }
     final hit = _all.where((e) => e.id == id);
-    return hit.isEmpty ? ZhuijuSource.instance : hit.first;
+    return hit.isEmpty ? OfflineSource.instance : hit.first;
   }
 
   /// 当前源

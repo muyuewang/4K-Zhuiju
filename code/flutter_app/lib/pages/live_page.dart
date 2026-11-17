@@ -40,7 +40,12 @@ class LivePage extends StatefulWidget {
 }
 
 class _LivePageState extends State<LivePage>
-    with SingleTickerProviderStateMixin {
+    // 用复数版本而不是 Single：`_load()` 每次都会新建 TabController，
+    // 而 Single 版本只允许 `vsync: this` 被用一次。现在只有一个调用点
+    // （initState），但下拉刷新、切源重载这类改动很容易再加一个——
+    // 那时崩的形态是 `multiple tickers were created`，与「直播」毫无关系，
+    // 排查方向会完全跑偏。首页刚因为同一个写法在冷启动时崩过。
+    with TickerProviderStateMixin {
   /// null = 还没读完资源（首帧）
   Map<String, List<LiveChannel>>? _sections;
   List<LiveChannel> _all = const [];

@@ -71,7 +71,18 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage>
-    with SingleTickerProviderStateMixin {
+    // 必须是复数的 TickerProviderStateMixin，不能是 Single。
+    //
+    // Single 版本只允许 `vsync: this` 被用**一次**，而这里每次换源都要
+    // 重建 TabController（分类条数会变），于是第二次创建时 Flutter 直接
+    // 抛 `_HomePageState is a SingleTickerProviderStateMixin but multiple
+    // tickers were created`。
+    //
+    // 这个 bug 在「源编译在包里」的年代不会被触发：分类永远是同一套，
+    // TabController 只建一次。改成本地零源 + 远端配置之后，
+    // **首次冷启动就必然踩到**（零源起手 → 配置到达 → 重建），
+    // 表现为一装就崩，且日志里只有这一句 ticker 报错，看不出和源有关。
+    with TickerProviderStateMixin {
   /// 当前数据源的分类。换源后条数会变（橘汁 7 个、kanju 7 个但内容不同），
   /// 所以 TabController 也必须跟着重建，不能是 late final。
   List<SourceCategory> get _cats => SourceRegistry.instance.now.categories;

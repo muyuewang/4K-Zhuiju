@@ -18,12 +18,21 @@ import 'package:zhuiju/core/playback_prefs.dart';
 import 'package:zhuiju/core/source/data_source.dart';
 import 'package:zhuiju/core/source/kanju_source.dart';
 import 'package:zhuiju/core/source/registry.dart';
+import 'package:zhuiju/core/source/zhuiju_source.dart';
 import 'package:zhuiju/core/source_picker.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   // flutter_test 默认把所有请求打成 400，这里恢复真实 HttpClient
   HttpOverrides.global = null;
+
+  // 注册表不内置任何源（2026-11-17）。装配只在需要它的用例里做，
+  // 不能放在 main() 顶层配 tearDown：tearDown 在**每个**用例之后都跑，
+  // 于是第一个用例之后源就被清空了，后面的用例全部拿到占位源。
+  //
+  // 注意也不能用 addTearDown：它只能在单个 test 体内调用，
+  // 放在 main() 顶层会让整个文件加载失败（报错形如「loading ... [E]」，
+  // 看起来像编译错误）。
 
   final kj = KanjuSource.instance;
 
@@ -146,8 +155,18 @@ void main() {
   });
 
   test('注册表：byId 能在两个源之间正确路由', () {
+    // 在本用例内装源，测完立即还原：这个文件里其它用例都是联网探针，
+    // 不关心注册表状态，不该被这里的装配影响。
+    SourceRegistry.replacePlugins(<DataSource>[
+      ZhuijuSource.instance,
+      KanjuSource.instance,
+    ]);
+    addTearDown(() => SourceRegistry.replacePlugins(const <DataSource>[]));
+
     expect(SourceRegistry.instance.byId('kanju').id, 'kanju');
     expect(SourceRegistry.instance.byId('zhuiju').id, 'zhuiju');
+    // 空 id 是「升级前的老收藏没有 sourceId」这种正常情况，
+    // 退到列表第一个（也就是配置里排第一的源）
     expect(SourceRegistry.instance.byId('').id, 'zhuiju');
     // kanju 的 id 绝不能被误判成橘汁（否则会拿长串去调数字接口）
     expect(SourceRegistry.instance.byId('kanju') is SectionedFeed, isTrue);

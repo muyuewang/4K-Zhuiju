@@ -12,7 +12,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:zhuiju/core/source/data_source.dart';
 import 'package:zhuiju/core/source/ddys_source.dart';
-import 'package:zhuiju/core/source/registry.dart';
 
 // ------------------------------ 真实样本 ------------------------------
 
@@ -378,21 +377,22 @@ void main() {
     });
   });
 
-  group('注册表', () {
-    test('低调影视已登记在册', () {
-      final registry = SourceRegistry.instance;
-      expect(registry.byId('ddys').id, 'ddys');
-      expect(SourceRegistry.all.any((e) => e.id == 'ddys'), isTrue);
+  // 注册表不再内置源（2026-11-17 架构反转）：所有源都由远程插件配置装入，
+// 所以「已登记在册」不再是源文件的职责。这里改成断言源实例的属性，
+// 装配链路本身由 plugin_registry_test 覆盖。
+  group('源自身属性', () {
+    test('id 与展示名', () {
+      final s = DdysSource.instance;
+      expect(s.id, 'ddys');
+      expect(s.displayName.isNotEmpty, isTrue);
     });
 
-    // 名字里不写死数量：源在持续增加（10 → 15），写死会变成每加一个源
-    // 就得改一次测试名，而测试要守的是「互不重复」这件事本身。
-    test('所有源的 id 互不重复', () {
-      final ids = SourceRegistry.all.map((e) => e.id).toList();
-      expect(ids.toSet().length, ids.length);
-      // 顺带守住「id 不能为空串」：空 id 会互相撞成同一个 key，
-      // 但 toSet().length 依然等于 length，上面的断言抓不到。
-      expect(ids.every((id) => id.trim().isNotEmpty), isTrue);
+    test('id 里不含空格与大写（会破坏 sourceId 的字符串比较）', () {
+      // id 会写进收藏/历史的 sourceId，并与配置里的 id 做等值比较。
+      // 混进空格或大写会让「同一个源」在字符串层面不相等。
+      final id = DdysSource.instance.id;
+      expect(id, id.trim().toLowerCase());
+      expect(id.contains(' '), isFalse);
     });
   });
 }
