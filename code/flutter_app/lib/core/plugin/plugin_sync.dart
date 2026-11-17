@@ -86,9 +86,9 @@ class PluginSync {
   ///
   /// 任何异常都被吃掉并转成失败结果：插件是增强能力，
   /// 它挂掉绝不能让 App 起不来，也不该让设置页弹红屏。
-  static Future<PluginSyncResult> refresh() async {
+  static Future<PluginSyncResult> refresh({bool force = false}) async {
     try {
-      final ok = await PluginLoader.instance.refresh();
+      final ok = await PluginLoader.instance.refresh(force: force);
       if (!ok) {
         final why = PluginLoader.instance.lastError ?? '无可用镜像';
         debugPrint('[PLUGIN] refresh failed: $why');

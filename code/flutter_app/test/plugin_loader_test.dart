@@ -150,4 +150,32 @@ void main() {
       expect(kPluginConfigDir, 'config/plugins');
     });
   });
+
+  group('破缓存时间戳', () {
+    final t1 = DateTime(2026, 11, 17, 18, 0, 0, 123, 456);
+
+    test('强制刷新用微秒级，同一小时内也能拿到不同 URL', () {
+      // 手动刷新必须每次都换戳，否则 CDN 回缓存的旧 index，
+      // 表现就是「提示已更新，源却没变」。
+      final a = PluginLoader.cacheBustStamp(force: true, now: t1);
+      final b = PluginLoader.cacheBustStamp(
+          force: true, now: t1.add(const Duration(microseconds: 1)));
+      expect(a, isNot(b));
+      expect(a.length, greaterThan(10), reason: '应是微秒时间戳而非小时取整');
+    });
+
+    test('自动刷新用小时级，同一小时内复用同一戳以省流量', () {
+      final a = PluginLoader.cacheBustStamp(force: false, now: t1);
+      final b = PluginLoader.cacheBustStamp(
+          force: false, now: t1.add(const Duration(minutes: 30)));
+      expect(a, b, reason: '启动自动刷新不必每次回源');
+    });
+
+    test('两种方式的时间戳都是纯数字，能安全拼进 query', () {
+      for (final force in [true, false]) {
+        final s = PluginLoader.cacheBustStamp(force: force, now: t1);
+        expect(RegExp(r'^\d+$').hasMatch(s), isTrue);
+      }
+    });
+  });
 }

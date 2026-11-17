@@ -176,13 +176,28 @@ class PluginLoader {
   ///
   /// 调用方**不应该 await**（启动后后台跑）。失败不影响任何现有功能。
   /// 设置页手动刷新时才需要等它返回，以便给出「成功/失败」的反馈。
-  Future<bool> refresh() async {
+  /// 生成破缓存时间戳。提成纯函数是为了能在测试里验证两种粒度的区别。
+  ///
+  /// 自动刷新（force=false）：小时级，同一小时内多个请求共用，省流量。
+  /// 手动刷新（force=true）：微秒级，每次都不同，CDN 必然回源拿最新。
+  @visibleForTesting
+  static String cacheBustStamp({required bool force, DateTime? now}) {
+    final t = now ?? DateTime.now();
+    return force
+        ? t.microsecondsSinceEpoch.toString()
+        : (t.millisecondsSinceEpoch ~/ 3600000).toString();
+  }
+
+  /// [force]：手动点「刷新」时为 true，必须绕过 CDN 缓存拿到最新配置。
+  ///
+  /// 自动刷新（启动时）用小时级时间戳就够了，省流量；但手动刷新若也用
+  /// 同一个小时戳，同一小时内再点就是同一个 URL，CDN 直接回缓存的旧
+  /// index.json——表现是「提示已更新，源却没变」，用户完全没法自己修。
+  /// 强制刷新改用微秒时间戳，每次 URL 都不同，CDN 必然回源。
+  Future<bool> refresh({bool force = false}) async {
     lastError = null;
 
-    // 按小时打时间戳破 CDN 缓存：配置改完想立刻生效只能靠 query。
-    // 按天粒度会出现「改了要等一天」，那对「站点今天挂了」这种场景
-    // 完全没意义。
-    final stamp = DateTime.now().millisecondsSinceEpoch ~/ 3600000;
+    final stamp = cacheBustStamp(force: force);
     final indexPath = '$kPluginConfigDir/index.json?t=$stamp';
 
     // 上一轮成功的镜像优先试（省掉一次注定失败的等待），然后是完整列表。
@@ -253,7 +268,7 @@ class PluginLoader {
   /// 加载单条。返回 [LoadedPlugin]=成功，String=该条的错误原因，
   /// null=按配置跳过（未启用）。用三种类型区分，是为了让「跳过」和
   /// 「出错」在日志里不混在一起。
-  Future<Object?> _loadOne(Object? raw, String mirror, int stamp) async {
+  Future<Object?> _loadOne(Object? raw, String mirror, String stamp) async {
     final manifest = PluginManifest.fromJson(raw);
     if (manifest == null) {
       return '清单结构不完整（${raw is Map ? raw['id'] : '非对象'}）';

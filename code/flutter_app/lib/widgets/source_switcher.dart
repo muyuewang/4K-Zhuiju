@@ -78,7 +78,10 @@ class _SourceSwitcherSheet extends StatelessWidget {
                 shrinkWrap: true,
                 padding: const EdgeInsets.only(bottom: 10),
                 children: [
-                  for (final group in SourceRegistry.groupOrder)
+                  // 用 orderedGroups 而不是写死的 groupOrder：远程配置里
+                  // 新出现的分组（片库/看剧那种）必须也能显示出来，
+                  // 否则源加载了、计数也算，用户却永远找不到它。
+                  for (final group in SourceRegistry.orderedGroups(grouped.keys))
                     if (grouped[group] != null) ...[
                       _groupLabel(context, group),
                       for (final s in grouped[group]!)

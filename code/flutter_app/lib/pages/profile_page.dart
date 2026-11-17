@@ -17,7 +17,6 @@ import '../core/favorites.dart';
 import '../core/history.dart';
 import '../core/layout.dart';
 import '../core/playback_prefs.dart';
-import '../core/plugin/plugin_loader.dart';
 import '../core/plugin/plugin_sync.dart';
 import '../core/source/data_source.dart';
 import '../core/source/registry.dart';
@@ -1148,7 +1147,9 @@ class _PluginRefreshRowState extends State<PluginRefreshRow> {
     // messenger 必须在 await 之前取好：await 结束后用户可能已经退出设置页，
     // 这时 context 对应的 element 已经卸载，再 of(context) 会抛异常。
     final messenger = ScaffoldMessenger.of(context);
-    final r = await PluginSync.refresh();
+    // 手动点就是「我要最新的」：强制换 URL 绕过 CDN 缓存，否则同一
+    // 小时内重复点会拿到缓存的旧配置，提示成功却没更新。
+    final r = await PluginSync.refresh(force: true);
     if (!mounted) return;
     setState(() => _busy = false);
 
@@ -1161,12 +1162,12 @@ class _PluginRefreshRowState extends State<PluginRefreshRow> {
 
   @override
   Widget build(BuildContext context) {
-    // 没插件、也没报过错 → 这一行毫无意义。显出来反而让人以为
-    // 「这里本该有东西却没加载出来」。
-    final relevant = SourceRegistry.pluginCount > 0 ||
-        PluginLoader.instance.lastError != null;
-    if (!relevant) return const SizedBox.shrink();
-
+    // 这一行必须始终显示，尤其是「一个源都没有」的时候。
+    //
+    // 之前只在「有插件 或 有错误」时才显示，结果出现最糟的组合：
+    // 配置一个都没拉到（pluginCount=0）、启动自动刷新又静默失败没留下
+    // lastError —— 用户正需要一个入口手动刷新自救，按钮却消失了，只能
+    // 干瞪着「源配置未就绪」。刷新是零源状态下唯一的自救手段，不能藏。
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1179,7 +1180,7 @@ class _PluginRefreshRowState extends State<PluginRefreshRow> {
           // 副标题写清这个按钮到底干什么：光看「插件配置」四个字，
           // 不知道是「检查更新」还是「重置」。
           subtitle: Text(
-            '远程配置有更新时点这里，不用重启',
+            '强制拉取最新配置，忽略缓存，不用重启',
             style:
                 TextStyle(fontSize: Ts.caption, color: context.palette.textDim),
           ),

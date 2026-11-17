@@ -111,6 +111,10 @@ void main() {
     }
   });
 
+  // 8 条线路串行取址，每条遇站点拒绝都要等网络超时；无插件通道时
+  // session 建不起来会走满超时，累计轻松超过 flutter_test 默认的 30s。
+  // 这是联网探针，放宽到 3 分钟让它跑完自己的「成功/拒绝/跳过」判断，
+  // 而不是被 runner 掐断成一条没有信息的 TimeoutException。
   test('详情+取址：第一集能解析出可播地址', () async {
     final list = await guard('detail#list', () => kj.search('沙'));
     if (list == null || list.isEmpty) return;
@@ -184,7 +188,7 @@ void main() {
 
     // 一条都没成功，且存在非站点错误 → 这是真的回归，必须失败。
     fail('取址链路异常（非站点拒绝）：${realErrors.join(' | ')}');
-  });
+  }, timeout: const Timeout(Duration(minutes: 3)));
 
   test('注册表：byId 能在两个源之间正确路由', () {
     // 在本用例内装源，测完立即还原：这个文件里其它用例都是联网探针，

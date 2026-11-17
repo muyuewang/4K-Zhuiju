@@ -256,5 +256,41 @@ void main() {
             reason: '分组「${SourceRegistry.groupOf(s)}」必须能展示出来');
       }
     });
+
+    test('orderedGroups 把未知分组也排进去，一个都不漏', () {
+      // 回归：片库配的「网页模板（直连）」、看剧配的「直连」不在
+      // groupOrder 的四个名字里。切换面板若只遍历 groupOrder，这两个源
+      // 加载成功、计数也算，但界面永远不显示——「19 个源却找不到 2 个」。
+      final present = <String>[
+        '采集站（直连）',
+        '网页模板（直连）', // 片库
+        '默认',
+        '直连', // 看剧
+        '需系统代理',
+      ];
+      final ordered = SourceRegistry.orderedGroups(present);
+
+      // 一个都不能少
+      expect(ordered.toSet(), present.toSet());
+      expect(ordered.length, present.length);
+
+      // 已知分组仍按既定顺序在前
+      expect(ordered.indexOf('默认'),
+          lessThan(ordered.indexOf('采集站（直连）')));
+      expect(ordered.indexOf('采集站（直连）'),
+          lessThan(ordered.indexOf('需系统代理')));
+
+      // 未知分组追加在末尾，顺序稳定
+      expect(ordered.last, anyOf('网页模板（直连）', '直连'));
+    });
+
+    test('orderedGroups 已知的常见分组顺序不变', () {
+      final ordered = SourceRegistry.orderedGroups(<String>[
+        '需系统代理', '默认', '采集站（直连）', '常用'
+      ]);
+      expect(ordered, <String>[
+        '默认', '常用', '采集站（直连）', '需系统代理'
+      ]);
+    });
   });
 }

@@ -88,6 +88,23 @@ class SourceRegistry {
     '需系统代理',
   ];
 
+  /// 把所有实际出现的分组排成展示顺序。
+  ///
+  /// 已知分组按 [groupOrder] 排；**没见过的分组一律追加到末尾，绝不丢弃**。
+  ///
+  /// 为什么必须有这个兜底：源全在远端配置里，清单可以随时新增一个
+  /// 从没见过的 group（比如片库的「网页模板（直连）」、看剧的「直连」）。
+  /// 界面若只遍历写死的 groupOrder，这些源会「加载成功、计数里算数，
+  /// 但切换面板里根本不显示」——表现为「提示 19 个源，却找不到某两个」。
+  /// 这种漏显示没有任何报错，最难查。
+  static List<String> orderedGroups(Iterable<String> present) {
+    final seen = present.toSet();
+    return <String>[
+      ...groupOrder.where(seen.contains),
+      ...seen.where((g) => !groupOrder.contains(g)),
+    ];
+  }
+
   /// 运行时登记一个数据源（幂等）。
   static void register(DataSource s) {
     if (_all.any((e) => e.id == s.id)) return;
