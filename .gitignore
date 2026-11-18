@@ -83,3 +83,8 @@ __pycache__/
 # 探针抓到的原始响应（几十 KB 的密文，只用来对拍一次；
 # 定型后的样本已经放进 test/fixtures/，这里不必进仓库）
 code/tools/_sjz_out/
+
+# APK 解包出的临时内容（classes.dex 9MB、assets 配置）。
+# 只用来查一次授权链路，结论已写进 config/plugins/sanjiaozhou.js 的注释，
+# 原始 dex 没有任何保留价值，进仓库只会把仓库撑大。
+code/tools/_sjz_apk/

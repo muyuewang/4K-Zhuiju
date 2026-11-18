@@ -12,7 +12,7 @@ config/plugins/
 ├── jisu.js           极速追剧：HTML + 独立取址接口，逐线路集数不同
 ├── kvm4k.js          4K影视：Go SSR + WASM 取址算法还原，signEntry 签名
 ├── kanju.js          看剧：HMAC 四行签名 + 分区榜单 + 线路 JSON
-├── sanjiaozhou.js    三角洲影视：私有聚合接口，列表/搜索响应体是 RC4 密文的十六进制串
+├── sanjiaozhou.js    三角洲影视：私有聚合接口，列表/搜索响应体是 RC4 密文的十六进制串（仅浏览）
 ├── ddys.js           低调影视（ddys.io）：详情页直出 m3u8
 ├── signed-demo.js    签名/加密类源模板（HMAC / AES / RSA 三种写法）
 └── README.md         本文件

@@ -11,6 +11,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuiju/core/plugin/plugin_loader.dart';
@@ -148,6 +149,58 @@ void main() {
   group('配置目录', () {
     test('配置目录常量与 README/索引一致', () {
       expect(kPluginConfigDir, 'config/plugins');
+    });
+  });
+
+  group('脚本去重（2026-11-18 用户反馈「每次加载都很慢」）', () {
+    // 这一组的来由：19 个源逐条串行下载，单个约 1.1s，用户点「刷新插件
+    // 配置」要干等 20 秒。真正的原因是 11 个源共用同一个 maccms-json.js，
+    // 而老实现把这一个文件拉了 11 遍。
+    test('多个源共用同一脚本时，只产生一个下载路径', () {
+      final ms = <PluginManifest>[
+        for (final id in ['bofeng', 'liangzi', 'dytt', 'guangsu'])
+          _mk(id: id).manifest,
+      ];
+      final paths = PluginLoader.uniqueScriptPaths(ms);
+      expect(paths.length, 1,
+          reason: '4 个源共用一个脚本，下载路径应只有 1 个，实际 ${paths.length}');
+      expect(paths.first, 'config/plugins/maccms-json.js');
+    });
+
+    test('不同脚本各算一个', () {
+      final a = _mk(id: 'a').manifest;
+      final b = _mk(id: 'b').manifest;
+      // _mk 里 script 都是 maccms-json.js，手工造一个不同的
+      final c = PluginManifest.fromJson(<String, dynamic>{
+        ...b.toJson(),
+        'id': 'c',
+        'script': 'config/plugins/yuny.js',
+      })!;
+      final paths = PluginLoader.uniqueScriptPaths([a, b, c]);
+      expect(paths.length, 2);
+      expect(paths, contains('config/plugins/yuny.js'));
+    });
+
+    test('真实 index.json：19 个源的实际下载次数明显少于源数量', () {
+      // 用仓库里真实的配置文件，防止「改了配置后去重失效」这种回归。
+      // 路径与 plugin_index_validation_test.dart 保持一致：测试的工作目录
+      // 是 code/flutter_app，上跳两级才是仓库根。
+      final f = File('../../config/plugins/index.json');
+      if (!f.existsSync()) {
+        // 路径不对就跳过，不让测试因目录结构变化而红（这不是被测逻辑的问题）
+        return;
+      }
+      final decoded = jsonDecode(f.readAsStringSync()) as Map;
+      final raw = (decoded['plugins'] as List);
+      final ms = <PluginManifest>[];
+      for (final one in raw) {
+        final m = PluginManifest.fromJson(one);
+        if (m != null && m.enabled && m.validate() == null) ms.add(m);
+      }
+      expect(ms, isNotEmpty);
+      final paths = PluginLoader.uniqueScriptPaths(ms);
+      expect(paths.length, lessThan(ms.length),
+          reason: '${ms.length} 个源理应共用脚本，去重后仍等于源数量说明去重没生效');
     });
   });
 
