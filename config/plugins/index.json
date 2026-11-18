@@ -1127,7 +1127,7 @@
       "script": "config/plugins/kanju.js",
       "version": 1,
       "enabled": true,
-      "description": "多线路、分区榜单；无弹幕；官方线需会话，插件仅用直出线路",
+      "description": "多线路、分区榜单；无弹幕；官方线与普通线全部保留（官方线二次换票）",
       "expandLines": true,
       "group": "直连",
       "defaultHeaders": {
@@ -1196,6 +1196,15 @@
       },
       "resolve": {
         "path": "/v1/playback/resolve/{token}"
+      },
+      "resolveLine": {
+        "path": "/v1/playback/resolve-line",
+        "method": "POST",
+        "bodyType": "json",
+        "query": {
+          "view": "compact"
+        },
+        "body": "{\"ticket\":\"{ticket}\"}"
       },
       "signEntry": "sign"
     },

@@ -9,12 +9,29 @@
 // 这里直接从 `req.url` 取最终 URL 的 path?query 来签，保证「签名的串 ==
 // 发出去的串」，不自己重新拼接/编码。
 //
-// ## 已知能力边界（诚实记录）
+// ## 线路的两种形态（2026-11-18 实测，务必读）
 //
-// 内置实现有「官方线优先 + 游客会话 + 二次 resolve」三步。插件只做
-// 第一阶段的线路解析，取址时挑**直出**线路（实测每集稳定 26 条），
-// 不走需要会话的官方线。官方线在部分新片上是唯一可播源时，
-// 播放会给出「换一条线路」的提示，而不是假装成功。
+// `line_options[]` 里混着两种线路，实测一部剧固定 33 条 = 官方线 10 + 普通线 23：
+//
+//   | 形态   | url_kind        | resolve_required | url 字段是什么      |
+//   | ------ | --------------- | ---------------- | ------------------- |
+//   | 官方线 | resolve_ticket  | true             | resolve://<票据>    |
+//   | 普通线 | m3u8            | false            | 直接可播的 m3u8     |
+//
+// 官方线是站方自己的付费/合作源（优酷、字节、专享4K 等），画质明显好于
+// 抓来的普通线，而且**本来就排在原始顺序最前面**（preference_weight
+// 1000→989 全在这 10 条上，普通线最高才 920）。
+//
+// 早先这版脚本把它们整批 `continue` 掉了，理由是「要二次换票，插件做不到」。
+// 那个判断是错的：宿主加了 `resolveLine` 端点之后，换票就是一次普通 POST。
+// 实测 10/10 全部成功，**而且不需要游客会话**（内置实现里那套
+// POST /v1/users/anonymous 对本接口不成立）。
+//
+// 现在的分工：
+//   parseLines        → 33 条全给，按站点原顺序（官方线自然在前）
+//   parseResolve      → 用户点哪条给哪条；官方线返回 {ticket}
+//   宿主             → 见到 ticket 就 POST resolveLine 换票
+//   parseLineResolve → 从换票应答 {"line":{"url":...}} 里取真地址
 //
 // 同步函数、无死循环、返回可 JSON 序列化对象。
 
@@ -200,10 +217,13 @@ function parseDetail(body, ctx) {
  * 宿主在详情阶段 resolve 第一集后调这里，拿到线路名清单，
  * 再把占位线路展开成 N 条——否则用户只能看到一条「默认线路」。
  *
- * 实测：一部 24 集的剧，第一集 resolve 返回 33 条 line_options，
- * 其中 23 条是直出 m3u8，其余是需要游客会话二次换票的官方线。
- * 插件框架没有「取址时再发一次请求」的能力，所以这里只展开直出线——
- * 给用户 23 条能播的，好过给 33 条里 10 条点开就失败。
+ * 实测一部剧 33 条 line_options = 官方线 10 + 普通线 23，
+ * **两种都要给**。官方线是站方合作源（优酷/字节/专享4K），
+ * 画质最好且本来就在最前面；把它们过滤掉，用户看到的线路面板
+ * 会从「新浪资源」这种抓来的普通线开始，和网页版对不上。
+ *
+ * 这里只负责「有哪些线路」，不负责「怎么取址」——官方线的票据
+ * 由 parseResolve 在播放时现取现换（换票请求由宿主发）。
  */
 function parseLines(body, ctx) {
   var d = unwrap(body);
@@ -214,18 +234,26 @@ function parseLines(body, ctx) {
   for (var i = 0; i < opts.length; i++) {
     var o = opts[i];
     if (!o || typeof o !== 'object') continue;
-    // 只要直出线：resolve_required 的官方线要二次换票，插件做不到
-    if (o.resolve_required === true) continue;
-    var url = s(o.url);
-    if (url.indexOf('http') !== 0) continue;
+    var url = s(o.url).trim();
+    // 官方线的 url 是 resolve://<票据>，普通线是 http(s)。
+    // 两种都是有效线路，只挡空值和既不是 http 也不是票据的怪数据。
+    var isTicket = url.indexOf('resolve://') === 0;
+    if (!isTicket && url.indexOf('http') !== 0) continue;
     var label = s(o.display_label || o.label).trim();
+    if (label === '') label = s(o.provider_name).trim();
     if (label === '' || seen[label]) continue;
     seen[label] = 1;
     lines.push({
       line: label,
       label: label,
       playFrom: s(o.play_from),
-      direct: true
+      // direct 只表示「地址已可直接播」，界面上据此判断要不要提示
+      // 用户「这条线可能要等一下」。官方线换票只是多一次 POST，
+      // 不改变它可播这一事实，所以不在这里过滤。
+      direct: !isTicket,
+      // 需要二次换票的线，宿主不用看这个字段（它按 parseResolve
+      // 返回的 ticket 自行判断），这里留着只为排查时一眼可辨。
+      resolveRequired: o.resolve_required === true
     });
   }
   return { lines: lines };
@@ -236,9 +264,12 @@ function parseLines(body, ctx) {
 /**
  * body 是 `/v1/playback/resolve/{token}` 的应答，含 line_options[]。
  *
- * ctx.line 是选中的线路名（parseLines 给的 label）。先看站点是否按
- * 「官方线」返回了换线路的 ticket：带 ctx.line 时能精确选中用户点的
- * 那条；没带（老调用路径）就退回原来的「选第一个直出」。
+ * ctx.line 是选中的线路名（parseLines 给的 label）。
+ *
+ * 返回值有两种含义：
+ *   - `{url: "https://..."}` —— 普通线，直接可播
+ *   - `{ticket: "..."}`      —— 官方线，宿主见到 ticket 会自动
+ *                                POST resolveLine 换票（见 parseLineResolve）
  */
 function parseResolve(body, ctx) {
   var d = unwrap(body);
@@ -247,31 +278,51 @@ function parseResolve(body, ctx) {
   var opts = arr(d.line_options);
   var wanted = s(ctx && ctx.line).trim();
 
-  // 用户点了具体线路（expandLines 展开出的 23 条直出线之一）：
-  // 按线路名精确取那一条，避免所有线路都播同一条。
+  // 用户点了具体线路：按名字精确取那一条。
+  //
+  // 官方线也要认——它给的是票据，交给宿主去换票。之前这里跳过
+  // resolve_required，导致「点了官方线就播不了」，而线路面板里
+  // 那些线本来就不该出现（已在 parseLines 里放出来）。
   if (wanted !== '') {
     for (var j = 0; j < opts.length; j++) {
       var t = opts[j];
-      if (!t || t.resolve_required === true) continue;
+      if (!t || typeof t !== 'object') continue;
       var name = s(t.display_label || t.label).trim();
+      if (name === '') name = s(t.provider_name).trim();
+      if (name !== wanted) continue;
       var tu = s(t.url).trim();
-      if (name === wanted && tu.indexOf('http') === 0) return { url: tu };
+      if (tu.indexOf('resolve://') === 0) {
+        // 票据原样交出去，剥前缀由宿主做（见 _ticketOf）。
+        // 这里只保证「不是空票据」。
+        var ticket = tu.substring('resolve://'.length);
+        if (ticket !== '') return { ticket: ticket, label: name };
+        continue;
+      }
+      if (tu.indexOf('http') === 0) return { url: tu };
     }
-    // 该集恰好没有这条线（线路按集浮动）：退回第一条直出线
+    // 该集恰好没有这条线（线路按集浮动）：走到下面的兜底
   }
 
+  // 兜底：优先站点标记为 selected 的普通线，否则第一条普通线。
+  //
+  // 为什么不兜到官方线：换票要多一次 POST（约 300~800ms），而用户
+  // 没点具体线路时（老调用路径）本来就不知道该播哪条，选条立刻能起的
+  // 更合适。只有明确点了官方线才走换票。
   var picked = null;
   for (var i = 0; i < opts.length; i++) {
     var o = opts[i];
     var url = s(o && o.url).trim();
-    if (o && o.resolve_required !== true && url.indexOf('http') === 0) {
+    if (o && url.indexOf('http') === 0 && o.resolve_required !== true) {
       if (o.selected === true) { picked = url; break; }
       if (picked === null) picked = url;
     }
   }
   if (picked !== null) return { url: picked };
 
-  // 全是需二次解析的官方线：明确说明，不返回 resolve://（播放器放不了）
+  // 站点明确说了「这一集要登录/标识失效」时先报错，不要再去换票。
+  //
+  // 这两条码是**整体状态**而不是单条线路的属性：换票也会被同一原因
+  // 拒掉，白跑一次请求还让用户多等 500ms，报错信息也更模糊。
   var code = s(d.code);
   if (code === 'playback_user_session_required') {
     return { url: '', error: '这条线路需要登录，请换一条线路' };
@@ -279,8 +330,65 @@ function parseResolve(body, ctx) {
   if (code === 'invalid_public_playback_id') {
     return { url: '', error: '播放标识已失效，请重新打开详情页' };
   }
+
+  // 一条普通线都没有（新片常见：只有官方合作源）：交给第一条官方线。
+  // 这比直接报错强——换票成功率实测 10/10。
+  for (var k = 0; k < opts.length; k++) {
+    var oo = opts[k];
+    if (!oo || typeof oo !== 'object') continue;
+    var ou = s(oo.url).trim();
+    if (ou.indexOf('resolve://') === 0) {
+      var tk = ou.substring('resolve://'.length);
+      if (tk !== '') {
+        return { ticket: tk, label: s(oo.display_label || oo.label) };
+      }
+    }
+  }
+
   return {
     url: '',
-    error: '这一集没有可直接播放的线路，请在选集里换一条'
+    error: '这一集没有可播放的线路，请在选集里换一条'
+  };
+}
+
+/**
+ * 官方线换票应答的解析。宿主发的是
+ *   POST /v1/playback/resolve-line?view=compact   body {"ticket": "..."}
+ * 应答形如：
+ *   {"object":"playback.line.resolve", ..., "line": {"url": "https://..."}}
+ *
+ * 实测（2026-11-18）10/10 条官方线都能换出地址，不需要任何会话。
+ * 失败时站点会把原因放在 code 里，尽量翻成人话给用户。
+ */
+function parseLineResolve(body, ctx) {
+  var d = unwrap(body);
+  if (!d) return { url: '', error: '官方线路换票没有返回数据' };
+
+  var ln = d.line;
+  if (ln && typeof ln === 'object') {
+    var u = s(ln.url).trim();
+    if (u.indexOf('http') === 0) return { url: u };
+    // 换完票还是 resolve:// 说明站点又给了一张票据（连环换票）。
+    // 宿主不支持多层，直接报清楚，不要让它进播放器。
+    if (u.indexOf('resolve://') === 0) {
+      return { url: '', error: '这条线路需要多次换票，暂不支持，请换一条线路' };
+    }
+  }
+
+  // 兜底：有些站把地址平铺在顶层
+  var flat = s(d.url).trim();
+  if (flat.indexOf('http') === 0) return { url: flat };
+
+  var code = s(d.code);
+  if (code === 'playback_line_ticket_expired' ||
+      code === 'invalid_line_ticket') {
+    return { url: '', error: '线路票据已过期，请返回重新选集' };
+  }
+  if (code === 'playback_user_session_required') {
+    return { url: '', error: '这条官方线路需要登录，请换一条线路' };
+  }
+  return {
+    url: '',
+    error: s(d.message) || '官方线路换票失败，请换一条线路'
   };
 }

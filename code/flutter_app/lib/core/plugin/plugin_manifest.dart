@@ -209,6 +209,7 @@ class PluginManifest {
     this.searchRequest,
     this.detailRequest,
     this.resolveRequest,
+    this.resolveLineRequest,
     this.signEntry,
     this.enabled = true,
     this.version = 0,
@@ -376,6 +377,37 @@ class PluginManifest {
   /// 取播放地址的请求。null 表示 detail 里给的地址可以直接播。
   final PluginRequest? resolveRequest;
 
+  /// 官方线路的「第二次换票」请求。null 表示该源没有这种两阶段线路。
+  ///
+  /// ## 为什么需要第二次请求（看剧 kanju，2026-11-18 实测）
+  ///
+  /// 有一类站把线路分成两种形态，同一个 `line_options[]` 里混着下发：
+  ///
+  /// | 形态 | `url_kind` | `resolve_required` | `url` 是什么 |
+  /// | --- | --- | --- | --- |
+  /// | 普通线 | `m3u8` | `false` | 直接能播的 m3u8 地址 |
+  /// | 官方线 | `resolve_ticket` | `true` | `resolve://<ticket>` 票据 |
+  ///
+  /// 官方线是站方自己的付费/合作源（优酷、字节、专享4K 等），
+  /// 画质与稳定性都明显好于抓来的普通线，而且**排在原始顺序最前面**
+  /// （实测 preference_weight 1000→989 全在这 10 条上，普通线最高 920）。
+  ///
+  /// 拿到票据后要 `POST /v1/playback/resolve-line?view=compact`
+  /// body `{"ticket": "<票据>"}`，应答是 `{"line":{"url":"https://..."}}`。
+  ///
+  /// 实测 10/10 官方线全部换票成功，**且不需要任何游客会话**
+  /// （`koanju_source.dart` 里「必须先建匿名会话」的结论对本接口不成立）。
+  ///
+  /// ## 契约
+  ///
+  /// 清单里写 `"resolveLine": {"path": "...", "method": "POST",
+  /// "bodyType": "json", "body": "{\"ticket\":\"{ticket}\"}"}`，
+  /// 脚本实现 `parseLineResolve(body, ctx)` → `{url: "https://..."}`。
+  ///
+  /// 宿主只在「第一次 resolve 拿到的这条线路 `resolve_required === true`」
+  /// 时才会发它——普通线仍然一步到位，不额外增加请求。
+  final PluginRequest? resolveLineRequest;
+
   /// 请求签名钩子的函数名。null 表示该源不需要签名。
   ///
   /// ## 为什么签名要单独一个入口
@@ -495,6 +527,9 @@ class PluginManifest {
         searchRequest,
         detailRequest,
         resolveRequest,
+        // 漏掉这一项的话，第二次换票请求的 headers 就不受 Host/Cookie
+        // 黑名单约束了——那是一条能带上任意头的通道，等于开了个后门。
+        resolveLineRequest,
       ];
 
   /// baseUrl 校验。规则与 [RemoteEndpoints.isValidBase] 一致，但这里
@@ -581,6 +616,10 @@ class PluginManifest {
       searchRequest: PluginRequest.fromJson(raw['search']),
       detailRequest: PluginRequest.fromJson(raw['detail']),
       resolveRequest: PluginRequest.fromJson(raw['resolve']),
+      // 与 `resolve` 并列的第二个端点。写成独立键而不是嵌进
+      // `resolve.second`，是为了让清单一眼可读：两个请求的方法、
+      // body 类型、路径都完全不同，嵌套会让人以为它们共享配置。
+      resolveLineRequest: PluginRequest.fromJson(raw['resolveLine']),
       signEntry: raw['signEntry'] is String && (raw['signEntry'] as String).trim().isNotEmpty
           ? (raw['signEntry'] as String).trim()
           : null,
@@ -620,6 +659,8 @@ class PluginManifest {
         if (searchRequest != null) 'search': searchRequest!.toJson(),
         if (detailRequest != null) 'detail': detailRequest!.toJson(),
         if (resolveRequest != null) 'resolve': resolveRequest!.toJson(),
+        if (resolveLineRequest != null)
+          'resolveLine': resolveLineRequest!.toJson(),
         if (signEntry != null) 'signEntry': signEntry,
         'enabled': enabled,
         'version': version,

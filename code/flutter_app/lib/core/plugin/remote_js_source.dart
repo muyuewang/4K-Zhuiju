@@ -365,7 +365,7 @@ class RemoteJsSource implements DataSource, SourceGrouped, SearchUnsupported {
       return video.path;
     }
 
-    final f = await _fetch(req, <String, String>{
+    final params = <String, String>{
       'id': video.dramaId.isNotEmpty ? video.dramaId : video.id,
       // 单集地址也传进去：多数站的取址接口要的是「这一集的标识」，
       // 而不是剧 id。两个都给，插件按自己的接口语义取用。
@@ -381,13 +381,103 @@ class RemoteJsSource implements DataSource, SourceGrouped, SearchUnsupported {
       'token1': video.playToken.contains('|')
           ? video.playToken.split('|').skip(1).join('|')
           : '',
-    });
+    };
 
+    final f = await _fetch(req, params);
     final out = await _call('parseResolve', <Object?>[f.body, _ctx(f, video)]);
     final map = _asMap(out, 'parseResolve');
+
+    // ---- 两阶段线路：第一次 resolve 只拿到票据，还要再换一次 ----
+    //
+    // 看剧这类站把「官方线」藏成一张票据（`resolve://<ticket>`），
+    // 必须 POST 换票才拿得到真地址。清单配了 `resolveLine` 才走这条
+    // 分支，普通线一步到位、不多发请求。
+    final ticket = _ticketOf(map);
+    if (ticket.isNotEmpty && manifest.resolveLineRequest != null) {
+      return _resolveLine(ticket, video);
+    }
+
     final url = _str(map['url'], '');
     if (url.isEmpty) {
-      throw PluginFetchException('${manifest.name} 没能解析出播放地址');
+      // 脚本给了具体原因（比如「这条线路需要登录」）就用它——
+      // 比宿主统一编一句「没能解析出播放地址」有用得多。
+      final why = _str(map['error'] ?? map['message'], '');
+      throw PluginFetchException(
+          why.isNotEmpty ? why : '${manifest.name} 没能解析出播放地址');
+    }
+    // 票据没换成功却把 `resolve://` 当地址返回，播放器会直接崩。
+    // 这里挡住，给一句能指导用户动作的话。
+    if (url.startsWith('resolve://')) {
+      throw PluginFetchException('${manifest.name} 这条线路需要二次解析，但清单没配 resolveLine');
+    }
+    return url;
+  }
+
+  /// 从 parseResolve 的返回值里取「待换票的票据」。
+  ///
+  /// 认三种写法，都是同一个意思，让脚本作者按手头数据挑方便的：
+  ///   - `{"ticket": "..."}`   显式给票据
+  ///   - `{"url": "resolve://..."}`  原样透传站点给的票据地址
+  ///   - `{"resolveRequired": true, "url": "<票据>"}`
+  ///
+  /// 空串表示这条线路不需要二次换票，直接可播。
+  ///
+  /// 为什么允许 `resolve://` 前缀：脚本从 `line_options[].url` 拿到的
+  /// 原文就是这个形态，让它自己剥前缀属于无谓的重复劳动，剥错了
+  /// （比如只 replace 了第一个 `/`）还会把票据弄坏，现象是换票 401。
+  static String _ticketOf(Map<dynamic, dynamic> map) {
+    final t = _str(map['ticket'], '');
+    if (t.isNotEmpty) return t;
+    final u = _str(map['url'], '');
+    if (u.startsWith('resolve://')) {
+      return u.substring('resolve://'.length);
+    }
+    if (map['resolveRequired'] == true && u.isNotEmpty) return u;
+    return '';
+  }
+
+  /// 官方线的第二次换票。
+  ///
+  /// ## 为什么不需要游客会话
+  ///
+  /// `kanju_source.dart` 里记的是「必须 POST /v1/users/anonymous 建会话，
+  /// 否则官方线 401」。2026-11-18 实测推翻了这条：带 ticket 直接 POST
+  /// `/v1/playback/resolve-line?view=compact`，10/10 条官方线全部返回
+  /// `{"line":{"url":"https://..."}}`，**全程没带任何 Cookie**。
+  ///
+  /// 所以这里不注入会话，也不碰 SharedPreferences——插件体系本来就没有
+  /// 持久化 Cookie 的通道，硬加会把「无状态解析」这条架构分界破掉。
+  Future<String> _resolveLine(String ticket, DramaVideo video) async {
+    final f = await _fetch(
+      manifest.resolveLineRequest!,
+      <String, String>{
+        'ticket': ticket,
+        // 票据本身常常很长（实测 347 字符，含 `-` 和 `_`）。
+        // 一并给出剧集维度参数，方便别的站把它拼进 query。
+        'token': video.playToken,
+        'id': video.dramaId.isNotEmpty ? video.dramaId : video.id,
+        'episode': '${video.episode}',
+        'line': video.source,
+      },
+    );
+
+    final out = await _call(
+      'parseLineResolve',
+      <Object?>[f.body, _ctx(f, video)],
+    );
+    final map = _asMap(out, 'parseLineResolve');
+    var url = _str(map['url'], '');
+    // 换票应答偶尔也把地址埋在 `line.url` 里（站点原始结构就是
+    // `{"line":{"url":...}}`）。脚本没剥就由宿主兜一层，免得
+    // 每个插件作者都要重复写这段。
+    if (url.isEmpty && map['line'] is Map) {
+      final ln = map['line'] as Map;
+      url = _str(ln['url'], '');
+    }
+    if (url.isEmpty || url.startsWith('resolve://')) {
+      final why = _str(map['error'] ?? map['message'], '');
+      throw PluginFetchException(
+          why.isNotEmpty ? why : '${manifest.name} 的官方线路换票失败，请换一条线路');
     }
     return url;
   }

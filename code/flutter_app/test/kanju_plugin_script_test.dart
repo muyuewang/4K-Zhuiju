@@ -189,15 +189,57 @@ void main() {
     expect(out['error'], contains('换一条线路'));
   });
 
-  test('parseLines 只展开直出线路，跳过需二次换票的官方线', () async {
+  test('parseLines 展开全部线路，含需二次换票的官方线', () async {
     final out = await call('parseLines', [resolve, ctx]);
     final lines = out['lines'] as List;
-    // resolve 夹具里 3 条：1 条官方线（resolve_required）+ 2 条直出
-    expect(lines.length, 2,
-        reason: '官方线要游客会话二次换票，插件不能展开成可播线路');
-    expect((lines.first as Map)['line'], '采集线A');
-    expect((lines[1] as Map)['line'], '采集线B');
-    expect((lines.first as Map)['direct'], isTrue);
+    // resolve 夹具里 3 条：1 条官方线（resolve_required）+ 2 条直出。
+    //
+    // 这里**必须**是 3 而不是 2。曾经这里是 2，理由是「官方线要游客
+    // 会话二次换票，插件做不到」——那条推断是错的：宿主加了 resolveLine
+    // 端点后，换票就是一次普通 POST，实测 10/10 成功且不需要任何会话。
+    // 过滤掉的后果是用户在线路面板里看到的全是抓来的普通线，
+    // 画质最好的官方线整批消失（和网页版对不上）。
+    expect(lines.length, 3, reason: '官方线也要出现在线路面板里，不能被过滤');
+    expect((lines[0] as Map)['line'], '官方线路', reason: '保持站点原始顺序，官方线在前');
+    expect((lines[0] as Map)['resolveRequired'], isTrue);
+    expect((lines[0] as Map)['direct'], isFalse, reason: '官方线地址是票据，不是直链');
+    expect((lines[1] as Map)['line'], '采集线A');
+    expect((lines[1] as Map)['direct'], isTrue);
+    expect((lines[2] as Map)['line'], '采集线B');
+  });
+
+  test('parseResolve 点官方线时交出票据，交给宿主换票', () async {
+    final out = await call('parseResolve', [
+      resolve,
+      <String, dynamic>{...ctx, 'line': '官方线路'},
+    ]);
+    // 票据而不是 URL：真正的 https 地址要宿主 POST resolveLine 才拿得到。
+    expect(out['ticket'], 'TICKET123');
+    // 票据分支不返回 url 键（返回的是 null 而非空串），宿主按
+    // `_str(map['url'], '')` 判空，两种情况都能正确处理。
+    expect(out['url'] ?? '', isEmpty, reason: 'resolve:// 直接进播放器会崩');
+  });
+
+  test('parseLineResolve 从换票应答里取真实地址', () async {
+    final body = jsonEncode({
+      'object': 'playback.line.resolve',
+      'current_episode': {'episode_number': 1},
+      'line': {
+        'label': '官方线路',
+        'url': 'https://v26-custom0009.onewsvod.com/x.mp4?a=264482',
+        'resolved': true,
+        'resolve_required': false,
+      },
+    });
+    final out = await call('parseLineResolve', [body, ctx]);
+    expect(out['url'], startsWith('https://'));
+    expect(out['error'], isNull);
+  });
+
+  test('parseLineResolve 无效应答给出人话错误', () async {
+    final out = await call('parseLineResolve', ['{}', ctx]);
+    expect(out['url'], '');
+    expect(out['error'], isNotEmpty);
   });
 
   test('parseResolve 按 ctx.line 精确选中用户点的那条线路', () async {

@@ -88,3 +88,13 @@ code/tools/_sjz_out/
 # 只用来查一次授权链路，结论已写进 config/plugins/sanjiaozhou.js 的注释，
 # 原始 dex 没有任何保留价值，进仓库只会把仓库撑大。
 code/tools/_sjz_apk/
+
+# NewTV（base.apk）解包内容，154MB，同样只用于一次性分析。
+# 结论：该源依赖登录态且服务端不可达，无可提取的可用源。
+code/tools/_newtv/
+
+# 探流临时产物（curl 抓回的前 8KB 样本）
+code/tools/_probe.bin
+
+# adb logcat 抓包残留（排查直播/启动问题时导出，一次性）
+logcat_dump.txt
