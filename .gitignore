@@ -79,3 +79,7 @@ desktop.ini
 # Python 字节码缓存（probe 脚本运行后到处留，且与 Python 版本绑定）
 __pycache__/
 *.pyc
+
+# 探针抓到的原始响应（几十 KB 的密文，只用来对拍一次；
+# 定型后的样本已经放进 test/fixtures/，这里不必进仓库）
+code/tools/_sjz_out/

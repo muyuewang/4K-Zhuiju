@@ -3,6 +3,85 @@
   "schema": 1,
   "plugins": [
     {
+      "id": "sanjiaozhou",
+      "name": "三角洲影视",
+      "baseUrl": "http://43.248.117.149:5656",
+      "script": "config/plugins/sanjiaozhou.js",
+      "version": 1,
+      "enabled": true,
+      "description": "私有聚合接口，响应 RC4 加密；片库 5.3 万，每片 5 条线路；播放走站点代理，需授权",
+      "group": "聚合站（加密接口）",
+      "vars": {
+        "rc4Key": "520720ygq",
+        "clientUrl": "http://43.248.117.45:5001/Client/"
+      },
+      "categories": [
+        {
+          "id": "tvplay",
+          "name": "电视剧"
+        },
+        {
+          "id": "movie",
+          "name": "电影"
+        },
+        {
+          "id": "tvshow",
+          "name": "综艺"
+        },
+        {
+          "id": "comic",
+          "name": "动漫"
+        },
+        {
+          "id": "oumeiju",
+          "name": "海外剧"
+        },
+        {
+          "id": "hanguoju",
+          "name": "4K"
+        },
+        {
+          "id": "movie_4k",
+          "name": "少儿"
+        },
+        {
+          "id": "movie_ZB",
+          "name": "短剧"
+        }
+      ],
+      "home": {
+        "path": "/api.php/localhost1/vod/",
+        "query": {
+          "ac": "list",
+          "class": "tvplay",
+          "page": "1"
+        }
+      },
+      "list": {
+        "path": "/api.php/localhost1/vod/",
+        "query": {
+          "ac": "list",
+          "class": "{category}",
+          "page": "{page}"
+        }
+      },
+      "search": {
+        "path": "/api.php/localhost1/So/",
+        "query": {
+          "ac": "list",
+          "zm": "{keyword}",
+          "page": "{page}"
+        }
+      },
+      "detail": {
+        "path": "/api.php/localhost1/vod/",
+        "query": {
+          "ac": "detail",
+          "ids": "{id}"
+        }
+      }
+    },
+    {
       "id": "bofeng",
       "name": "大师兄 · 暴风",
       "baseUrl": "https://bfzyapi.com",
