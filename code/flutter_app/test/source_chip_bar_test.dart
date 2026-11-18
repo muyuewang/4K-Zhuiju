@@ -105,4 +105,35 @@ void main() {
     await tester.pump();
     expect(picked, _kanju26.last);
   });
+
+  testWidgets('胶囊宽度收缩到文字，不铺满整行（2026-11-18 实机反馈）', (tester) async {
+    // 用户截图：14 条线路各占一整行、上下大片留白，"线路太占地方"。
+    // 根因是 `Container(alignment:)` 在 Wrap 的松约束下会撑满整行——
+    // Wrap 给子件的 maxWidth 是整行宽度，Align 拿它就当成了自己的宽度。
+    //
+    // 这条断言锁两件事：单个胶囊不能被拉成整行；整体行数必须是「换行」
+    // 的量级（26 条 ≤ 6 行），而不是「一条一行」。
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(_host(SourceChipBar(
+      names: _kanju26,
+      current: _kanju26.first,
+      onSelect: (_) {},
+    )));
+
+    for (final n in _kanju26) {
+      final w = tester.getSize(find.text(n)).width;
+      // 文字自身宽度之外只该多出左右各 13 的内边距
+      expect(w, lessThan(200), reason: '「$n」的胶囊被拉宽了（width=$w）');
+    }
+
+    final rows = <double>{};
+    for (final n in _kanju26) {
+      rows.add(tester.getTopLeft(find.text(n)).dy.roundToDouble());
+    }
+    expect(rows.length, lessThanOrEqualTo(6),
+        reason: '26 条线路铺了 ${rows.length} 行，说明胶囊又被撑成整行了');
+  });
 }

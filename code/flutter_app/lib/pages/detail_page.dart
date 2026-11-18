@@ -425,7 +425,8 @@ class _DetailPageState extends State<DetailPage> {
     final live = eps.isNotEmpty && eps.first.isLive;
     final showSort = !live && eps.length > 12;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 10, 8, 0),
+      // 左 12 与剧集网格、剧名、主按钮同一条左边线（原来 14，会偏 2px）。
+      padding: EdgeInsets.fromLTRB(12, tv ? 10 : 8, 8, 0),
       child: Row(
         children: [
           Text(
@@ -495,37 +496,46 @@ class _DetailPageState extends State<DetailPage> {
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: SizedBox(
-              height: tv ? 52 : 44,
-              child: TvFocusRing(
-                radius: 10,
-                child: FilledButton.icon(
-                  onPressed: () => _playPrimary(eps),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: kAccent,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(R.card),
-                    ),
-                  ),
-                  icon: Icon(Icons.play_arrow_rounded, size: tv ? 28 : 22),
-                  label: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: tv ? Ts.subtitle : Ts.bodyLg,
-                      fontWeight: FontWeight.w600,
+      // 宽屏右栏有七八百像素，主按钮拉满会变成一条横幅，压过剧名和简介。
+      // 手机上本来就窄（<460），这里的上限对手机无影响。
+      // TV 仍要拉满：遥控器焦点框太小反而不容易瞄准。
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: tv ? double.infinity : 460),
+          child: Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: tv ? 52 : 44,
+                  child: TvFocusRing(
+                    radius: 10,
+                    child: FilledButton.icon(
+                      onPressed: () => _playPrimary(eps),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: kAccent,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(R.card),
+                        ),
+                      ),
+                      icon: Icon(Icons.play_arrow_rounded, size: tv ? 28 : 22),
+                      label: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: tv ? Ts.subtitle : Ts.bodyLg,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -615,7 +625,10 @@ class _DetailPageState extends State<DetailPage> {
               slivers: [
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 46, 20, 0),
+                    // 左边界必须和下面几个区块（主按钮 12、播放源 12、
+                    // 剧集网格 4+12）对齐。原来这里是 4，标题比按钮左移
+                    // 8px，宽屏下一眼就能看出「剧名没跟按钮对齐」。
+                    padding: const EdgeInsets.fromLTRB(12, 40, 20, 0),
                     child: _infoWide(d),
                   ),
                 ),
@@ -637,12 +650,14 @@ class _DetailPageState extends State<DetailPage> {
                 // 剧集标题 + 正序/倒序
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.only(right: 12),
+                    padding: const EdgeInsets.only(right: 20),
                     child: _episodeHeader(eps),
                   ),
                 ),
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(4, 4, 20, 24),
+                  // 左 12：与上面的剧名 / 主按钮 / 播放源同一个左边线。
+                  // 这里原来是 4，整列比按钮左移 8px，宽屏下一眼可见。
+                  padding: const EdgeInsets.fromLTRB(12, 4, 20, 24),
                   sliver: SliverGrid(
                     gridDelegate:
                         const SliverGridDelegateWithMaxCrossAxisExtent(
@@ -889,11 +904,15 @@ class _DetailPageState extends State<DetailPage> {
   /// 用 `Wrap` 换行铺开，线路再多也全部可见。
   ///
   /// 顺序**原样沿用**传入的 names（站点原版线路顺序），这里不排序。
+  ///
+  /// 2026-11-18 用户反馈「线路太占地方」：根因不在这个方法的间距，而在
+  /// [SourceChipBar] 的胶囊被 `Container(alignment:)` 撑成了整行宽，
+  /// 14 条线路铺成 14 行。那边修好后这里只是把间距再收一档。
   Widget _sourceSelector(
       List<String> names, Map<String, List<DramaVideo>> map, String? cur) {
     final tv = isTv(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      padding: EdgeInsets.fromLTRB(12, tv ? 6 : 10, 12, tv ? 6 : 2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -910,7 +929,7 @@ class _DetailPageState extends State<DetailPage> {
                       color: context.palette.textDim)),
             ],
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: tv ? 8 : 7),
           SourceChipBar(
             names: names,
             current: cur,

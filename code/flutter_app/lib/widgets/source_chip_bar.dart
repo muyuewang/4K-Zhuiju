@@ -54,22 +54,35 @@ class SourceChipBar extends StatelessWidget {
     final body = GestureDetector(
       onTap: active ? null : () => onSelect(name),
       child: Container(
-        // 用 minHeight 而不是固定 height：Wrap 按子件真实尺寸排版，
-        // 写死高度会让换行后的每行基线参差。
-        constraints: BoxConstraints(minHeight: tv ? 46 : 32),
-        padding: EdgeInsets.symmetric(
-            horizontal: tv ? 20 : 13, vertical: tv ? 10 : 6),
-        alignment: Alignment.center,
+        // 固定高度：Wrap 同一行里各胶囊高度一致，换行后每行基线才齐。
+        // （原来用 minHeight + alignment，见下方 _widthNote 的坑）
+        height: tv ? 46 : 30,
+        padding: EdgeInsets.symmetric(horizontal: tv ? 20 : 13),
         decoration: BoxDecoration(
           color: active ? kAccent : context.palette.card,
-          borderRadius: BorderRadius.circular(tv ? 23 : 16),
+          borderRadius: BorderRadius.circular(tv ? 23 : 15),
         ),
-        child: Text(
-          name,
-          style: TextStyle(
-            fontSize: tv ? Ts.subtitle : Ts.bodySm,
-            color: active ? Colors.white : context.palette.textDim,
-            fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+        // **关键**：这里必须是 `Center(widthFactor: 1)`，不能给 Container 加
+        // `alignment`。
+        //
+        // `Container(alignment: x)` 内部会包一个 `Align`。`Align` 在宽度
+        // 有界（Wrap 给子件的 maxWidth 是整行）且没设 widthFactor 时，会
+        // 撑满整行宽度。结果就是每个胶囊都是一整行长条，一行只能放一个，
+        // 14 条线路铺成 14 行、上下留白几十像素——2026-11-18 用户截图
+        // 报的"线路太占地方"就是这个。
+        //
+        // widthFactor: 1 = 宽度收缩到文字宽度（高度由外层 height 定死）。
+        child: Center(
+          widthFactor: 1,
+          child: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: tv ? Ts.subtitle : Ts.bodySm,
+              color: active ? Colors.white : context.palette.textDim,
+              fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+            ),
           ),
         ),
       ),
