@@ -290,7 +290,8 @@
     {
       "id": "feifan",
       "name": "非凡资源",
-      "baseUrl": "http://cj.ffzyapi.com",
+      "baseUrl": "https://api.ffzyapi.com",
+  "baseUrlFallbacks": ["http://cj.ffzyapi.com"],
       "script": "config/plugins/maccms-json.js",
       "version": 1,
       "enabled": true,
@@ -638,7 +639,8 @@
     {
       "id": "suoni",
       "name": "索尼资源",
-      "baseUrl": "https://suoniapi.com",
+      "baseUrl": "https://suonizy.com",
+  "baseUrlFallbacks": ["https://suoniapi.com"],
       "script": "config/plugins/maccms-json.js",
       "version": 1,
       "enabled": true,

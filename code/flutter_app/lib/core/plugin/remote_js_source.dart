@@ -33,8 +33,11 @@
 /// `id`、`page`。设计成对象而不是散参数，是为了将来加字段不破坏老脚本。
 library;
 
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show SocketException;
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models.dart';
@@ -50,6 +53,42 @@ class RemoteJsSource implements DataSource, SourceGrouped, SearchUnsupported {
   final LoadedPlugin plugin;
 
   PluginManifest get manifest => plugin.manifest;
+
+  /// 本次会话里已经验证可用的根地址（源 id → 地址）。
+  ///
+  /// 放静态表而不是实例字段：插件清单热更新会重建 `RemoteJsSource`，
+  /// 实例字段会随之丢失，用户就会在下一次热更新后重新吃一轮超时。
+  /// 静态表按 id 索引，重建后仍能直接命中上次可用的域名。
+  static final Map<String, String> _stickyBase = <String, String>{};
+
+  /// 当前真正使用的根地址。
+  ///
+  /// 优先用粘住的备用地址；没有就用清单里的主地址。所有拼 URL 的地方
+  /// （请求、签名 ctx、解析 ctx）**都必须读这个**，不能直接读
+  /// `manifest.baseUrl`——否则换到备用域名后，解析出来的封面等相对
+  /// 链接还会拼回那个连不上的主域名，图片全裂。
+  String get _base => _stickyBase[manifest.id] ?? manifest.baseUrl;
+
+  /// 判断异常是不是「换域名可能有用」的网络层故障。
+  ///
+  /// 只认超时/连接失败/连接重置这类**没拿到响应**的情况。
+  /// HTTP 4xx/5xx 不走这条：那时站是通的，换域名重试不但没用，
+  /// 还会让一个已经在报错的接口被多打 N 倍请求。
+  static bool _isNetworkFailure(Object e) {
+    if (e is DioException) {
+      // connectionError 覆盖"连接被重置/拒绝"，connectionTimeout 覆盖
+      // TCP 握手超时，receiveTimeout 覆盖连上了但迟迟不回包——
+      // 被墙的三种表现正好对上。
+      return e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout;
+    }
+    // Dio 偶尔会把底层 SocketException 原样抛出（keep-alive 复用失败时）
+    if (e is SocketException) return true;
+    if (e is TimeoutException) return true;
+    return false;
+  }
 
   /// 源 id 直接取清单里的 id，**不加任何前缀**。
   ///
@@ -664,24 +703,76 @@ class RemoteJsSource implements DataSource, SourceGrouped, SearchUnsupported {
     PluginRequest req,
     Map<String, String> params,
   ) async {
-    final prepared = prepareRequest(
-      manifest: manifest,
-      req: req,
-      params: <String, String>{
-        ...params,
-        // vars 以 `vars.x` 的形式进占位符表，配置里写 `{vars.key}`
-        for (final e in manifest.vars.entries) 'vars.${e.key}': e.value,
-      },
-    );
+    final all = <String, String>{
+      ...params,
+      // vars 以 `vars.x` 的形式进占位符表，配置里写 `{vars.key}`
+      for (final e in manifest.vars.entries) 'vars.${e.key}': e.value,
+    };
 
-    // 配了 signEntry 就先让插件签一遍（改 header / query / body），
-    // 再发出去。「先签后发」这个顺序不能反——签名算的就是要发出去
-    // 的那个报文，反了就是在给已经发完的请求签名。
-    final signed = manifest.signEntry == null
-        ? prepared
-        : await _sign(prepared);
+    // 候选根地址：**粘住的可用地址排第一**，然后是清单主地址与备用地址。
+    //
+    // 顺序很关键。粘住地址已经验证过能连，正常情况下第一个就命中，
+    // 全程只有一次请求；只有它后来也挂了，才会退回去重试后面的候选。
+    // 如果反过来（每次从主地址开始试），一个被墙的主域名会让**每一条**
+    // 请求都先白等一次超时，分类页会被拖到十几秒。
+    final bases = <String>[];
+    void addBase(String b) {
+      if (bases.contains(b)) return;
+      // 备用地址来自远程配置，可能是内网地址，提前剔掉。
+      //
+      // 但**主地址不剔**：配置本身就是坏的，应该让它走到 prepareRequest
+      // 抛出原本那句「源站地址不可用：…」——错误页和测试都依赖这句
+      // 文案，换成一句笼统的「没有可用的源站地址」反而更难排查。
+      if (b != manifest.baseUrl && urlRejectionReason(b) != null) {
+        debugPrint('[PLUGIN] ${manifest.id} 忽略不可用的备用地址：$b');
+        return;
+      }
+      bases.add(b);
+    }
 
-    return PluginFetch.instance.fetch(signed);
+    final sticky = _stickyBase[manifest.id];
+    if (sticky != null) addBase(sticky);
+    for (final b in manifest.baseCandidates) {
+      addBase(b);
+    }
+
+    for (var i = 0; i < bases.length; i++) {
+      final base = bases[i];
+      try {
+        final prepared = prepareRequest(
+          manifest: manifest,
+          req: req,
+          params: all,
+          baseOverride: base,
+        );
+
+        // 配了 signEntry 就先让插件签一遍（改 header / query / body），
+        // 再发出去。「先签后发」这个顺序不能反——签名算的就是要发出去
+        // 的那个报文，反了就是在给已经发完的请求签名。
+        final signed =
+            manifest.signEntry == null ? prepared : await _sign(prepared, base);
+
+        final res = await PluginFetch.instance.fetch(signed);
+
+        // 成功即粘住，后续请求直接走这个域名。
+        if (sticky != base) {
+          _stickyBase[manifest.id] = base;
+          if (base != manifest.baseUrl) {
+            debugPrint('[PLUGIN] ${manifest.id} 主域名不可用，改用 $base');
+          }
+        }
+        return res;
+      } catch (e) {
+        // 站是通的（拿到 4xx/5xx 或解析出错）时换域名没有意义，
+        // 直接抛：否则一个报错的接口会被乘以候选域名个数地重打。
+        if (!_isNetworkFailure(e)) rethrow;
+        if (i == bases.length - 1) rethrow;
+        debugPrint('[PLUGIN] ${manifest.id} 访问 $base 失败（$e），试下一个地址');
+      }
+    }
+    // 理论上到不了这里：baseCandidates 至少包含主地址，循环必然返回或抛出。
+    throw PluginFetchException(
+        '源站地址不可用：${manifest.id} 没有可用的根地址（${manifest.baseUrl}）');
   }
 
   /// 调插件的签名钩子，把返回的改动合并进请求。
@@ -699,7 +790,7 @@ class RemoteJsSource implements DataSource, SourceGrouped, SearchUnsupported {
   /// `Cookie` / `Authorization`（凭证不该由远程脚本注入）。
   /// 命中即整个请求作废，而不是「过滤掉继续发」——后者会让作者
   /// 以为签名生效了，实际发出去的是没签的报文，比直接报错难查得多。
-  Future<PreparedRequest> _sign(PreparedRequest base) async {
+  Future<PreparedRequest> _sign(PreparedRequest base, String rootUrl) async {
     final u = Uri.parse(base.url);
     final out = await _call(manifest.signEntry!, <Object?>[
       <String, Object?>{
@@ -710,7 +801,9 @@ class RemoteJsSource implements DataSource, SourceGrouped, SearchUnsupported {
         'body': base.body,
         'vars': manifest.vars,
         'ctx': <String, Object?>{
-          'baseUrl': manifest.baseUrl,
+          // 用本次请求真正走的根地址，不是清单主地址：换到备用域名后
+          // 签名脚本若按 baseUrl 拼参，拼出来的必须是那个能连上的域名。
+          'baseUrl': rootUrl,
           'sourceId': manifest.id,
         },
       },
@@ -826,7 +919,10 @@ class RemoteJsSource implements DataSource, SourceGrouped, SearchUnsupported {
   /// 列表/详情的 ctx 里不含这些字段——它们对解析整页没有意义。
   Map<String, Object?> _ctx(FetchResult f, [DramaVideo? video]) => <String, Object?>{
         'vars': manifest.vars,
-        'baseUrl': manifest.baseUrl,
+        // 解析阶段补全相对链接（封面、相对播放地址）用的根地址。
+        // 必须用 _base 而不是 manifest.baseUrl：走备用域名时，
+        // 站方返回的 `//upload/x.jpg` 要拼到**实际可用的**那个域名上。
+        'baseUrl': _base,
         'finalUrl': f.finalUrl,
         'sourceId': manifest.id,
         if (video != null) ...<String, Object?>{

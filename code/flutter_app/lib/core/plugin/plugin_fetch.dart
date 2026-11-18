@@ -216,8 +216,11 @@ PreparedRequest prepareRequest({
   required PluginManifest manifest,
   required PluginRequest req,
   required Map<String, String> params,
+  String? baseOverride,
 }) {
-  final base = manifest.baseUrl.trim();
+  // baseOverride 用于「主域名连不上就换备用域名」的重试：同一份清单、
+  // 同样的 path/query，只有根地址不同。传 null 时行为与以前完全一致。
+  final base = (baseOverride ?? manifest.baseUrl).trim();
   final baseErr = urlRejectionReason(base);
   if (baseErr != null) {
     throw PluginFetchException('源站地址不可用：$baseErr（$base）');

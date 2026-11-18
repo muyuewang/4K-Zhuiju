@@ -191,6 +191,7 @@ class PluginManifest {
     required this.id,
     required this.name,
     required this.baseUrl,
+    this.baseUrlFallbacks = const <String>[],
     required this.script,
     required this.categories,
     this.description = '',
@@ -227,6 +228,34 @@ class PluginManifest {
   /// 单独拎出来是因为它是**最高频的变更项**：采集站换域名是常态，
   /// 而换域名时只需要改这一个字段。
   final String baseUrl;
+
+  /// 备用站点根地址，按顺序尝试。
+  ///
+  /// ## 为什么需要这个
+  ///
+  /// 采集站换域名是常态，而且**同一份数据的多个域名往往只有部分可达**
+  /// （实测：`cj.ffzyapi.com` 被断，`api.ffzyapi.com` 正常，数据完全一样）。
+  /// 只有一个 `baseUrl` 时，主域名一被墙整个源就废了；配上备用域名后，
+  /// 主域名连不上会自动换下一个，用户无感。
+  ///
+  /// 判定标准是**网络层失败**（超时/连接重置/DNS 失败），不是 HTTP 4xx/5xx——
+  /// 后者说明站是通的，只是这次请求有问题，换域名重试没有意义还会放大请求量。
+  ///
+  /// 命中的备用地址会粘住到本次会话结束，后续请求直接走它，
+  /// 不会每次都从主域名重新试一遍（那等于每条请求多付一次超时代价）。
+  final List<String> baseUrlFallbacks;
+
+  /// 依次尝试的根地址：主地址在前，备用地址去重后接在后面。
+  ///
+  /// 去重是必要的：配置里手滑把主地址也写进备用列表时，
+  /// 会在同一个死域名上白试两次。
+  List<String> get baseCandidates {
+    final out = <String>[baseUrl];
+    for (final b in baseUrlFallbacks) {
+      if (!out.contains(b)) out.add(b);
+    }
+    return out;
+  }
 
   /// JS 脚本在仓库里的相对路径，如 `config/plugins/maccms-generic.js`。
   ///
@@ -562,6 +591,21 @@ class PluginManifest {
     if (id is! String || name is! String) return null;
     if (baseUrl is! String || script is! String) return null;
 
+    // 备用地址是可选兜底：**单条非法就丢弃这一条**，不让整个源作废。
+    // 理由与 validate() 的「跳过这一条 / 整份作废」取舍一致——
+    // 备用地址写错本意是「少一层保护」，不该升级成「源没了」。
+    final fallbacks = <String>[];
+    final rawFallbacks = raw['baseUrlFallbacks'];
+    if (rawFallbacks is List) {
+      for (final f in rawFallbacks) {
+        if (f is! String) continue;
+        final t = f.trim();
+        if (t.isEmpty) continue;
+        if (validateBaseUrl(t) != null) continue;
+        if (!fallbacks.contains(t)) fallbacks.add(t);
+      }
+    }
+
     final cats = <SourceCategory>[];
     final rawCats = raw['categories'];
     if (rawCats is List) {
@@ -590,6 +634,7 @@ class PluginManifest {
       id: id,
       name: name,
       baseUrl: baseUrl,
+      baseUrlFallbacks: fallbacks,
       script: script,
       categories: cats,
       description: raw['description'] is String
@@ -637,6 +682,7 @@ class PluginManifest {
         'id': id,
         'name': name,
         'baseUrl': baseUrl,
+        if (baseUrlFallbacks.isNotEmpty) 'baseUrlFallbacks': baseUrlFallbacks,
         'script': script,
         if (description.isNotEmpty) 'description': description,
         if (group.isNotEmpty) 'group': group,
