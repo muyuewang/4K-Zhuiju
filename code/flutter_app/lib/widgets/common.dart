@@ -28,11 +28,16 @@ class DramaCard extends StatefulWidget {
   /// TV 模式下是否为页面初始焦点
   final bool autofocus;
 
+  /// 来源角标文案（全局搜索结果用）。非空时显示在海报右上角，
+  /// 让用户分清这条结果来自哪个源。首页/分类页不传，不显示。
+  final String sourceLabel;
+
   const DramaCard({
     super.key,
     required this.drama,
     required this.onTap,
     this.autofocus = false,
+    this.sourceLabel = '',
   });
 
   @override
@@ -104,6 +109,35 @@ class _DramaCardState extends State<DramaCard> {
                                   height: 1.1,
                                   color: Colors.white,
                                   fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        // 右上角来源角标（全局搜索结果用）。手机卡片窄，
+                        // 源名可能很长（如「大师兄 · 暴风」），限宽 + 省略。
+                        if (widget.sourceLabel.isNotEmpty)
+                          Positioned(
+                            right: 0,
+                            top: 0,
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 92),
+                              child: Container(
+                                padding: const EdgeInsets.fromLTRB(6, 3, 7, 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.72),
+                                  borderRadius: const BorderRadius.only(
+                                    bottomLeft: Radius.circular(R.card),
+                                  ),
+                                ),
+                                child: Text(
+                                  widget.sourceLabel,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: Ts.caption,
+                                    height: 1.1,
+                                    color: Colors.white,
+                                  ),
                                 ),
                               ),
                             ),

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../core/api.dart';
 import '../core/layout.dart';
 import '../core/models.dart';
+import '../core/search/global_search.dart';
 import '../core/search_history.dart';
 import '../core/source/data_source.dart';
 import '../core/source/registry.dart';
@@ -556,10 +557,16 @@ class _SearchPageState extends State<SearchPage> {
   bool _searched = false;
   String? _err;
 
-  /// 当前源站方没开放搜索时的解释文案（空串 = 正常可搜）。
-  ///
-  /// 与 [_err] 分开：这不是失败，重试一百次也是同一句话，所以不该
-  /// 走带「重试」按钮的错误页，也不该被用户当成网络问题。
+  /// 全局搜索进度：「已搜 12/19 源」。渐进刷新时显示在结果上方，
+  /// 让用户知道后面还有源在路上，而不是以为就这些结果。
+  GlobalSearchProgress? _progress;
+
+  /// 各源失败的简要说明，用于状态行（如「2 个源无响应」）。
+  /// 单源失败不影响已拿到的结果，只在状态行轻描淡写地提一句。
+  int _failedCount = 0;
+
+  /// 所有已注册源都不支持搜索时的一次性说明。全局搜索下这种情况少见，
+  /// 但存在（比如只配了一个站方没开放搜索的源），此时不该说「没找到」。
   String _blocked = '';
 
   /// 请求序号：只认最后一次发起的搜索。
@@ -589,20 +596,7 @@ class _SearchPageState extends State<SearchPage> {
     final q = (kw ?? _input.text).trim();
     if (q.isEmpty) return;
     _input.text = q;
-    // 站方没开放搜索时，一次请求都不用发：直接给解释 + 可点的替代动作。
-    final src = SourceRegistry.instance.now;
-    final blocked =
-        src is SearchUnsupported ? (src as SearchUnsupported).searchUnsupportedHint : '';
-    if (blocked.isNotEmpty) {
-      setState(() {
-        _blocked = blocked;
-        _result = const [];
-        _loading = false;
-        _searched = true;
-        _err = null;
-      });
-      return;
-    }
+
     // 落一条搜索历史：用户下次进搜索页直接点，不用重打
     SearchHistory.instance.add(q);
     final seq = ++_seq;
@@ -610,19 +604,43 @@ class _SearchPageState extends State<SearchPage> {
       _loading = true;
       _searched = true;
       _err = null;
+      _result = const [];
+      _progress = null;
+      _failedCount = 0;
       _blocked = '';
     });
     try {
-      // 走当前数据源：两个源的搜索接口、签名、返回结构完全不同，
-      // 页面不该知道这些差异，也不该在切源后还打老源的接口。
-      final r = await SourceRegistry.instance.now.search(q);
+      final result = await GlobalSearchService.instance.search(
+        q,
+        onPartial: (partial, progress) {
+          // 连点/清空后旧请求的回调一律丢弃，否则会覆盖新词的结果
+          if (!mounted || seq != _seq) return;
+          setState(() {
+            _result = partial;
+            _progress = progress;
+          });
+        },
+      );
       if (!mounted || seq != _seq) return;
       setState(() {
-        _result = r;
+        _result = result.results;
+        _progress = result.progress;
+        _failedCount = result.failed.length;
         _loading = false;
+        // 全部源都不支持搜索时，取第一个源给出的解释文案。
+        if (result.allUnsupported) {
+          final first = SourceRegistry.all.firstWhere(
+            (s) => s is SearchUnsupported,
+            orElse: () => SourceRegistry.all.first,
+          );
+          _blocked = first is SearchUnsupported
+              ? (first as SearchUnsupported).searchUnsupportedHint
+              : '当前源不支持搜索';
+        }
       });
     } catch (e) {
       if (!mounted || seq != _seq) return;
+      // 全局搜索把单源异常都吞了，能走到这里只有整体性问题
       setState(() {
         _loading = false;
         _err = friendlyError(e);
@@ -639,6 +657,8 @@ class _SearchPageState extends State<SearchPage> {
       _searched = false;
       _loading = false;
       _err = null;
+      _progress = null;
+      _failedCount = 0;
       _blocked = '';
     });
   }
@@ -681,9 +701,12 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildBody() {
-    if (_loading) return const Loading();
+    if (_loading && _result.isEmpty) return const Loading();
     if (_err != null) {
       return ErrorView(message: _err!, onRetry: () => _doSearch());
+    }
+    if (!_searched) {
+      return _hotWords();
     }
     if (_blocked.isNotEmpty) {
       return SingleChildScrollView(
@@ -691,8 +714,6 @@ class _SearchPageState extends State<SearchPage> {
         child: EmptyView(
           text: '这个源搜不了',
           hint: _blocked,
-          // 空屏必须给出路：用户此刻唯一的动作是「返回」，但那需要他自己
-          // 想到「回去换源」。这里直接把这一步写成按钮。
           action: ActionChip(
             label: const Text('返回首页换个源',
                 style: TextStyle(fontSize: Ts.bodySm)),
@@ -702,9 +723,6 @@ class _SearchPageState extends State<SearchPage> {
           ),
         ),
       );
-    }
-    if (!_searched) {
-      return _hotWords();
     }
     if (_result.isEmpty) {
       // 空屏必须给出路。搜不到时用户原来的唯一动作是「返回」，
@@ -731,31 +749,73 @@ class _SearchPageState extends State<SearchPage> {
         ),
       );
     }
+    final prog = _progress;
+    final status = prog == null
+        ? ''
+        : prog.finished
+            ? '搜遍 ${prog.total} 个源 · ${prog.ok} 个有结果${_failedCount > 0 ? ' · $_failedCount 个无响应' : ''}'
+            : '已搜 ${prog.done}/${prog.total} 个源…';
+
     return ContentClamp(
-      child: GridView.builder(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
-        gridDelegate: posterGridDelegate(tv: isTv(context)),
-        itemCount: _result.length,
-        itemBuilder: (c, i) {
-          final d = _result[i];
-          return DramaCard(
-            drama: d,
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => DetailPage(
-                dramaId: d.id,
-                title: d.name,
-                // 搜索结果有来源标记就按标记走，避免搜索中途切源后打错源
-                sourceId: d.sourceId.isEmpty
-                    ? SourceRegistry.instance.now.id
-                    : d.sourceId,
+      child: Column(
+        children: [
+          if (status.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
+              child: Row(
+                children: [
+                  if (!prog!.finished)
+                    const SizedBox(
+                      width: 11,
+                      height: 11,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  if (!prog.finished) const SizedBox(width: 8),
+                  Text(status,
+                      style: TextStyle(fontSize: Ts.caption, color: context.palette.textDim)),
+                ],
               ),
-            )),
-            // 搜索结果列表没有 Tab 并存问题，第一张可直接拿焦点
-            autofocus: i == 0,
-          );
-        },
+            ),
+          Expanded(
+            child: GridView.builder(
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 16),
+              gridDelegate: posterGridDelegate(tv: isTv(context)),
+              itemCount: _result.length,
+              itemBuilder: (c, i) {
+                final d = _result[i];
+                return DramaCard(
+                  drama: d,
+                  // 全局搜索混着所有源的结果，角标标出来源，用户才知道
+                  // 这条点进去走的是哪个源（各源片库/线路不同）。
+                  sourceLabel: _sourceLabel(d.sourceId),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => DetailPage(
+                      dramaId: d.id,
+                      title: d.name,
+                      // 每条结果都带自己的 sourceId，回详情打回对应源
+                      sourceId: d.sourceId.isEmpty
+                          ? SourceRegistry.instance.now.id
+                          : d.sourceId,
+                    ),
+                  )),
+                  // 搜索结果列表没有 Tab 并存问题，第一张可直接拿焦点
+                  autofocus: i == 0,
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
+  }
+
+  /// sourceId → 展示名。全局搜索结果跨源，角标要显示人能看懂的源名。
+  String _sourceLabel(String sid) {
+    final id = sid.isEmpty ? SourceRegistry.instance.now.id : sid;
+    for (final s in SourceRegistry.all) {
+      if (s.id == id) return s.displayName;
+    }
+    return id;
   }
 
   Widget _hotWords() {
