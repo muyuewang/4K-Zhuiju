@@ -323,7 +323,7 @@ String _jisuUnescape(String s) => s
 
 // ============================== 适配器 ==============================
 
-class JisuSource implements DataSource {
+class JisuSource implements DataSource, SearchSinglePage {
   JisuSource._()
       : _http = SiteHttp(baseUrl: kJisuBase, referer: '$kJisuBase/');
 

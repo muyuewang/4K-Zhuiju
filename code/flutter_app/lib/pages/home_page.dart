@@ -13,6 +13,8 @@ import '../core/source/registry.dart';
 import '../core/source/zhuiju_source.dart';
 import '../widgets/common.dart';
 import '../widgets/feed_view.dart';
+import '../widgets/page_bar.dart';
+import '../widgets/search_source_rail.dart';
 import '../widgets/source_switcher.dart';
 import '../widgets/tv_focus.dart';
 import '../theme.dart';
@@ -569,6 +571,39 @@ class _SearchPageState extends State<SearchPage> {
   /// 但存在（比如只配了一个站方没开放搜索的源），此时不该说「没找到」。
   String _blocked = '';
 
+  /// 当前选中的源 id（空串 = 「全部」）。
+  ///
+  /// 切源**不重新搜索**：全部页已经把每个源的第 1 页拉回来了，切过去
+  /// 只是换个视图看缓存，必须秒开。只有点「下一页」才发新请求。
+  String _selectedSourceId = '';
+
+  /// 每源未跨源去重的原始结果（来自 [GlobalSearchProgress.perSource]）。
+  ///
+  /// 不能拿 [_result] 按 sourceId 过滤来当单源结果：全部页会把同名同
+  /// 年份的剧合并成一条只带一个 sourceId，过滤后「看剧 42 条」会变成
+  /// 38 条，左栏数字与列表对不上。
+  Map<String, List<Drama>> _perSource = const {};
+
+  /// 单源视图的分页缓存：`_srcPages[n]` 是第 n+1 页。
+  ///
+  /// 存成「按页分组」而不是一个拍平的大列表，是为了让「上一页」能真的
+  /// 回到上一页 —— 拍平后只知道总数，算不出第 N 页的边界。
+  final List<List<Drama>> _srcPages = <List<Drama>>[];
+
+  /// 单源视图当前页（从 1 开始）
+  int _srcPage = 1;
+
+  /// 单源翻页请求进行中
+  bool _srcPaging = false;
+
+  /// 第 1 页之后是否还能翻。靠「上一页返回条数是否够一页」推断 ——
+  /// 各源的搜索接口都不返回总数，没有更好的判据。
+  bool _srcHasNext = false;
+
+  /// 单源翻页失败的原因（人话）。非空时在结果区顶部显示一行，
+  /// 但**不清空已经拿到的结果**：翻页失败不该把用户看了一半的内容抹掉。
+  String? _srcErr;
+
   /// 请求序号：只认最后一次发起的搜索。
   ///
   /// 没有它会出两种错：
@@ -608,6 +643,15 @@ class _SearchPageState extends State<SearchPage> {
       _progress = null;
       _failedCount = 0;
       _blocked = '';
+      // 新的一轮搜索要让源选择、分页缓存全部归零：
+      // 留着上一次的选中源会出现「搜新词却停在旧源的空列表」。
+      _selectedSourceId = '';
+      _perSource = const {};
+      _srcPages.clear();
+      _srcPage = 1;
+      _srcPaging = false;
+      _srcHasNext = false;
+      _srcErr = null;
     });
     try {
       final result = await GlobalSearchService.instance.search(
@@ -618,6 +662,7 @@ class _SearchPageState extends State<SearchPage> {
           setState(() {
             _result = partial;
             _progress = progress;
+            _perSource = progress.perSource;
           });
         },
       );
@@ -625,6 +670,7 @@ class _SearchPageState extends State<SearchPage> {
       setState(() {
         _result = result.results;
         _progress = result.progress;
+        _perSource = result.progress.perSource;
         _failedCount = result.failed.length;
         _loading = false;
         // 全部源都不支持搜索时，取第一个源给出的解释文案。
@@ -648,6 +694,123 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
+  /// 切换左侧源。**不发请求**，直接用全部页已经拿到的第 1 页数据。
+  void _selectSource(String id) {
+    if (id == _selectedSourceId) return;
+    setState(() {
+      _selectedSourceId = id;
+      _srcErr = null;
+      _srcPage = 1;
+      _srcPages.clear();
+      if (id.isNotEmpty) {
+        final first = _perSource[id] ?? const <Drama>[];
+        if (first.isNotEmpty) _srcPages.add(first);
+        // 够一整页才可能还有下一页；不足一页说明这就是全部。
+        _srcHasNext = first.length >= _srcPageSize && _supportsPaging(id);
+      } else {
+        _srcHasNext = false;
+      }
+    });
+  }
+
+  /// 每源第 1 页的条数。与全局搜索的 perSourceLimit 必须一致，
+  /// 否则「够不够一页」的判断会错（判少了会吞掉真实存在的下一页）。
+  static const int _srcPageSize = kGlobalSearchPerSourceLimit;
+
+  /// 该源是否支持翻页（不支持的在 [DataSource] 上用可选接口声明）。
+  bool _supportsPaging(String sourceId) {
+    for (final s in SourceRegistry.all) {
+      if (s.id == sourceId) return s is! SearchSinglePage;
+    }
+    return true;
+  }
+
+  /// 单源视图翻页。
+  ///
+  /// 只打**一个**源的接口，所以几百毫秒就回来 —— 这正是「全部页不分页、
+  /// 单源页分页」这个设计的立足点。全部页翻页要让 19 个源同时翻，
+  /// 慢且各源分页语义不统一。
+  Future<void> _srcGo(int delta) async {
+    final sid = _selectedSourceId;
+    if (sid.isEmpty || _srcPaging) return;
+    final target = _srcPage + delta;
+    if (target < 1) return;
+
+    // 已经缓存过这一页（用户来回翻）→ 直接切，不发请求
+    if (target <= _srcPages.length) {
+      setState(() {
+        _srcPage = target;
+        _srcErr = null;
+        _srcHasNext = _srcPages.length > target ||
+            _srcPages[target - 1].length >= _srcPageSize;
+      });
+      return;
+    }
+
+    // 只能顺序翻：各源都没有「跳页」语义，也没有总数
+    if (target != _srcPages.length + 1) return;
+
+    final seq = _seq;
+    setState(() {
+      _srcPaging = true;
+      _srcErr = null;
+    });
+    try {
+      final src = SourceRegistry.all.firstWhere((s) => s.id == sid);
+      final list = await src.search(_input.text.trim(), page: target).timeout(
+            kGlobalSearchPerSourceTimeout,
+          );
+      if (!mounted || seq != _seq) return;
+      setState(() {
+        _srcPaging = false;
+        _srcPages.add(List<Drama>.unmodifiable(list));
+        _srcPage = target;
+        // 满页才认为还有下一页：各源不返回总数，这是唯一可靠的判据
+        _srcHasNext = list.length >= _srcPageSize;
+      });
+    } catch (e) {
+      if (!mounted || seq != _seq) return;
+      // 翻页失败**不清空已有结果**：用户可能正在看第 1 页的内容，
+      // 抹掉它换一个错误页是更糟的体验。只在顶部加一行说明。
+      setState(() {
+        _srcPaging = false;
+        _srcErr = friendlyError(e);
+      });
+    }
+  }
+
+  /// 当前应该渲染的列表。
+  List<Drama> get _visibleResults {
+    if (_selectedSourceId.isEmpty) return _result;
+    if (_srcPages.isEmpty) return const <Drama>[];
+    return _srcPages[_srcPage - 1];
+  }
+
+  /// 左侧导航项。只包含**有结果**的源 + 「全部」。
+  ///
+  /// 超时/无结果的源不列：点进去必然是空屏，列出来只是制造一次失望。
+  /// 它们的数量折成左栏底部的 footNote。
+  List<SourceRailItem> _railItems() {
+    final items = <SourceRailItem>[
+      SourceRailItem(id: '', label: '全部', count: _result.length),
+    ];
+    final entries = _perSource.entries.toList()
+      ..sort((a, b) {
+        final c = b.value.length.compareTo(a.value.length);
+        if (c != 0) return c;
+        // 条数相同按名字排，避免每次搜索顺序随机跳动
+        return _sourceLabel(a.key).compareTo(_sourceLabel(b.key));
+      });
+    for (final e in entries) {
+      items.add(SourceRailItem(
+        id: e.key,
+        label: _sourceLabel(e.key),
+        count: e.value.length,
+      ));
+    }
+    return items;
+  }
+
   /// 清空输入：同时让在飞的请求作废，否则它回来还会把结果填上。
   void _clear() {
     _seq++;
@@ -660,6 +823,13 @@ class _SearchPageState extends State<SearchPage> {
       _progress = null;
       _failedCount = 0;
       _blocked = '';
+      _selectedSourceId = '';
+      _perSource = const {};
+      _srcPages.clear();
+      _srcPage = 1;
+      _srcPaging = false;
+      _srcHasNext = false;
+      _srcErr = null;
     });
   }
 
@@ -750,58 +920,167 @@ class _SearchPageState extends State<SearchPage> {
       );
     }
     final prog = _progress;
-    final status = prog == null
-        ? ''
-        : prog.finished
-            ? '搜遍 ${prog.total} 个源 · ${prog.ok} 个有结果${_failedCount > 0 ? ' · $_failedCount 个无响应' : ''}'
-            : '已搜 ${prog.done}/${prog.total} 个源…';
+    final tv = isTv(context);
+    final rail = _railItems();
+    final visible = _visibleResults;
+    final single = _selectedSourceId.isNotEmpty;
+
+    // 左栏底部的小字：说清楚「有几个源没回来」，但不必为它们留可点项。
+    // 只统计**失败**的源（超时/报错）；搜成功但 0 结果的源没必要提，
+    // 那是「这个源确实没有」，不是异常。
+    final footNote = _failedCount > 0 ? '$_failedCount 个源无响应' : '';
+
+    // 进度行：全部页显示汇总，单源页显示该源自己的状态。
+    final String status;
+    if (single) {
+      status = '${_sourceLabel(_selectedSourceId)} · 共 ${visible.length} 条'
+          '${_srcPage > 1 ? '（第 $_srcPage 页）' : ''}';
+    } else if (prog == null) {
+      status = '';
+    } else if (prog.finished) {
+      status = '共 ${_result.length} 条 · ${prog.ok} 个源有结果';
+    } else {
+      status = '已搜 ${prog.done}/${prog.total} 个源 · 已找到 ${_result.length} 条';
+    }
 
     return ContentClamp(
       child: Column(
         children: [
           if (status.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
+              padding: EdgeInsets.fromLTRB(tv ? 16 : 14, 8, 14, 2),
               child: Row(
                 children: [
-                  if (!prog!.finished)
+                  // 只有「全部」页还在收集中才转圈；单源页的数据早已到手，
+                  // 这里转圈会让人以为在等网络
+                  if (!single && !(prog?.finished ?? true)) ...[
                     const SizedBox(
                       width: 11,
                       height: 11,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
-                  if (!prog.finished) const SizedBox(width: 8),
-                  Text(status,
-                      style: TextStyle(fontSize: Ts.caption, color: context.palette.textDim)),
+                    const SizedBox(width: 8),
+                  ],
+                  Expanded(
+                    child: Text(
+                      status,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: Ts.caption,
+                          color: context.palette.textDim),
+                    ),
+                  ),
+                  if (_srcErr != null)
+                    Flexible(
+                      child: Text(
+                        _srcErr!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                            fontSize: Ts.caption, color: context.palette.textDim),
+                      ),
+                    ),
                 ],
               ),
             ),
           Expanded(
-            child: GridView.builder(
-              padding: const EdgeInsets.fromLTRB(12, 6, 12, 16),
-              gridDelegate: posterGridDelegate(tv: isTv(context)),
-              itemCount: _result.length,
-              itemBuilder: (c, i) {
-                final d = _result[i];
-                return DramaCard(
-                  drama: d,
-                  // 全局搜索混着所有源的结果，角标标出来源，用户才知道
-                  // 这条点进去走的是哪个源（各源片库/线路不同）。
-                  sourceLabel: _sourceLabel(d.sourceId),
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => DetailPage(
-                      dramaId: d.id,
-                      title: d.name,
-                      // 每条结果都带自己的 sourceId，回详情打回对应源
-                      sourceId: d.sourceId.isEmpty
-                          ? SourceRegistry.instance.now.id
-                          : d.sourceId,
-                    ),
-                  )),
-                  // 搜索结果列表没有 Tab 并存问题，第一张可直接拿焦点
-                  autofocus: i == 0,
-                );
-              },
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SearchSourceRail(
+                  items: rail,
+                  selectedId: _selectedSourceId,
+                  onSelect: _selectSource,
+                  tv: tv,
+                  footNote: footNote,
+                  autofocus: true,
+                ),
+                Expanded(
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: visible.isEmpty
+                            ? EmptyView(
+                                text: single
+                                    ? '「${_sourceLabel(_selectedSourceId)}」没有结果'
+                                    : '没找到',
+                                hint: single
+                                    ? '换一个源看看，或回到「全部」'
+                                    : '换个词试试',
+                              )
+                            : GridView.builder(
+                                padding: EdgeInsets.fromLTRB(
+                                    tv ? 16 : 12, 6, 12, 16),
+                                gridDelegate:
+                                    posterGridDelegate(tv: tv),
+                                itemCount: visible.length,
+                                itemBuilder: (c, i) {
+                                  final d = visible[i];
+                                  return DramaCard(
+                                    drama: d,
+                                    // 按用户要求，单源页**也保留**来源角标。
+                                    // 全部页必须标（混着 19 个源）；
+                                    // 单源页虽只有一个源，但角标同时也提示了
+                                    // 「这条走哪个源取详情」，保持一致更省心。
+                                    sourceLabel: _sourceLabel(
+                                        d.sourceId.isEmpty
+                                            ? _selectedSourceId
+                                            : d.sourceId),
+                                    onTap: () =>
+                                        Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                      builder: (_) => DetailPage(
+                                        dramaId: d.id,
+                                        title: d.name,
+                                        // 每条结果都带自己的 sourceId，
+                                        // 回详情打回对应源
+                                        sourceId: d.sourceId.isEmpty
+                                            ? (_selectedSourceId.isEmpty
+                                                ? SourceRegistry.instance.now.id
+                                                : _selectedSourceId)
+                                            : d.sourceId,
+                                      ),
+                                    )),
+                                    // 网格第一张拿焦点；左栏 autofocus 会先抢到，
+                                    // 网格这里只在没有左栏时才有意义
+                                    autofocus: false,
+                                  );
+                                },
+                              ),
+                      ),
+                      // 分页条只在单源视图出现：全部页翻页要 19 个源同时翻，
+                      // 慢且各源分页语义不统一（详见 _srcGo 注释）
+                      if (single)
+                        _srcPaging
+                            ? const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 14),
+                                child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2),
+                                ),
+                              )
+                            : PageBar(
+                                page: _srcPage,
+                                hasPrev: _srcPage > 1,
+                                hasNext: _srcHasNext,
+                                onPrev: () => _srcGo(-1),
+                                onNext: () => _srcGo(1),
+                                total: visible.length,
+                                tv: tv,
+                                // 不支持翻页的源要说清楚原因，
+                                // 否则用户会一直按「下一页」按到手酸
+                                note: _supportsPaging(_selectedSourceId)
+                                    ? ''
+                                    : '该源不支持翻页，已显示全部结果',
+                              ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ],

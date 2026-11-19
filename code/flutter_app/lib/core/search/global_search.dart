@@ -41,14 +41,34 @@ class GlobalSearchProgress {
   final int ok; // 成功返回结果的源数
   final List<String> noResult; // 搜成功但 0 结果的源 ID
 
+  /// 每个有结果的源 → **未跨源去重**的原始列表（保持源自己的顺序）。
+  ///
+  /// ## 为什么必须单独存一份，不能从 [GlobalSearchResult.results] 过滤
+  ///
+  /// 「全部」页会把不同源命中的同一部剧合并成一条（按名称+年份去重），
+  /// 合并后只保留最优的那条、并且只带**一个** sourceId。所以拿最终结果
+  /// 按 sourceId 过滤会得到「看剧 38 条」，而看剧自己明明命中了 42 条——
+  /// 左栏显示 42、点进去 38，用户会以为数据错了。
+  ///
+  /// 原始列表就是给左栏计数和单源视图用的：它是「这个源到底搜到了什么」，
+  /// 与去重无关。翻页也从这份数据接续（第 1 页用它，第 2 页起实时请求）。
+  ///
+  /// 渐进过程中每次回调都会重建，先回来的源先出现在左栏。
+  final Map<String, List<Drama>> perSource;
+
   const GlobalSearchProgress({
     required this.total,
     required this.done,
     required this.ok,
     this.noResult = const [],
+    this.perSource = const {},
   });
 
   bool get finished => done >= total;
+
+  /// 各源命中条数之和（未去重）。用于左栏「全部」项的角标。
+  int get totalHits =>
+      perSource.values.fold(0, (sum, list) => sum + list.length);
 }
 
 /// 一轮全局搜索的最终结果。
@@ -102,10 +122,10 @@ class GlobalSearchService {
     // 所有已注册源都不支持搜索：一次请求都不会发。要让页面说清楚是
     // 「源搜不了」而不是「没找到」，否则用户会反复换关键词白费劲。
     if (sources.isEmpty) {
-      final empty = const GlobalSearchProgress(total: 0, done: 0, ok: 0);
+      const empty = GlobalSearchProgress(total: 0, done: 0, ok: 0);
       onPartial(const <Drama>[], empty);
-      return GlobalSearchResult(
-        results: const <Drama>[],
+      return const GlobalSearchResult(
+        results: <Drama>[],
         progress: empty,
         allUnsupported: true,
       );
@@ -115,6 +135,11 @@ class GlobalSearchService {
     final index = <String, int>{}; // 归一化 key → accumulated 下标
     final failed = <String, String>{};
     final noResult = <String>[];
+
+    // 每个源命中、且**未跨源去重**的原始列表，供左栏计数与单源视图使用。
+    // 与 [accumulated] 并行维护：accumulated 是给人看的合并结果，
+    // 这里是「每个源到底搜到了什么」，两者条数不同是正常的（见字段注释）。
+    final perSource = <String, List<Drama>>{};
     var done = 0;
     var ok = 0;
 
@@ -130,6 +155,7 @@ class GlobalSearchService {
           noResult.add(src.id);
         } else {
           ok++;
+          perSource[src.id] = List<Drama>.unmodifiable(limited);
           for (final d in limited) {
             _merge(accumulated, index, d);
           }
@@ -145,6 +171,7 @@ class GlobalSearchService {
             done: done,
             ok: ok,
             noResult: List<String>.unmodifiable(noResult),
+            perSource: Map<String, List<Drama>>.unmodifiable(perSource),
           ),
         );
       }
@@ -160,6 +187,7 @@ class GlobalSearchService {
       done: done,
       ok: ok,
       noResult: List<String>.unmodifiable(noResult),
+      perSource: Map<String, List<Drama>>.unmodifiable(perSource),
     );
     onPartial(List<Drama>.unmodifiable(sorted), progress);
     return GlobalSearchResult(

@@ -436,7 +436,7 @@ String ddysClip(String s) =>
 
 // ============================== 适配器 ==============================
 
-class DdysSource implements DataSource {
+class DdysSource implements DataSource, SearchSinglePage {
   DdysSource._();
 
   static final DdysSource instance = DdysSource._();

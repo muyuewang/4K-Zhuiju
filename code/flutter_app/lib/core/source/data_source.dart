@@ -143,6 +143,26 @@ abstract class SearchUnsupported {
   String get searchUnsupportedHint;
 }
 
+/// 可选能力：**搜索结果不支持翻页**。
+///
+/// ## 为什么做成可选接口而不是 [DataSource] 的必选 getter
+///
+/// 项目里所有源都是 `implements DataSource`（不是 extends），Dart 的
+/// `implements` 会绕过继承来的默认实现 —— 在 [DataSource] 里写
+/// `bool get supportsSearchPaging => true` 一点用都没有，编译器照样要求
+/// 每个实现类补一行。加一个恒为 true 的 getter 到 9 个源里，纯噪音。
+///
+/// 只有「真的不能翻」的源才实现本接口，页面统一按
+/// `s is SearchSinglePage` 判断，加源时不用动页面。
+///
+/// ## 实测依据（2026-11-19 逐源核对源码）
+///
+/// 下面三个源的 `search` 里都有 `if (page > 1) return const [];`，
+/// 且各自注释写明了原因（站点搜索接口不分页 / page=2 返回与第 1 页
+/// 逐字节相同）。在这种情况下把「下一页」画出来，用户点了只会得到
+/// 一个空列表，看起来像 App 坏了。
+abstract class SearchSinglePage {}
+
 /// 分类项。与页面原有的 Category 结构一致，但归属数据源。
 class SourceCategory {
   final String id;

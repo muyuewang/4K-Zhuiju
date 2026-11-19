@@ -344,7 +344,7 @@ String _kvmUnescape(String s) => s
 
 // ============================== 适配器 ==============================
 
-class Kvm4kSource implements DataSource {
+class Kvm4kSource implements DataSource, SearchSinglePage {
   Kvm4kSource._()
       : _http = SiteHttp(baseUrl: kKvm4kBase, referer: '$kKvm4kBase/');
 
