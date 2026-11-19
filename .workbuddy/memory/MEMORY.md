@@ -65,6 +65,18 @@ GitHub 仓库 `muyuewang/4K-Zhuiju`。
   （10 条）的 `url` 是 `resolve://<票据>`，需再 POST `resolve-line` 换真实地址。
   别按 `http` 前缀过滤线路 —— 官方线可播率 100%，普通线只有 39%。
 
+### 看剧源（zhuiju 橘汁）
+
+- **列表与详情的 protobuf 字段号是两套，不能互通**：name 5→9、actor 12→25、
+  remark 13→26、year 14→18。用错的表现极隐蔽 —— 接口正常返回、剧名也对，
+  只是地区/年份/主演全空，会一直怀疑接口缺字段。
+- 封面地址在 `CoverImage` 容器的**字段 2**（字段 1 为空）。取错的表现是列表
+  全部无封面而搜索页正常。列表 `type` 在字段 9，不是 8。
+- **API 域名由站点远端配置下发**，不写死在客户端。换域名只改清单 `baseUrl`，不用发版。
+- 报错码速判：返回 **38 字节** = 域名对了只缺签名头；`HTTP=000`/超时 = 连不上。
+- 改字段号时别重写探测脚本，`code/tools/diag_zhuiju_fields.js` 与
+  `diag_zhuiju_detail.js` 直接 dump 全字段；`probe_zhuiju_lines.js` 统计线路可播率。
+
 ## 环境速查
 
 | 项 | 值 |
