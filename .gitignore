@@ -98,3 +98,16 @@ code/tools/_probe.bin
 
 # adb logcat 抓包残留（排查直播/启动问题时导出，一次性）
 logcat_dump.txt
+
+# NewTV 逆向分析的一次性脚本与截图（结论已写进本文件与记忆文档）。
+# newtv_sign.py / parse_pcap.py 只用于当时那套壳与 UDP 协议的验证，
+# 目标 App 已从项目中彻底移除，脚本留着只是噪音。
+code/tools/newtv_sign.py
+code/tools/parse_pcap.py
+code/tools/_s*.png
+code/tools/_vod*.png
+# /proc/<pid>/maps 导出（雷电模拟器里 dump 出来核对壳装载的 so）
+maps.txt
+
+# WorkBuddy 自动化运行时的会话目录（由工具自己管理，不是工程内容）
+.workbuddy/memory/automations/
