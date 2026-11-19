@@ -39,6 +39,26 @@ GitHub 仓库 `muyuewang/4K-Zhuiju`。
   唯一声明项），由 `code/tools/probe_live.py` 全量探活后生成。
 - `Registry` 不内置任何源，所有源都来自 `config/plugins/*.js`。
 
+### 插件网络层
+
+- **挑战式验证**（首访 403 + `Set-Cookie`，带 cookie 重发才 200）已支持：清单开
+  `"cookieJar": true`，宿主自动吸收并重发一次，**默认关闭**。必须「先吸收再看状态码」
+  —— 挑战 cookie 恰恰在 403 那次下发，顺序反了永远拿不到。
+- 该开关只能做**清单级**（整源共用一套会话），不能按请求开：cookie 是上一次请求
+  下发的，两次请求不同步就跟不上。
+- 这不违反「脚本不许碰 Cookie」：脚本注入凭证 ≠ 宿主回送服务端下发的会话值。
+  `Host`/`Cookie`/`Authorization` 三层拦截照旧。
+- **加源必须同步改** `test/plugin_index_validation_test.dart` 里的源总数断言。
+
+### 验证新代码是否真进包
+
+- Dart AOT 会裁掉未被 `is` 检查引用的标识符，**不能靠 grep 字段名判断**。
+  要搜字符串字面量，或直接搜类名（如 `plugin_cookie_jar`）。
+- **产物体积相同不代表没更新**：v1.11.15 与 v1.11.16 的 APK 字节数完全相同
+  （AOT 段对齐所致），但 md5 与关键标识均不同。必须比 md5 / 搜标识，不能看体积。
+- 插件脚本里的中文文案（如「加密专线」）在二进制里**搜不到是正常的** ——
+  `config/plugins/*.js` 运行时联网拉取，不编译进包。
+
 ### 看剧源（kanju）
 
 - 取址是**两阶段**：`resolve/{episodeToken}` 出 33 条 `line_options`，官方线
