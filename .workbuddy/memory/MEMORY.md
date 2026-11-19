@@ -49,6 +49,14 @@ GitHub 仓库 `muyuewang/4K-Zhuiju`。
 - 这不违反「脚本不许碰 Cookie」：脚本注入凭证 ≠ 宿主回送服务端下发的会话值。
   `Host`/`Cookie`/`Authorization` 三层拦截照旧。
 - **加源必须同步改** `test/plugin_index_validation_test.dart` 里的源总数断言。
+- **宿主 Content-Type 覆盖（已修）**：`PluginFetch.fetch()` 曾只用清单 `bodyType`
+  推导的 `req.contentType`，空串时补成表单类型，把签名钩子写在 headers 里的
+  `Content-Type` **静默顶掉**。现已改为 headers 优先。凡「接口 200 但返回业务错误码」
+  的 protobuf/binary 源，先怀疑这里。服务端对 json/octet-stream 一样放行，
+  所以清单加 `bodyType: "json"` 可兼容未升级的旧包。
+- **QuickJS 无 `TextDecoder`**，UTF-8 解码必须纯 JS 实现（`zhuiju.js` 的 `hexToText`）。
+  走宿主 `b64e`/`b64d` 是 2 次 FFI × 集数，658 条 video 就撞穿 5000 次预算。
+- **`maxHostCalls = 5000`**，每次 `PluginRuntime.call` 重置。
 
 ### 验证新代码是否真进包
 
@@ -58,6 +66,13 @@ GitHub 仓库 `muyuewang/4K-Zhuiju`。
   （AOT 段对齐所致），但 md5 与关键标识均不同。必须比 md5 / 搜标识，不能看体积。
 - 插件脚本里的中文文案（如「加密专线」）在二进制里**搜不到是正常的** ——
   `config/plugins/*.js` 运行时联网拉取，不编译进包。
+
+### 日志
+
+- `lib/core/app_log.dart`：环形 2000 条 / 2s 落盘 / 2MB 滚动，
+  用 `debugPrint = AppLog._handlePrint` 一次性劫持全项目日志，零改造。
+- 诊断页 `lib/pages/log_page.dart`，入口在「我的」页。
+- 排查用户端问题第一步：让对方进「诊断日志」→ 复制全部，比猜快得多。
 
 ### 看剧源（kanju）
 
