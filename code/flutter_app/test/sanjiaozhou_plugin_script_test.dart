@@ -144,7 +144,7 @@ void main() {
   });
 
   test('parseResolve 对已是 http 的输入不二次包装', () async {
-    final url = '${clientUrl}?url=PAN1-3-abc%3D';
+    const url = '$clientUrl?url=PAN1-3-abc%3D';
     final out = await call('parseResolve', [url, ctx]);
     expect(out['url'], url, reason: '代理地址被重复包了一层');
   });

@@ -4,6 +4,7 @@ import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/material.dart';
 import 'package:video_player_media_kit/video_player_media_kit.dart';
 
+import 'core/app_log.dart';
 import 'core/desktop_window.dart';
 import 'core/download.dart';
 import 'core/favorites.dart';
@@ -29,6 +30,12 @@ import 'core/tokens.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 日志中心必须最先装：它接管 `debugPrint`，装晚了启动阶段的日志
+  // （代理探测、网络失败、插件拉取）就全丢了——而这些恰恰是
+  // 「装完打不开」类问题唯一的线索。
+  //
+  // 内部只做内存缓冲 + 起一个定时器，磁盘文件异步打开，不阻塞首帧。
+  await AppLog.init();
   // Windows 播放内核换成 FFmpeg（libmpv），必须在任何播放器创建之前完成。
   //
   // 为什么需要这一步：video_player 在 Windows 上原本落到系统的
@@ -63,13 +70,13 @@ Future<void> main() async {
   // 桌面端崩溃要能定位。Release 版默认把异常吞成一块灰/白屏，
   // 用户在 Windows 上没有 logcat 可看，只能靠这里的输出落到 stderr。
   FlutterError.onError = (details) {
-    debugPrint('[ERR] ${details.exceptionAsString()}');
-    debugPrint('[ERR] ${details.stack}');
+    // 走 AppLog 而不是裸 debugPrint：前者会同时进内存和磁盘，
+    // 崩溃时那一步落盘（E 级立即 flush）就是事后唯一能拿到的现场。
+    AppLog.error('FLUTTER', details.exceptionAsString(), details.stack);
     FlutterError.presentError(details);
   };
   PlatformDispatcher.instance.onError = (error, stack) {
-    debugPrint('[ERR] uncaught: $error');
-    debugPrint('[ERR] $stack');
+    AppLog.error('UNCAUGHT', error, stack);
     return true;
   };
   // 绝不能在这里 await 磁盘恢复。

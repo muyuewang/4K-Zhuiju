@@ -601,6 +601,30 @@ class RemoteJsSource implements DataSource, SourceGrouped, SearchUnsupported {
       throw PluginFetchException('${manifest.name} 返回的 items 不是数组');
     }
 
+    // 空列表 + 有 error ⇒ 这是**失败**，不是「这个分类没内容」。
+    //
+    // ## 为什么这条判断必须有（2026-11-19 的实际事故）
+    //
+    // 橘汁的服务端在签名不对时返回 `code=100001 请求时间戳过期`，
+    // 脚本的 `parseList` 把错误吞成 `{items: []}`，宿主这边又只检查
+    // 「items 是不是数组」——于是整条链路上没有任何一环报错，
+    // 用户看到的是「这个分类暂时没有内容」，看起来像站方片库空了。
+    //
+    // 真正的原因是宿主把签名脚本写的 Content-Type 覆盖成了表单类型，
+    // 服务端读不出时间戳。这个错误**本该在第一眼就暴露**，
+    // 结果绕了一大圈才查出来。
+    //
+    // 约定：脚本想表达「失败」就返回 `error` 字段（parseResolve 一直是
+    // 这么做的，列表这边漏了）。空 items + 无 error 仍然是合法的
+    // 「真的没有内容」，不能报错——否则翻到最后一页会弹红色错误页。
+    if (rawItems.isEmpty) {
+      final why = _str(map['error'] ?? map['message'], '');
+      if (why.isNotEmpty) {
+        debugPrint('[PLUGIN] ${manifest.id} 列表返回空且带错误：$why');
+        throw PluginFetchException('${manifest.name}：$why');
+      }
+    }
+
     // 两阶段回查：列表接口只给 id 和名字（无封面），要再按 ids 批量补全。
     // 必须在转成 Drama **之前**做，否则已经丢掉的封面字段没法补回来。
     final enriched = manifest.batchDetail

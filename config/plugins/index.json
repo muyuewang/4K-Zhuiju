@@ -1500,7 +1500,8 @@
         "query": {
           "page": "1",
           "pagesize": "20"
-        }
+        },
+        "bodyType": "json"
       },
       "list": {
         "path": "/api/proto/v5/drama/category",
@@ -1512,7 +1513,8 @@
           "typeId1": "{category}",
           "page": "{page}",
           "pagesize": "20"
-        }
+        },
+        "bodyType": "json"
       },
       "search": {
         "path": "/api/proto/v5/drama/search",
@@ -1524,7 +1526,8 @@
           "page": "{page}",
           "pagesize": "20",
           "searchKeys": "{keyword}"
-        }
+        },
+        "bodyType": "json"
       },
       "detail": {
         "path": "/api/proto/v5/drama/getDetail",
@@ -1534,7 +1537,8 @@
         "responseType": "bin",
         "query": {
           "id": "{id}"
-        }
+        },
+        "bodyType": "json"
       },
       "resolve": {
         "path": "/api/proto/v5/videoUsableUrl",
@@ -1545,7 +1549,8 @@
         "query": {
           "vodPlayFrom": "{line}",
           "playUrl": "{url}"
-        }
+        },
+        "bodyType": "json"
       },
       "signEntry": "sign"
     }

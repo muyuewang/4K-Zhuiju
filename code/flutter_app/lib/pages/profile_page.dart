@@ -31,6 +31,7 @@ import 'detail_page.dart';
 import 'download_page.dart';
 import 'favorites_page.dart';
 import 'history_page.dart';
+import 'log_page.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -669,6 +670,25 @@ class ProfilePage extends StatelessWidget {
           // 单独抽成 StatefulWidget，因为要异步扫描目录才知道占了多少，
           // 塞进这个 StatelessWidget 里没法在扫完后刷新那一行文字。
           const CacheSettingRow(),
+          Divider(height: 1, color: context.palette.divider),
+          // 诊断日志入口。
+          //
+          // 为什么放在设置里、而不是藏在「开发者选项」：2026-11-19 排查
+          // 「橘汁所有分类全空」时，用户能提供的只有一张写着「暂时没有
+          // 内容」的截图，真正的原因（服务端 100001 时间戳过期）在日志里，
+          // 而 release 包的日志谁都看不到。入口藏起来等于没有。
+          //
+          // 副标题写清楚「干什么用」：光看「诊断日志」四个字，
+          // 用户不知道点开能干嘛，会以为是个危险开关。
+          _settingRow(
+            context,
+            icon: Icons.bug_report_outlined,
+            title: '诊断日志',
+            trailing: '排查用',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const LogPage()),
+            ),
+          ),
           Divider(height: 1, color: context.palette.divider),
           _settingRow(
             context,

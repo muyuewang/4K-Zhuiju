@@ -27,6 +27,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
+import '../user_facing_error.dart';
 import 'plugin_cookie_jar.dart';
 import 'plugin_manifest.dart';
 
@@ -122,8 +123,14 @@ class FetchResult {
 }
 
 /// 抓取失败。消息都是给人看的中文，直接可以进错误页。
-class PluginFetchException implements Exception {
+///
+/// 实现 [UserFacingException] 是必需的，不是可选的装饰：
+/// 没有它的话，`friendlyError()` 认不出这个类型，会把精心写好的
+/// 「橘汁：请求时间戳过期」换成兜底那句「出错了，请重试」。
+/// 排查时最值钱的一句话就这样被吞掉了 —— 见 user_facing_error.dart。
+class PluginFetchException implements UserFacingException {
   PluginFetchException(this.message);
+  @override
   final String message;
   @override
   String toString() => message;
@@ -424,6 +431,32 @@ class PluginFetch {
     var body = req.body;
     var bodyBytes = req.bodyBytes;
 
+    // 签名钩子在 headers 里写的 Content-Type 优先于清单推导值。
+    //
+    // ## 为什么必须这样（2026-11-19 实测）
+    //
+    // 之前只认 `req.contentType`（由清单 `bodyType` 推导，默认 form 时是空串），
+    // 空串就补成 `application/x-www-form-urlencoded`，于是**签名脚本写在
+    // headers 里的 Content-Type 被静默覆盖**。
+    //
+    // 橘汁就是被这一条打死的：它要求 `application/x-protobuf`，被改成表单
+    // 类型后服务端按表单解析 protobuf 体，读不到时间戳，回
+    // `code=100001 请求时间戳过期`；而 `parseList` 又把错误吞成空数组，
+    // 界面上只是「这个分类暂时没有内容」，**一个字的报错都没有**。
+    //
+    // 对照实验（`test/zhuiju_content_type_diag_test.dart`）：
+    //   form-urlencoded → 27 字节 code=100001
+    //   application/x-protobuf → 15471 字节正常数据
+    //   application/json / octet-stream → 同样正常
+    // 也就是说坏的不是「非表单」这个类别，而是**宿主把作者写的头改掉了**。
+    String? headerContentType;
+    for (final e in req.headers.entries) {
+      if (e.key.toLowerCase() == 'content-type') {
+        headerContentType = e.value;
+        break;
+      }
+    }
+
     for (var hop = 0; hop <= 3; hop++) {
       final reject = urlRejectionReason(url);
       if (reject != null) {
@@ -434,9 +467,10 @@ class PluginFetch {
       // body 清空，这时候还挂着 content-type 是错的（有些网关
       // 见到 GET 带表单类型会拒）。
       final contentType = method == 'POST'
-          ? (req.contentType.isEmpty
-              ? Headers.formUrlEncodedContentType
-              : req.contentType)
+          ? (headerContentType ??
+              (req.contentType.isEmpty
+                  ? Headers.formUrlEncodedContentType
+                  : req.contentType))
           : null;
 
       // 每个地址最多试两次：第一次可能被「挑战」拦下。

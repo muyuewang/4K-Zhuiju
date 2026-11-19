@@ -75,8 +75,22 @@ function fInt(no, v) {
 /**
  * SecureRequest{aes1, aes2, fake, timestamp, random}
  * 返回 hex 串；宿主会解码成原始字节发出。
+ *
+ * ## `ts` 必须由调用方传进来，**不能在这里再调一次 Date.now()**
+ *
+ * 2026-11-19 实测（`test/zhuiju_sign_diag_test.dart`）：本函数内部自己调
+ * `Date.now()` 时，body 里的时间戳与 `publicParams.timestamp` 相差 **50ms**，
+ * 服务端直接回 `code=100001 请求时间戳过期`，界面上表现为**所有分类全空
+ * 且不报错**（`parseList` 把错误吞成了空数组）。
+ *
+ * 差 50ms 的原因是两者之间夹着一次 RSA 公钥加密：pointycastle 的
+ * 1024 位 PKCS#1 在 QuickJS 里要跑几十毫秒，Node 侧原生实现只要 1ms
+ * 左右，所以离线对拍脚本一直是绿的 —— 这个坑只有在真实宿主里才现形。
+ *
+ * 服务端的判据是「header.timestamp 必须等于 body 里的 ts」，差 1ms 都算
+ * 重放。所以**时间戳只能取一次**，由 sign() 算好后同时给两处用。
  */
-function buildBody(params) {
+function buildBody(params, ts) {
   var keys = [];
   for (var k in params) {
     if (Object.prototype.hasOwnProperty.call(params, k)) keys.push(k);
@@ -87,7 +101,6 @@ function buildBody(params) {
     kv += keys[i] + '=' + s(params[keys[i]]);
   }
 
-  var ts = Date.now();
   var r8 = token(8);
   var fake = token(20);
   var encrypted = aesB64(ZJ_SAFE_CODE, kv + ts);
@@ -138,6 +151,9 @@ function buildPublicParams(ts, r16) {
  * 填好，脚本读出来塞进加密的请求体。
  */
 function sign(req) {
+  // 时间戳**只取一次**，header 与 body 共用同一个值。
+  // 分别取会让两者差几十毫秒（中间夹着 RSA 加密），服务端判重放。
+  // 详见 buildBody 上方的说明。
   var ts = Date.now();
   var r16 = token(16);
   var raw = req.query || {};
@@ -157,7 +173,7 @@ function sign(req) {
       'Accept': 'application/x-protobuf',
       'User-Agent': 'okhttp/3.12.1'
     },
-    body: buildBody(q)
+    body: buildBody(q, ts)
   };
 }
 
@@ -219,14 +235,90 @@ function all(fields, no) {
   return fields[no] || [];
 }
 
-/** hex 字节串 → UTF-8 文本（经宿主解码，QuickJS 没有 TextDecoder） */
+/**
+ * hex 字节串 → UTF-8 文本，**纯 JS 实现，不调宿主**。
+ *
+ * ## 为什么不能用 host.b64e + host.b64d
+ *
+ * 那样一次解码要跨 FFI 两次。列表页（20 条 × 3 字段）才 120 次，
+ * 看不出问题；但详情页是**线路 × 集数**的乘积 —— 实测《兰香如故》
+ * 47 集 × 14 条线路 = 658 条 video，每条取 name/source/path 三个字段，
+ * 就是 658 × 3 × 2 ≈ **3900 次**，再加上其它开销直接撞穿宿主
+ * 5000 次/次的预算，整个 parseDetail 抛
+ * 「host 调用次数超出上限（5000 次）」。
+ *
+ * 表现是**详情页解析失败**，而列表页完全正常 —— 很容易误判成
+ * 「详情接口挂了」或「剧集太多不支持」，其实只是解码方式太贵。
+ *
+ * 自己解 UTF-8 没有额外成本（纯字符串运算），QuickJS 没有 TextDecoder
+ * 也不影响 —— 手写一个不到 30 行。改完之后详情页只剩 1 次宿主调用
+ * （解响应体的 base64），与集数无关。
+ */
+function hexToText(hex) {
+  var len = hex.length / 2;
+  var out = '';
+  var i = 0;
+  while (i < len) {
+    var b0 = parseInt(hex.substr(i * 2, 2), 16);
+    i++;
+    if (b0 < 0x80) {
+      out += String.fromCharCode(b0);
+      continue;
+    }
+
+    // 判定首字节属于几字节序列，并取出已含的高位
+    var cp;
+    var extra;
+    if ((b0 & 0xE0) === 0xC0) {
+      cp = b0 & 0x1F;
+      extra = 1;
+    } else if ((b0 & 0xF0) === 0xE0) {
+      cp = b0 & 0x0F;
+      extra = 2;
+    } else if ((b0 & 0xF8) === 0xF0) {
+      cp = b0 & 0x07;
+      extra = 3;
+    } else {
+      // 非法首字节（含孤立的 continuation）：按替换符处理，不中断整串
+      out += '\uFFFD';
+      continue;
+    }
+
+    if (i + extra > len) {
+      out += '\uFFFD';
+      break;
+    }
+
+    var bad = false;
+    for (var k = 0; k < extra; k++) {
+      var b = parseInt(hex.substr(i * 2, 2), 16);
+      i++;
+      if ((b & 0xC0) !== 0x80) {
+        bad = true;
+        break;
+      }
+      cp = (cp << 6) | (b & 0x3F);
+    }
+    if (bad) {
+      out += '\uFFFD';
+      continue;
+    }
+
+    if (cp > 0xFFFF) {
+      // 补充平面要拆成代理对，否则 String.fromCharCode 会被截断
+      cp -= 0x10000;
+      out += String.fromCharCode(0xD800 + (cp >> 10), 0xDC00 + (cp & 0x3FF));
+    } else {
+      out += String.fromCharCode(cp);
+    }
+  }
+  return out;
+}
+
+/** hex 字节串 → UTF-8 文本 */
 function text(hexBytes) {
   if (!hexBytes) return '';
-  var b64 = s(host.b64e(hexBytes, 'hex'));
-  var out = s(host.b64d(b64, 'utf8'));
-  // 错误对象形如 {"__err": "..."}，不能当正文返回
-  if (out.charAt(0) === '{' && out.indexOf('"__err"') >= 0) return '';
-  return out;
+  return hexToText(hexBytes);
 }
 
 function str(fields, no) {
@@ -305,8 +397,15 @@ function dramaFrom(seg) {
 
 function parseList(body, ctx) {
   var u = unwrap(body);
-  if (!u || u.error) return { items: [] };
-  if (!u.data) return { items: [] };
+  // 错误必须往上传，不能吞成空数组。
+  //
+  // 2026-11-19 的事故就是吞出来的：服务端回 `code=100001 请求时间戳过期`，
+  // 这里返回 `{items: []}`，宿主只检查 items 是不是数组，界面上于是
+  // 显示「这个分类暂时没有内容」——看起来像站方片库空了，实际是签名炸了。
+  // 宿主侧已改成「空 items + 有 error ⇒ 报错」，这里负责把 error 填上。
+  if (!u) return { items: [], error: '接口返回的不是 protobuf 数据' };
+  if (u.error) return { items: [], error: u.error };
+  if (!u.data) return { items: [], error: '接口没返回内容' };
   var fs = pbFields(u.data);
   var items = [];
   var segs = all(fs, 1);

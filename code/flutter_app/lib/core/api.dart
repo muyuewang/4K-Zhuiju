@@ -19,6 +19,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 
 import 'models.dart';
 import 'protocol.dart';
+import 'user_facing_error.dart';
 
 class ApiException implements Exception {
   final int code;
@@ -352,6 +353,17 @@ class ZhuijuApi {
 /// 这种东西——既看不懂，也不知道下一步该干嘛（重试？换源？检查网络？）。
 String friendlyError(Object e) {
   if (e is ApiException) return e.msg;
+  // 「消息本身就是人话」的异常优先原样返回。
+  //
+  // 必须放在 SocketException / DioException 判断**之前**：插件层的
+  // 失败原因（「橘汁：请求时间戳过期」「这条线路需要二次解析，但清单
+  // 没配 resolveLine」）是脚本作者针对具体场景写的中文，比下面任何一句
+  // 通用文案都更有用。之前没有这条分支，它们全被兜底换成「出错了，
+  // 请重试」，排查时最值钱的一句话就这么丢了。
+  if (e is UserFacingException) {
+    final msg = e.message.trim();
+    if (msg.isNotEmpty) return msg;
+  }
   if (e is SocketException) return '网络不可达，请检查网络或切换线路';
   if (e is TimeoutException) return '请求超时，请重试或切换线路';
   if (e is DioException) {
