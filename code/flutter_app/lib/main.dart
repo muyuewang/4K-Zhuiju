@@ -14,7 +14,6 @@ import 'core/net_proxy.dart';
 import 'core/playback_prefs.dart';
 import 'core/plugin/plugin_loader.dart';
 import 'core/plugin/plugin_sync.dart';
-import 'core/remote_endpoints.dart';
 import 'core/search_history.dart';
 import 'core/source/registry.dart';
 import 'core/theme_settings.dart';
@@ -97,22 +96,6 @@ Future<void> main() async {
 }
 
 Future<void> _restoreInBackground() async {
-  // 接口域名配置放**最前面**，而且必须在任何网络请求之前完成。
-  //
-  // 原因：它决定 `ZhuijuApi.baseUrl`。橘汁是默认源，首页一 build 就发请求，
-  // 如果这里晚于首屏，第一轮请求会打在内置默认域名上——那个域名一旦
-  // 已经失效（2026-11-17 就是整站 502），用户会先看到一次「连接失败」，
-  // 然后配置才加载完。读一个字符串而已，比任何网络动作都便宜。
-  try {
-    await RemoteEndpoints.instance.restore();
-  } catch (e) {
-    debugPrint('[BOOT] remote endpoints restore failed: $e');
-  }
-  // 远端刷新**不 await**：它是纯后台动作，拉到了就热更新 baseUrl，
-  // 拉不到就继续用缓存/默认。为它阻塞启动只会换来白屏多几秒，
-  // 而它成功与否都不影响「用现有值先把界面跑起来」这件事。
-  unawaited(RemoteEndpoints.instance.refresh());
-
   // 插件源必须在 `SourceRegistry.restore()` **之前**注册好。
   //
   // 原因：restore() 是按 id 去 `_all` 里找上次选中的源。如果用户选的是
@@ -120,7 +103,7 @@ Future<void> _restoreInBackground() async {
   // 表现就是「我明明选了 A 源，每次重启都变回橘汁」，而且没有任何报错。
   // 所以顺序是：先把插件（含缓存）装进注册表，再恢复选择。
   //
-  // 这里只读 SharedPreferences 缓存，不发网络请求（快）。远端刷新在
+  // 这里只读 SharedPreferences 缓存，不发网络请求（快）。插件远端刷新在
   // 下面用 unawaited 单独跑。
   try {
     await PluginLoader.instance.restore();

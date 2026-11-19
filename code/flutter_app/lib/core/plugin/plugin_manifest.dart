@@ -579,7 +579,8 @@ class PluginManifest {
         resolveLineRequest,
       ];
 
-  /// baseUrl 校验。规则与 [RemoteEndpoints.isValidBase] 一致，但这里
+  /// baseUrl 校验。规则与 `ZhuijuApi.defaultHost` 的形态一致：只允许
+  /// http/https、必须有 host、不能带用户名密码。但这里
   /// **允许带路径前缀**：部分站点的接口挂在 `https://cdn.example.com/api/`
   /// 这种子路径下，把前缀写进 baseUrl 比每条 request 都重复一遍更省事。
   static String? validateBaseUrl(String s) {

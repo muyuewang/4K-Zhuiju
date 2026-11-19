@@ -33,23 +33,21 @@ class ZhuijuApi {
   ZhuijuApi._();
   static final ZhuijuApi instance = ZhuijuApi._();
 
-  /// 编进包里的兜底域名。
+  /// 橘汁接口根地址，编译进包里。
   ///
-  /// **这是最后一层兜底，不是唯一来源。** 真正生效的地址见 [baseUrl]，
-  /// 它可能被 `RemoteEndpoints` 从远端配置覆盖。改动原因见
-  /// `remote_endpoints.dart` 顶部注释：2026-11-17 该域名整站 502，
-  /// 而官方仍在更新新版本，域名是运营方动态下发的，写死等于每次
-  /// 换域名都要等发版。
-  static const String defaultHost = 'http://juziapp.hzhcbkj.cn';
+  /// 曾经是可远端下发的（`RemoteEndpoints` + `config/endpoints.json`），
+  /// 2026-11-19 已全量下线：那份配置下发的 `juziapp.hzhcbkj.cn` 早已 502，
+  /// 而下发机制本身也没解决过问题——域名换过一次，靠的还是发版。
+  /// 现在这里就是唯一来源，换域名改这一行重新打包。
+  ///
+  /// 当前值 `juziappcc.hzhcbkj.cn` 于 2026-11-19 实测 HTTP 200。
+  static const String defaultHost = 'http://juziappcc.hzhcbkj.cn';
 
   /// 兼容旧引用（测试与部分页面按 `host` 取默认值）。
   /// 新增代码请用 [defaultHost] 表达「内置默认」这个语义。
   static const String host = defaultHost;
 
-  /// 当前实际使用的接口根地址。
-  ///
-  /// 可写：启动时 `RemoteEndpoints.restore()` 会把缓存值灌进来，
-  /// 之后 `refresh()` 拉到新值会再覆盖一次。测试也靠它改指向本地 server。
+  /// 当前实际使用的接口根地址。测试靠它改指向本地 server。
   static String baseUrl = defaultHost;
 
   /// 整条重试链的总期限。

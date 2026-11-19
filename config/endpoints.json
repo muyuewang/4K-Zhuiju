@@ -1,4 +1,0 @@
-{
-  "_comment": "接口地址下发。改完后 App 在下一次启动时自动生效，无需发版。格式说明见同目录 README.md。invalid 字段不会被采用，会退回本地缓存或内置默认值。",
-  "zhuijuBase": "http://juziapp.hzhcbkj.cn"
-}
