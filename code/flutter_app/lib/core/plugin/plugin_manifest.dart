@@ -203,6 +203,7 @@ class PluginManifest {
     this.expandLines = false,
     this.dropIndirectLines = false,
     this.searchUnsupported = false,
+    this.cookieJar = false,
     this.vars = const <String, String>{},
     this.defaultHeaders = const <String, String>{},
     this.homeRequest,
@@ -369,6 +370,23 @@ class PluginManifest {
   /// 开了之后搜索页直接给提示，不再发那次注定被拦的请求；同时本源的
   /// `search` 端点配置会被忽略（留着只为配置可读）。见 [SearchUnsupported]。
   final bool searchUnsupported;
+
+  /// 是否启用宿主的 Cookie 会话（吸收 `Set-Cookie` 并自动回送）。
+  ///
+  /// 默认关。开启后宿主会按 host 代管会话值，并在首次响应为 403 时
+  /// 带着刚下发的 cookie 自动重试一次。
+  ///
+  /// ## 为什么这是个清单开关而不是默认行为
+  ///
+  /// 它会改变请求的往返形态（一个地址可能发两次），对绝大多数源是纯粹
+  /// 的浪费 —— 采集站都是无状态接口。只有明确遇到「挑战式软验证」的站
+  /// 才该打开。剧踪（juzong）的搜索页是第一个需要的：
+  /// 无 cookie 恒 403，带上次下发的 cookie 才是 200 + 结果。
+  ///
+  /// 开启它**不等于**允许脚本注入凭证：脚本仍然写不了 `Cookie` / `Host` /
+  /// `Authorization`（那三层拦截照旧生效），会话值由服务端下发、宿主回送，
+  /// 插件全程接触不到。见 `plugin_cookie_jar.dart`。
+  final bool cookieJar;
 
   /// 所有请求默认带的头（如 UA / Referer）。单个请求可覆盖。
   final Map<String, String> defaultHeaders;
@@ -654,6 +672,7 @@ class PluginManifest {
       expandLines: raw['expandLines'] is bool ? raw['expandLines'] as bool : false,
       dropIndirectLines: raw['dropIndirectLines'] is bool ? raw['dropIndirectLines'] as bool : false,
       searchUnsupported: raw['searchUnsupported'] is bool ? raw['searchUnsupported'] as bool : false,
+      cookieJar: raw['cookieJar'] is bool ? raw['cookieJar'] as bool : false,
       vars: PluginRequest._strMap(raw['vars']),
       defaultHeaders: PluginRequest._strMap(raw['defaultHeaders']),
       listRequest: PluginRequest.fromJson(raw['list']),
@@ -695,6 +714,7 @@ class PluginManifest {
         if (expandLines) 'expandLines': expandLines,
         if (dropIndirectLines) 'dropIndirectLines': dropIndirectLines,
         if (searchUnsupported) 'searchUnsupported': searchUnsupported,
+        if (cookieJar) 'cookieJar': cookieJar,
         'categories': categories
             .map((c) => <String, dynamic>{'id': c.id, 'name': c.name})
             .toList(),

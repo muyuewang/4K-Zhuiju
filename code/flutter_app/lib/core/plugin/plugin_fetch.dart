@@ -27,6 +27,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
+import 'plugin_cookie_jar.dart';
 import 'plugin_manifest.dart';
 
 /// 响应体大小上限。
@@ -61,6 +62,7 @@ class PreparedRequest {
     this.bodyFormat = 'text',
     this.contentType = '',
     this.binaryResponse = false,
+    this.cookieJar = false,
   });
 
   final String url;
@@ -88,6 +90,13 @@ class PreparedRequest {
   ///
   /// 默认 false：绝大多数源是文本（HTML / JSON / XML），直接给字符串。
   final bool binaryResponse;
+
+  /// 是否启用宿主的 Cookie 会话（吸收 `Set-Cookie` 并自动回送）。
+  ///
+  /// 默认 false，由清单的 `cookieJar` 开启。见 [PluginCookieJar]。
+  /// 开启后如果首次响应是 403，宿主会带着刚下发的 cookie 自动重试一次 ——
+  /// 这是应对「搜索页挑战」的唯一可靠办法（剧踪实测）。
+  final bool cookieJar;
 }
 
 /// 一次抓取结果。
@@ -308,6 +317,9 @@ PreparedRequest prepareRequest({
     // 否则 JSON 串会被当成表单整体塞进一个字段名里。
     contentType: req.isJsonBody ? Headers.jsonContentType : '',
     binaryResponse: req.isBinaryResponse,
+    // 清单级开关：整源所有请求共用同一套会话。不能按请求单独开 ——
+    // 挑战 cookie 是上一次请求下发的，两次请求若不同步就跟不上。
+    cookieJar: manifest.cookieJar,
   );
 }
 
@@ -418,57 +430,53 @@ class PluginFetch {
         throw PluginFetchException('拒绝请求：$reject（$url）');
       }
 
-      final options = Options(
-        method: method,
-        headers: req.headers,
-        // 只在真带 body 时才设。301/302/303 会把方法降成 GET、
-        // body 清空，这时候还挂着 content-type 是错的（有些网关
-        // 见到 GET 带表单类型会拒）。
-        contentType: method == 'POST'
-            ? (req.contentType.isEmpty
-                ? Headers.formUrlEncodedContentType
-                : req.contentType)
-            : null,
-      );
+      // 只在真带 body 时才设 contentType。301/302/303 会把方法降成 GET、
+      // body 清空，这时候还挂着 content-type 是错的（有些网关
+      // 见到 GET 带表单类型会拒）。
+      final contentType = method == 'POST'
+          ? (req.contentType.isEmpty
+              ? Headers.formUrlEncodedContentType
+              : req.contentType)
+          : null;
 
-      // 二进制和文本走两条独立的取数分支，**不是**都取 bytes 再解码。
+      // 每个地址最多试两次：第一次可能被「挑战」拦下。
       //
-      // 为什么不能统一：Dio 的 `ResponseType.plain` 会按响应头里的
-      // charset 解码（部分采集站是 GB2312），换成 bytes + 强制 utf8
-      // 会让这些站的中文全变问号。文本路径必须保持原样。
-      final _Resp resp;
-      if (req.binaryResponse) {
-        final r = await _client.request<List<int>>(
-          url,
+      // 剧踪（juzong）的搜索页就是这样：无 cookie 直接回 403 并下发一对
+      // cookie，带着它重发一次才是 200 + 结果。不重试的话，用户第一次
+      // 搜索永远是空结果，而第二次又「莫名其妙好了」—— 这种不确定的
+      // 表现比直接报错更难排查。
+      //
+      // 重试只做一次：真被 WAF 封了的时候，多试几次只会让封得更久。
+      var challengeTried = false;
+      late _Resp resp;
+      while (true) {
+        final headers = Map<String, String>.from(req.headers);
+        // 会话值由宿主代管，回送给**同一个 host**。插件全程接触不到它，
+        // 也没法指定发哪个值 —— 见 plugin_cookie_jar.dart 的说明。
+        if (req.cookieJar) {
+          final c = PluginCookieJar.instance.headerFor(url);
+          if (c != null && c.isNotEmpty) headers['Cookie'] = c;
+        }
+
+        resp = await _send(
+          url: url,
+          method: method,
+          headers: headers,
+          contentType: contentType,
           data: method == 'POST' ? (bodyBytes ?? body) : null,
-          options: Options(
-            method: options.method,
-            headers: options.headers,
-            contentType: options.contentType,
-            responseType: ResponseType.bytes,
-          ),
+          binaryResponse: req.binaryResponse,
         );
-        // 不看 content-type、不看状态码就先留着头，下面统一判
-        final bytes = r.data ?? const <int>[];
-        resp = _Resp(
-          statusCode: r.statusCode ?? 0,
-          headers: r.headers,
-          data: base64Encode(bytes),
-          byteLength: bytes.length,
-        );
-      } else {
-        final r = await _client.request<String>(
-          url,
-          data: method == 'POST' ? (bodyBytes ?? body) : null,
-          options: options,
-        );
-        final data = r.data ?? '';
-        resp = _Resp(
-          statusCode: r.statusCode ?? 0,
-          headers: r.headers,
-          data: data,
-          byteLength: data.length,
-        );
+
+        if (!req.cookieJar) break;
+
+        // 不看状态码先吸收：挑战 cookie 恰恰是在 403 那次响应上下发的。
+        PluginCookieJar.instance.absorb(url, resp.headers['set-cookie']);
+
+        if (resp.statusCode == 403 && !challengeTried) {
+          challengeTried = true;
+          continue;
+        }
+        break;
       }
 
       final code = resp.statusCode;
@@ -506,6 +514,62 @@ class PluginFetch {
       );
     }
     throw PluginFetchException('重定向次数过多');
+  }
+
+  /// 发一次实际请求，把两种泛型分支归一成 [_Resp]。
+  ///
+  /// 抽成独立方法的理由：挑战重试要**发两次同样的请求**，而这二十行
+  /// （二进制/文本两条取数路径）如果复制一份，迟早会漂移 ——
+  /// 比如只在一处补了超时处理。
+  Future<_Resp> _send({
+    required String url,
+    required String method,
+    required Map<String, String> headers,
+    required String? contentType,
+    required Object? data,
+    required bool binaryResponse,
+  }) async {
+    // 二进制和文本走两条独立的取数分支，**不是**都取 bytes 再解码。
+    //
+    // 为什么不能统一：Dio 的 `ResponseType.plain` 会按响应头里的
+    // charset 解码（部分采集站是 GB2312），换成 bytes + 强制 utf8
+    // 会让这些站的中文全变问号。文本路径必须保持原样。
+    if (binaryResponse) {
+      final r = await _client.request<List<int>>(
+        url,
+        data: data,
+        options: Options(
+          method: method,
+          headers: headers,
+          contentType: contentType,
+          responseType: ResponseType.bytes,
+        ),
+      );
+      final bytes = r.data ?? const <int>[];
+      return _Resp(
+        statusCode: r.statusCode ?? 0,
+        headers: r.headers,
+        data: base64Encode(bytes),
+        byteLength: bytes.length,
+      );
+    }
+
+    final r = await _client.request<String>(
+      url,
+      data: data,
+      options: Options(
+        method: method,
+        headers: headers,
+        contentType: contentType,
+      ),
+    );
+    final text = r.data ?? '';
+    return _Resp(
+      statusCode: r.statusCode ?? 0,
+      headers: r.headers,
+      data: text,
+      byteLength: text.length,
+    );
   }
 }
 

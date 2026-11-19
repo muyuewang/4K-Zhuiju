@@ -1344,6 +1344,101 @@
           "ids": "{id}"
         }
       }
+    },
+    {
+      "id": "juzong",
+      "name": "剧踪影院",
+      "baseUrl": "https://www.juzong01.me",
+      "script": "config/plugins/juzong.js",
+      "version": 1,
+      "enabled": true,
+      "cookieJar": true,
+      "description": "MacCMS 网页站、无弹幕；片库 6.2 万；列表走 JSON 接口，搜索走 HTML（需 Cookie 挑战）；可直接播的只有 XG/BF/DY 三条海外线，独家专线需第三方解析",
+      "group": "网页模板（直连）",
+      "defaultHeaders": {
+        "Accept-Language": "zh-CN,zh;q=0.9",
+        "Referer": "https://www.juzong01.me/"
+      },
+      "vars": {
+        "plainLineHints": "XG,BF,DY,WJ,WS,蓝光,专线",
+        "ticketLineHints": "独家,维护",
+        "webLineNames": "鹅播,爱播,酷播,芒果,腾讯,爱奇艺,优酷,B站,搜狐",
+        "detailLinkPattern": "href=\"/voddetail/(\\d+)/\""
+      },
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "1",
+          "name": "电影"
+        },
+        {
+          "id": "2",
+          "name": "剧集"
+        },
+        {
+          "id": "3",
+          "name": "综艺"
+        },
+        {
+          "id": "4",
+          "name": "动漫"
+        },
+        {
+          "id": "6",
+          "name": "动作片"
+        },
+        {
+          "id": "13",
+          "name": "国产剧"
+        },
+        {
+          "id": "16",
+          "name": "欧美剧"
+        },
+        {
+          "id": "20",
+          "name": "海外剧"
+        },
+        {
+          "id": "23",
+          "name": "动画片"
+        }
+      ],
+      "home": {
+        "path": "/index.php/ajax/data",
+        "query": {
+          "mid": "1",
+          "ac": "detail",
+          "page": "1",
+          "limit": "20"
+        }
+      },
+      "list": {
+        "path": "/index.php/ajax/data",
+        "query": {
+          "mid": "1",
+          "ac": "detail",
+          "page": "{page}",
+          "limit": "20",
+          "tid": "{category}"
+        }
+      },
+      "search": {
+        "path": "/vodsearch/-------------.html",
+        "query": {
+          "wd": "{keyword}",
+          "page": "{page}"
+        }
+      },
+      "detail": {
+        "path": "/voddetail/{id}/"
+      },
+      "resolve": {
+        "path": "{url}"
+      }
     }
   ]
 }
