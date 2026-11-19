@@ -291,7 +291,9 @@
       "id": "feifan",
       "name": "非凡资源",
       "baseUrl": "https://api.ffzyapi.com",
-  "baseUrlFallbacks": ["http://cj.ffzyapi.com"],
+      "baseUrlFallbacks": [
+        "http://cj.ffzyapi.com"
+      ],
       "script": "config/plugins/maccms-json.js",
       "version": 1,
       "enabled": true,
@@ -640,7 +642,9 @@
       "id": "suoni",
       "name": "索尼资源",
       "baseUrl": "https://suonizy.com",
-  "baseUrlFallbacks": ["https://suoniapi.com"],
+      "baseUrlFallbacks": [
+        "https://suoniapi.com"
+      ],
       "script": "config/plugins/maccms-json.js",
       "version": 1,
       "enabled": true,
@@ -1439,6 +1443,111 @@
       "resolve": {
         "path": "{url}"
       }
+    },
+    {
+      "id": "zhuiju",
+      "name": "橘汁",
+      "baseUrl": "http://juziappcc.hzhcbkj.cn",
+      "baseUrlFallbacks": [
+        "http://juziapp.hzhcbkj.cn",
+        "https://juzhi777.app"
+      ],
+      "script": "config/plugins/zhuiju.js",
+      "version": 2,
+      "enabled": true,
+      "description": "分类齐全、支持弹幕；protobuf 接口（hex 请求体 + bin 响应 + RSA 签名）。API 域名由站点远端配置下发（腾讯 COS / 123pan 的 app.txt），换域名时改 baseUrl 即可，无需发版",
+      "group": "直连",
+      "categories": [
+        {
+          "id": "",
+          "name": "推荐"
+        },
+        {
+          "id": "21",
+          "name": "电视剧"
+        },
+        {
+          "id": "20",
+          "name": "电影"
+        },
+        {
+          "id": "22",
+          "name": "综艺"
+        },
+        {
+          "id": "23",
+          "name": "动漫"
+        },
+        {
+          "id": "24",
+          "name": "短剧"
+        },
+        {
+          "id": "25",
+          "name": "直播"
+        },
+        {
+          "id": "26",
+          "name": "漫剧"
+        }
+      ],
+      "home": {
+        "path": "/api/proto/v5/drama/search",
+        "method": "POST",
+        "body": "",
+        "bodyFormat": "hex",
+        "responseType": "bin",
+        "query": {
+          "page": "1",
+          "pagesize": "20"
+        }
+      },
+      "list": {
+        "path": "/api/proto/v5/drama/category",
+        "method": "POST",
+        "body": "",
+        "bodyFormat": "hex",
+        "responseType": "bin",
+        "query": {
+          "typeId1": "{category}",
+          "page": "{page}",
+          "pagesize": "20"
+        }
+      },
+      "search": {
+        "path": "/api/proto/v5/drama/search",
+        "method": "POST",
+        "body": "",
+        "bodyFormat": "hex",
+        "responseType": "bin",
+        "query": {
+          "page": "{page}",
+          "pagesize": "20",
+          "searchKeys": "{keyword}"
+        }
+      },
+      "detail": {
+        "path": "/api/proto/v5/drama/getDetail",
+        "method": "POST",
+        "body": "",
+        "bodyFormat": "hex",
+        "responseType": "bin",
+        "query": {
+          "id": "{id}"
+        }
+      },
+      "resolve": {
+        "path": "/api/proto/v5/videoUsableUrl",
+        "method": "POST",
+        "body": "",
+        "bodyFormat": "hex",
+        "responseType": "bin",
+        "query": {
+          "vodPlayFrom": "{line}",
+          "playUrl": "{url}"
+        }
+      },
+      "signEntry": "sign"
     }
   ]
 }
