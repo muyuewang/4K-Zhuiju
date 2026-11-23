@@ -55,17 +55,33 @@ void main() {
     print('剧名: ${d.name}');
     print('线路数: ${d.videos.map((v) => v.sourceCn).toSet().length}');
 
-    // 找一条官方线（resolveRequired 或 sourceCn 含"官方"）
-    final official = d.videos.firstWhere(
-      (v) => v.sourceCn.contains('官方'),
-      orElse: () => d.videos.first,
-    );
-    print('测试线路: ${official.sourceCn}');
+    // 覆盖前 / 中 / 后各一集：用户报障是「前几集能看、后面 401」，
+    // 必须证明引导一次后，靠后的集数同样能换票，才算真修好。
+    final seen = <int>{};
+    final picks = <dynamic>[];
+    for (final target in const [1, 100, 201]) {
+      for (final v in d.videos) {
+        if (v.episode == target && !seen.contains(target) && v.sourceCn.contains('官方')) {
+          picks.add(v);
+          seen.add(target);
+          break;
+        }
+      }
+    }
+    // 兜底：若某集没有官方线，取该集任意线
+    for (final target in const [1, 100, 201]) {
+      if (seen.contains(target)) continue;
+      final v = d.videos.firstWhere((x) => x.episode == target,
+          orElse: () => d.videos.first);
+      picks.add(v);
+      seen.add(target);
+    }
 
-    final url = await src.resolveUrl(official);
-    print('换出的地址: ${url.substring(0, url.length.clamp(0, 120))}');
-
-    expect(url.startsWith('http'), isTrue,
-        reason: '官方线换票失败，没拿到 http 地址（可能又回 401 了）');
-  }, timeout: const Timeout(Duration(seconds: 90)));
+    for (final v in picks) {
+      final url = await src.resolveUrl(v);
+      print('第${v.episode}集 ${v.sourceCn} -> ${url.substring(0, url.length.clamp(0, 90))}');
+      expect(url.startsWith('http'), isTrue,
+          reason: '第${v.episode}集换票失败（可能又回 401 了）');
+    }
+  }, timeout: const Timeout(Duration(seconds: 150)));
 }

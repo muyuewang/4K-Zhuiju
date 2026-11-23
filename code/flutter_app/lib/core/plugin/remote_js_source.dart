@@ -951,6 +951,11 @@ class RemoteJsSource implements DataSource, SourceGrouped, SearchUnsupported {
       // 乱码或空体——故障离签名代码很远，极难定位。
       contentType: base.contentType,
       binaryResponse: base.binaryResponse,
+      // 签名重建必须带走会话开关：漏掉的话 cookieJar 源（看剧的匿名
+      // 会话、剧踪的挑战 cookie）签名后全部退化为无会话请求，表现是
+      // 「引导成功但 jar 一直是空、官方线 401」。这个字段不参与签名
+      // 计算，但决定 fetch 是否吸收/回送 Set-Cookie，必须原样传递。
+      cookieJar: base.cookieJar,
     );
   }
 

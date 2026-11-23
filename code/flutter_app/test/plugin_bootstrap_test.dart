@@ -106,6 +106,12 @@ class _SessionSite {
 }
 
 const script = r'''
+// 最小签名钩子：原样回传，用来强制请求走 _sign() 重建路径。
+// 回归点：_sign 重建 PreparedRequest 时必须保留 cookieJar，否则
+// 带签名的源（看剧就是）引导拿到的 cookie 会全丢。
+function sign(req) {
+  return { headers: {}, body: req.body };
+}
 function parseDetail(body, ctx) {
   var d = JSON.parse(body);
   var eps = [];
@@ -143,12 +149,14 @@ function parseLineResolve(body, ctx) {
 }
 ''';
 
-PluginManifest manifestOf(String base, {bool withBootstrap = true}) =>
+PluginManifest manifestOf(String base,
+        {bool withBootstrap = true, bool withSign = false}) =>
     PluginManifest.fromJson(<String, dynamic>{
-      'id': 'bootstrap_demo',
+      'id': withSign ? 'bootstrap_signed' : 'bootstrap_demo',
       'name': '会话引导测试源',
       'baseUrl': base,
       'script': 'config/plugins/kanju.js',
+      if (withSign) 'signEntry': 'sign',
       'categories': <Map<String, String>>[
         <String, String>{'id': '', 'name': '推荐'},
       ],
@@ -212,7 +220,30 @@ void main() {
       expect(site.bootstrapCount, 1, reason: '引导请求应该发一次');
       expect(site.resolveLineHeaders['cookie'],
           contains('ai_movie_session=ums_TESTSESSION'),
-          reason: '引导下发的 cookie 没被回送到换票请求');
+          reason: '引导下发了 cookie，但没回送到换票请求');
+    });
+
+    test('带签名钩子的源，引导 cookie 依然能回送（_sign 不丢字段）', () async {
+      // 回归：看剧源配了 signEntry，每个请求都过 _sign() 重建。
+      // 若 _sign 重建 PreparedRequest 时漏传 cookieJar，签名后请求就
+      // 既不吸收也不回送 Set-Cookie —— 表现是「引导成功但换票仍 401」。
+      final site = await _SessionSite.start();
+      addTearDown(site.stop);
+      final src = RemoteJsSource(
+        LoadedPlugin(
+          manifest: manifestOf(site.baseUrl, withSign: true),
+          script: script,
+        ),
+      );
+
+      final d = await src.detail('show1');
+      final url = await src.resolveUrl(d.videos.first);
+
+      expect(url, 'https://cdn.example.com/real.m3u8',
+          reason: '带签名后换票仍 401，说明 _sign 把 cookieJar 弄丢了');
+      expect(site.resolveLineHeaders['cookie'],
+          contains('ai_movie_session=ums_TESTSESSION'),
+          reason: '签名重建后引导 cookie 没回送');
     });
 
     test('引导只发一次，多次换票不重复打 /anonymous', () async {
