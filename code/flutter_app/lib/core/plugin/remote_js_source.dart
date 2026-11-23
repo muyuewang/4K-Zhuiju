@@ -61,6 +61,42 @@ class RemoteJsSource implements DataSource, SourceGrouped, SearchUnsupported {
   /// 静态表按 id 索引，重建后仍能直接命中上次可用的域名。
   static final Map<String, String> _stickyBase = <String, String>{};
 
+  /// 每个源的一次性会话引导。存 Future 而非 bool：首页可能并发发多个
+  /// 请求，用 bool 的话后来者会在引导完成前就发出去、拿不到 cookie。
+  /// 缓存 Future 让并发请求都 await 同一个引导，只打一次 /anonymous。
+  /// 失败时移除，下次请求再试（网络抖动不该让会话永久失效）。
+  static final Map<String, Future<void>> _bootstrapFutures =
+      <String, Future<void>>{};
+
+  /// 需要会话的源在发第一个业务请求前先跑一次引导请求，把它下发的
+  /// `Set-Cookie` 吸收进 cookie jar（由 PluginFetch.fetch 完成）。
+  ///
+  /// 典型场景：看剧的官方线换票要先建立游客会话，否则 401
+  /// `playback_user_session_required`。引导请求本身走 _fetch（带签名、
+  /// 带域名 failover），但用 bootstrap=true 防止递归引导。
+  /// 仅测试用：清掉会话引导记录，让每个用例都能重新走一遍引导。
+  static void resetForTest() {
+    _bootstrapFutures.clear();
+    _stickyBase.clear();
+  }
+
+  Future<void> _bootstrapOnce() async {
+    final req = manifest.bootstrapRequest;
+    if (req == null || !manifest.cookieJar) return;
+    await _bootstrapFutures.putIfAbsent(
+      manifest.id,
+      () async {
+        try {
+          await _fetch(req, const <String, String>{}, bootstrap: true);
+          debugPrint('[PLUGIN] ${manifest.id} 会话引导完成');
+        } catch (e) {
+          _bootstrapFutures.remove(manifest.id);
+          debugPrint('[PLUGIN] ${manifest.id} 会话引导失败（不阻断业务请求）：$e');
+        }
+      },
+    );
+  }
+
   /// 当前真正使用的根地址。
   ///
   /// 优先用粘住的备用地址；没有就用清单里的主地址。所有拼 URL 的地方
@@ -483,14 +519,17 @@ class RemoteJsSource implements DataSource, SourceGrouped, SearchUnsupported {
   /// 否则官方线 401」。2026-11-18 实测推翻过这条：当时带 ticket 直接 POST
   /// `/v1/playback/resolve-line?view=compact`，10/10 条全部成功、不带 Cookie。
   ///
-  /// ⚠ 2026-11-23 站点又改了：匿名换票 11 条里 9 条回
-  /// 401 `playback_user_session_required`（要登录），网页端因为是登录 VIP
-  /// 才播得了。插件体系没有账号登录通道，这个门槛跨不过去——用户点官方线
-  /// 报错是站点策略，不是解析 bug。服务端的「该内容需要登录后播放」由
-  /// Network 层从 401 body 里透传到错误页（见 plugin_fetch 的 4xx 分支）。
+  /// ⚠ 2026-11-23 站点又改了：不带会话换票 11 条里 9 条回
+  /// 401 `playback_user_session_required`。一度以为是「必须登录 VIP」，
+  /// 实测推翻：POST `/v1/users/anonymous` 拿游客会话 cookie 后 10/10 成功。
+  /// 门槛是「要有会话」，不是「要有账号」。
   ///
-  /// 所以这里仍不注入会话、不碰 SharedPreferences——硬加持久化 Cookie
-  /// 会把「无状态解析」这条架构分界破掉，也解决不了「需要账号」的问题。
+  /// 解法是清单级的 [PluginManifest.bootstrapRequest]：宿主发业务请求前
+  /// 自动打一次引导请求，`PluginFetch` 把 Set-Cookie 收进内存 jar，
+  /// 后续所有请求（含本方法的换票）自动带上。脚本全程接触不到 cookie，
+  /// 「无状态解析」这条架构分界不变——会话是服务端下发、宿主代管的。
+  ///
+  /// 依旧不碰 SharedPreferences：会话纯内存，进程退出即丢弃，下次重新引导。
   Future<String> _resolveLine(String ticket, DramaVideo video) async {
     final f = await _fetch(
       manifest.resolveLineRequest!,
@@ -730,8 +769,14 @@ class RemoteJsSource implements DataSource, SourceGrouped, SearchUnsupported {
 
   Future<FetchResult> _fetch(
     PluginRequest req,
-    Map<String, String> params,
-  ) async {
+    Map<String, String> params, {
+    bool bootstrap = false,
+  }) async {
+    // 引导请求本身不能再次触发引导（否则无限递归）。
+    // 引导失败不抛：让业务请求照常发出，最坏情况只是官方线仍 401，
+    // 比整个源被一次引导失败拖死要好。
+    if (!bootstrap) await _bootstrapOnce();
+
     final all = <String, String>{
       ...params,
       // vars 以 `vars.x` 的形式进占位符表，配置里写 `{vars.key}`

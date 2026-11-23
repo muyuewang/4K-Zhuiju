@@ -204,6 +204,7 @@ class PluginManifest {
     this.dropIndirectLines = false,
     this.searchUnsupported = false,
     this.cookieJar = false,
+    this.bootstrapRequest,
     this.vars = const <String, String>{},
     this.defaultHeaders = const <String, String>{},
     this.homeRequest,
@@ -388,6 +389,18 @@ class PluginManifest {
   /// 插件全程接触不到。见 `plugin_cookie_jar.dart`。
   final bool cookieJar;
 
+  /// 会话引导请求：在发任何业务请求前先打一次，把它下发的 `Set-Cookie`
+  /// 吸收进 cookie jar，后续所有请求自动带上。
+  ///
+  /// 解决的是「官方线换票要先建立游客会话」这类站点：看剧（kanju）的
+  /// `/v1/users/anonymous` 返回 201 + ai_movie_session，带着它换票
+  /// 10/10 成功，不带则 9/11 回 401 playback_user_session_required。
+  ///
+  /// 需要同时开 [cookieJar] 才会回送引导拿到的 cookie。执行时机在宿主，
+  /// 每次会话只跑一次，插件脚本接触不到 cookie 值——安全边界与
+  /// [cookieJar] 一致。不配就是 null，绝大多数源不受影响。
+  final PluginRequest? bootstrapRequest;
+
   /// 所有请求默认带的头（如 UA / Referer）。单个请求可覆盖。
   final Map<String, String> defaultHeaders;
 
@@ -569,6 +582,9 @@ class PluginManifest {
   }
 
   List<PluginRequest?> get _allRequests => [
+        // 引导请求也要过 header 黑名单：否则它就成了脚本注入 Cookie 的
+        // 新通道（服务端下发的会话可以回送，但脚本自己写死的不行）。
+        bootstrapRequest,
         homeRequest,
         listRequest,
         searchRequest,
@@ -674,6 +690,7 @@ class PluginManifest {
       dropIndirectLines: raw['dropIndirectLines'] is bool ? raw['dropIndirectLines'] as bool : false,
       searchUnsupported: raw['searchUnsupported'] is bool ? raw['searchUnsupported'] as bool : false,
       cookieJar: raw['cookieJar'] is bool ? raw['cookieJar'] as bool : false,
+      bootstrapRequest: PluginRequest.fromJson(raw['bootstrap']),
       vars: PluginRequest._strMap(raw['vars']),
       defaultHeaders: PluginRequest._strMap(raw['defaultHeaders']),
       listRequest: PluginRequest.fromJson(raw['list']),
@@ -716,6 +733,7 @@ class PluginManifest {
         if (dropIndirectLines) 'dropIndirectLines': dropIndirectLines,
         if (searchUnsupported) 'searchUnsupported': searchUnsupported,
         if (cookieJar) 'cookieJar': cookieJar,
+        if (bootstrapRequest != null) 'bootstrap': bootstrapRequest!.toJson(),
         'categories': categories
             .map((c) => <String, dynamic>{'id': c.id, 'name': c.name})
             .toList(),

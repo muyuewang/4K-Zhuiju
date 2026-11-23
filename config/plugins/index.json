@@ -1131,11 +1131,18 @@
       "name": "看剧（多线路）",
       "baseUrl": "https://kanju.ai",
       "script": "config/plugins/kanju.js",
-      "version": 1,
+      "version": 2,
       "enabled": true,
-      "description": "多线路、分区榜单；无弹幕；官方线与普通线全部保留（官方线二次换票）",
+      "description": "多线路、分区榜单；无弹幕；官方线与普通线全部保留（官方线二次换票需游客会话）",
       "expandLines": true,
+      "cookieJar": true,
       "group": "直连",
+      "bootstrap": {
+        "path": "/v1/users/anonymous",
+        "method": "POST",
+        "bodyType": "json",
+        "body": "{}"
+      },
       "defaultHeaders": {
         "Accept": "application/json",
         "Origin": "https://kanju.ai",
