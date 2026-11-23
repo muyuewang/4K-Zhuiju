@@ -532,7 +532,17 @@ class PluginFetch {
       }
 
       if (code < 200 || code >= 300) {
-        throw PluginFetchException('HTTP $code');
+        // 服务端在 4xx/5xx 的 JSON body 里往往写了真正的原因（比如看剧的
+        // 换票接口 401 带 {"code":"playback_user_session_required",
+        // "message":"该内容需要登录后播放"}）。以前这里只抛 `HTTP 401`，
+        // 脚本的 parseLineResolve 根本没机会执行，那句人话永远到不了用户
+        // 眼前——用户只看到干巴巴的「HTTP 401」，不知道要换线路还是登录。
+        //
+        // 把 body 里的 message 一并带出来，让错误页能显示「该内容需要
+        // 登录后播放」。解析失败就退回原来的 `HTTP $code`，不影响既有行为。
+        final detail = _errorDetailOf(resp.data);
+        throw PluginFetchException(
+            detail == null ? 'HTTP $code' : 'HTTP $code：$detail');
       }
 
       final data = resp.data;
@@ -628,6 +638,29 @@ class _Resp {
 
   /// 原始字节数（不是 base64 后的字符数），用于大小上限判断。
   final int byteLength;
+}
+
+/// 从 4xx/5xx 的响应体里提取一句能给用户看的错误原因。
+///
+/// 只认 JSON 对象里最常见的几个文案字段，且限制长度——服务端有时把整段
+/// HTML 或大段调试信息塞进 message，直接显示会把错误页撑爆。解析不出来
+/// （非 JSON、字段类型不对、空串）就返回 null，由调用方退回 `HTTP $code`。
+String? _errorDetailOf(String body) {
+  if (body.isEmpty) return null;
+  try {
+    final decoded = jsonDecode(body);
+    if (decoded is! Map) return null;
+    for (final k in const ['message', 'msg', 'error_message', 'detail']) {
+      final v = decoded[k];
+      if (v is String && v.trim().isNotEmpty) {
+        final t = v.trim();
+        return t.length > 80 ? '${t.substring(0, 80)}…' : t;
+      }
+    }
+  } catch (_) {
+    // 非 JSON（HTML 错误页等）——交给调用方用原始状态码
+  }
+  return null;
 }
 
 /// 给错误信息补上「人话」前缀。

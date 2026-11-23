@@ -480,12 +480,17 @@ class RemoteJsSource implements DataSource, SourceGrouped, SearchUnsupported {
   /// ## 为什么不需要游客会话
   ///
   /// `kanju_source.dart` 里记的是「必须 POST /v1/users/anonymous 建会话，
-  /// 否则官方线 401」。2026-11-18 实测推翻了这条：带 ticket 直接 POST
-  /// `/v1/playback/resolve-line?view=compact`，10/10 条官方线全部返回
-  /// `{"line":{"url":"https://..."}}`，**全程没带任何 Cookie**。
+  /// 否则官方线 401」。2026-11-18 实测推翻过这条：当时带 ticket 直接 POST
+  /// `/v1/playback/resolve-line?view=compact`，10/10 条全部成功、不带 Cookie。
   ///
-  /// 所以这里不注入会话，也不碰 SharedPreferences——插件体系本来就没有
-  /// 持久化 Cookie 的通道，硬加会把「无状态解析」这条架构分界破掉。
+  /// ⚠ 2026-11-23 站点又改了：匿名换票 11 条里 9 条回
+  /// 401 `playback_user_session_required`（要登录），网页端因为是登录 VIP
+  /// 才播得了。插件体系没有账号登录通道，这个门槛跨不过去——用户点官方线
+  /// 报错是站点策略，不是解析 bug。服务端的「该内容需要登录后播放」由
+  /// Network 层从 401 body 里透传到错误页（见 plugin_fetch 的 4xx 分支）。
+  ///
+  /// 所以这里仍不注入会话、不碰 SharedPreferences——硬加持久化 Cookie
+  /// 会把「无状态解析」这条架构分界破掉，也解决不了「需要账号」的问题。
   Future<String> _resolveLine(String ticket, DramaVideo video) async {
     final f = await _fetch(
       manifest.resolveLineRequest!,
