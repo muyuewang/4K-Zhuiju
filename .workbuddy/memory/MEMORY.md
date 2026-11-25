@@ -67,6 +67,21 @@ GitHub 仓库 `muyuewang/4K-Zhuiju`。
 - 插件脚本里的中文文案（如「加密专线」）在二进制里**搜不到是正常的** ——
   `config/plugins/*.js` 运行时联网拉取，不编译进包。
 
+### 界面层（v1.11.20 起）
+
+- **`Container(color:)` 包 `Row` 会拉出整宽横带**。`Row` 默认 `mainAxisSize.max`，
+  在 Stack 的非 positioned 子项里撑满宽度。播放器中央按钮曾经因此一直拖着一条灰框。
+  要给按钮垫底就只包按钮本身（`Center` + 圆底 + `BoxShadow`）。
+- **Hero tag 必须带页面命名空间**：同一部剧会同时出现在多个 Tab（TabBarView 保活
+  相邻页），同路由两个同 tag 的 Hero 会断言失败。用 `posterHeroTag(scope, id)`；
+  搜索「全部」是多源混合，tag 还要带 sourceId（不同源 id 会撞号）。
+- **Hero 落点必须在目标页第一帧存在**，所以 DetailPage 有 `initialCover` 参数从列表
+  透传封面，且 loading 态骨架必须与最终版式同构（差 10px 转场结束整页会跳）。
+- 设计 token 在 `lib/core/tokens.dart`（字号/圆角/间距/动效）、`lib/theme.dart`
+  （`SemColor` 语义三色、`AppPalette` 主题扩展、`DesktopFadeTransitionsBuilder`）。
+- 列表加载态用 `PosterGridSkeleton`，不再用 `Loading()`；卡片首次出现走 `AppearFade`
+  （`_appeared` 集合去重，滚回来不重放）。
+
 ### 日志
 
 - `lib/core/app_log.dart`：环形 2000 条 / 2s 落盘 / 2MB 滚动，

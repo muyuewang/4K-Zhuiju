@@ -38,6 +38,20 @@ class DetailPage extends StatefulWidget {
   final String resumeSource;
   final int resumeSec;
 
+  /// 从列表页透传的 Hero tag（空串 = 不做海报转场）
+  ///
+  /// 详情页自己算不出来：tag 里带页面命名空间（见 `posterHeroTag`），
+  /// 只有发起 push 的那一页知道自己在哪个网格里。
+  final String heroTag;
+
+  /// 列表页已经拿到过的封面地址
+  ///
+  /// 详情接口要 1 秒左右才回来，这段时间里详情页如果只知道一个 id，
+  /// 首帧就没有海报可画 —— 而 Hero 的落点必须在目标页第一帧存在，
+  /// 否则整段转场直接失效。把列表已有的封面带过来，既补上了这个落点，
+  /// 也顺带让详情页首屏不再是空白。
+  final String initialCover;
+
   const DetailPage({
     super.key,
     required this.dramaId,
@@ -46,6 +60,8 @@ class DetailPage extends StatefulWidget {
     this.resumeEpisode = 0,
     this.resumeSource = '',
     this.resumeSec = 0,
+    this.heroTag = '',
+    this.initialCover = '',
   });
 
   /// 是否有续播意图
@@ -271,7 +287,16 @@ class _DetailPageState extends State<DetailPage> {
     // 没有 AppBar 也就没有返回按钮：用户在弱网下点进来、看到「连接失败」
     // 之后，除了按系统返回键没有任何出路，看起来就像卡死在白屏里。
     // 这里始终保留一条返回栏。
-    if (_loading || _err != null) {
+    if (_loading) {
+      // 加载态用「和最终版式一致」的骨架，而不是居中一个转圈：
+      // Hero 的落点在目标页第一帧就得存在，位置也得对得上，
+      // 否则海报要么飞不起来，要么落地后整页内容「跳」一下。
+      return Scaffold(
+        backgroundColor: context.palette.bg,
+        body: _loadingBody(),
+      );
+    }
+    if (_err != null) {
       return Scaffold(
         backgroundColor: context.palette.bg,
         appBar: AppBar(
@@ -286,9 +311,7 @@ class _DetailPageState extends State<DetailPage> {
             style: const TextStyle(fontSize: Ts.subtitle),
           ),
         ),
-        body: _loading
-            ? const Loading()
-            : ErrorView(message: _err!, onRetry: _load),
+        body: ErrorView(message: _err!, onRetry: _load),
       );
     }
     return Scaffold(body: _buildBody());
@@ -598,21 +621,12 @@ class _DetailPageState extends State<DetailPage> {
                     borderRadius: BorderRadius.circular(R.panel),
                     child: AspectRatio(
                       aspectRatio: 2 / 3,
-                      child: d.cover.best.isEmpty
-                          ? Container(
-                              color: context.palette.card,
-                              child: Center(
-                                child: Icon(Icons.movie_outlined,
-                                    color: context.palette.textDim, size: 40),
-                              ),
-                            )
-                          : CachedNetworkImage(
-                              imageUrl: d.cover.best,
-                              fit: BoxFit.cover,
-                              memCacheWidth: 520,
-                              errorWidget: (_, __, ___) =>
-                                  Container(color: context.palette.card),
-                            ),
+                      child: _heroWrap(_coverImage(
+                        d.cover.best.isNotEmpty
+                            ? d.cover.best
+                            : widget.initialCover,
+                        520,
+                      )),
                     ),
                   ),
                 ],
@@ -721,18 +735,16 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
-  Widget _header(DramaDetail d) {
+  /// 手机版头部：整宽海报 + 上下渐变
+  Widget _header(DramaDetail d) => _headerFor(
+        d.cover.best.isNotEmpty ? d.cover.best : widget.initialCover,
+      );
+
+  Widget _headerFor(String url) {
     return Stack(
       fit: StackFit.expand,
       children: [
-        if (d.cover.best.isNotEmpty)
-          CachedNetworkImage(
-            imageUrl: d.cover.best,
-            fit: BoxFit.cover,
-            // 头部只有 260 高，按原图解码会白白吃掉十几 MB
-            memCacheWidth: 720,
-            errorWidget: (_, __, ___) => Container(color: context.palette.card),
-          ),
+        if (url.isNotEmpty) _heroWrap(_coverImage(url, 720)),
         // 顶部/底部渐变
         DecoratedBox(
           decoration: BoxDecoration(
@@ -742,6 +754,121 @@ class _DetailPageState extends State<DetailPage> {
               colors: [Colors.black54, Colors.transparent, context.palette.bg],
               stops: const [0, 0.45, 1],
             ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 封面图（不裁剪圆角，交给调用方）
+  ///
+  /// 空地址时给一块带图标的占位，而不是留空：详情页首帧就靠它撑住，
+  /// 空一块会和 Hero 落点对不上。
+  Widget _coverImage(String url, int memW) {
+    if (url.isEmpty) {
+      return Container(
+        color: context.palette.card,
+        child: Center(
+          child: Icon(Icons.movie_outlined,
+              color: context.palette.textDim, size: 40),
+        ),
+      );
+    }
+    return CachedNetworkImage(
+      imageUrl: url,
+      fit: BoxFit.cover,
+      // 按实际显示尺寸解码：头部只有 260 高，按原图解码会白白吃掉十几 MB
+      memCacheWidth: memW,
+      errorWidget: (_, __, ___) => Container(color: context.palette.card),
+    );
+  }
+
+  /// Hero 包装（tag 为空时原样返回，不引入任何额外节点）
+  Widget _heroWrap(Widget child) {
+    if (widget.heroTag.isEmpty) return child;
+    return Hero(
+      tag: widget.heroTag,
+      // Hero 飞行时活在 overlay 里，那里没有 Material 祖先，
+      // 里面的 Text 会渲染成带黄下划线的调试样式。
+      child: Material(type: MaterialType.transparency, child: child),
+    );
+  }
+
+  /// 加载中的骨架
+  ///
+  /// 骨架**必须和最终版式同构**：同样的返回行、同样的海报位置、
+  /// 同样的列宽。差 10px 都会让转场结束时整页内容「跳」一下，
+  /// 那种跳动比没有转场更难受。
+  Widget _loadingBody() {
+    final wide = isTv(context) || isWide(context);
+    if (wide) {
+      return ContentClamp(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 292,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(18, 14, 6, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 真实的返回行（不是灰条）：弱网下用户点进来还能退出去
+                    Row(
+                      children: [
+                        IconButton(
+                          tooltip: '返回',
+                          icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                              size: 18),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                        const SizedBox(width: 2),
+                        Text('详情',
+                            style: TextStyle(
+                                fontSize: Ts.bodyLg,
+                                color: context.palette.textDim)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(R.panel),
+                      child: AspectRatio(
+                        aspectRatio: 2 / 3,
+                        child: _heroWrap(_coverImage(widget.initialCover, 520)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(top: 180),
+                child: Loading(),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return CustomScrollView(
+      slivers: [
+        SliverAppBar(
+          expandedHeight: 260,
+          pinned: true,
+          backgroundColor: context.palette.bg,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+            onPressed: () => Navigator.pop(context),
+          ),
+          flexibleSpace: FlexibleSpaceBar(
+            background: _headerFor(widget.initialCover),
+          ),
+        ),
+        const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.only(top: 64),
+            child: Loading(),
           ),
         ),
       ],

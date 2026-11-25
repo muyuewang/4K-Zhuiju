@@ -34,16 +34,16 @@ void main() {
       home: Scaffold(
         body: PagedGrid(
           loader: _hang,
-          onTap: (_) {},
+          onTap: (_, __) {},
           // 测试用极短期限，避免真的等 20 秒
           requestDeadline: const Duration(milliseconds: 150),
         ),
       ),
     ));
 
-    // 初始：转圈
+    // 初始：骨架屏占位（不是转圈）
     await tester.pump();
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.byType(PosterGridSkeleton), findsOneWidget);
 
     // 超过期限后必须收敛为错误态，不能再转
     await tester.pump(const Duration(milliseconds: 300));
@@ -62,7 +62,7 @@ void main() {
         body: PagedGrid(
           key: const ValueKey('a'),
           loader: _hang,
-          onTap: (_) {},
+          onTap: (_, __) {},
           requestDeadline: const Duration(milliseconds: 150),
         ),
       ),
@@ -77,7 +77,7 @@ void main() {
         body: PagedGrid(
           key: const ValueKey('b'),
           loader: _ok,
-          onTap: (_) {},
+          onTap: (_, __) {},
           requestDeadline: const Duration(milliseconds: 150),
         ),
       ),
@@ -86,7 +86,7 @@ void main() {
 
     expect(find.byType(ErrorView), findsNothing,
         reason: '换源后不该残留上一个源的错误态');
-    expect(find.byType(CircularProgressIndicator), findsNothing,
+    expect(find.byType(PosterGridSkeleton), findsNothing,
         reason: '正常源应当立刻结束加载态');
   });
 }

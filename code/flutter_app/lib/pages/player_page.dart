@@ -193,6 +193,17 @@ class _PlayerPageState extends State<PlayerPage> {
   String _tip = '';
   bool _showCtrl = true;
 
+  /// 控制条自动隐藏计时器
+  ///
+  /// 主流播放器（B 站 / 爱奇艺 / YouTube）在播放中都会把控制条收起来，
+  /// 因为压在下方的渐变条会盖掉字幕和画面底部。之前这里只有「点一下切换」，
+  /// 用户点了暂停、调完进度之后控制条就一直挂在画面上，全屏看片时
+  /// 底部那一块永远是被压暗的。
+  ///
+  /// **暂停时不隐藏**：暂停状态下用户多半正要操作（选集、拖进度、切线路），
+  /// 这时候把控件收掉等于让他多点一下才能干活。
+  Timer? _ctrlHideTimer;
+
   /// 全屏
   bool _fullscreen = false;
 
@@ -506,6 +517,7 @@ class _PlayerPageState extends State<PlayerPage> {
     _countdownTimer?.cancel();
     _noticeTimer?.cancel();
     _hudTimer?.cancel();
+    _ctrlHideTimer?.cancel();
     _brightnessFx.dispose();
     _hudLevel.dispose();
     _hudText.dispose();
@@ -574,7 +586,7 @@ class _PlayerPageState extends State<PlayerPage> {
         return KeyEventResult.ignored;
       }
       if (!_showCtrl) {
-        setState(() => _showCtrl = true);
+        _pokeCtrl();
         return KeyEventResult.handled;
       }
       if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
@@ -591,19 +603,19 @@ class _PlayerPageState extends State<PlayerPage> {
       if (k == LogicalKeyboardKey.mediaPlayPause) {
         if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
         c.value.isPlaying ? c.pause() : c.play();
-        setState(() => _showCtrl = true);
+        _pokeCtrl();
         return KeyEventResult.handled;
       }
       if (k == LogicalKeyboardKey.mediaPlay) {
         if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
         c.play();
-        setState(() => _showCtrl = true);
+        _pokeCtrl();
         return KeyEventResult.handled;
       }
       if (k == LogicalKeyboardKey.mediaPause) {
         if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
         c.pause();
-        setState(() => _showCtrl = true);
+        _pokeCtrl();
         return KeyEventResult.handled;
       }
       if (k == LogicalKeyboardKey.mediaFastForward ||
@@ -622,7 +634,7 @@ class _PlayerPageState extends State<PlayerPage> {
         if (c == null) return KeyEventResult.ignored;
         c.pause();
         c.seekTo(Duration.zero);
-        setState(() => _showCtrl = true);
+        _pokeCtrl();
         return KeyEventResult.handled;
       }
     }
@@ -630,7 +642,7 @@ class _PlayerPageState extends State<PlayerPage> {
     if (k == LogicalKeyboardKey.space) {
       if (c == null || !c.value.isInitialized) return KeyEventResult.ignored;
       c.value.isPlaying ? c.pause() : c.play();
-      setState(() => _showCtrl = true);
+      _pokeCtrl();
       return KeyEventResult.handled;
     }
 
@@ -665,7 +677,7 @@ class _PlayerPageState extends State<PlayerPage> {
       final v = (c.value.volume + (up ? 0.1 : -0.1)).clamp(0.0, 1.0);
       c.setVolume(v);
       _showNotice('音量 ${(v * 100).round()}%');
-      setState(() => _showCtrl = true);
+      _pokeCtrl();
       return KeyEventResult.handled;
     }
 
@@ -694,10 +706,63 @@ class _PlayerPageState extends State<PlayerPage> {
     c.seekTo(target);
     final secs = delta.inSeconds.abs();
     _showNotice('${delta.isNegative ? '快退' : '快进'} $secs 秒');
-    setState(() => _showCtrl = true);
+    _pokeCtrl();
+  }
+
+  /// 控制条的淡入淡出包装
+  ///
+  /// 原来是 `if (_showCtrl)` 直接增删节点：出现和消失都是瞬间的，
+  /// 观感是「闪」而不是「收」，全屏看片时尤其刺眼。220ms 淡入淡出之后
+  /// 控件有了进出方向，和 B 站/爱奇艺的手感一致。
+  ///
+  /// [IgnorePointer] 不能省：`Opacity` 为 0 的节点仍然参与命中测试，
+  /// 少了它，控件藏起来之后那一块区域还是会被「看不见的按钮」吃掉点击，
+  /// 用户表现为「点画面唤不出控制条」。
+  Widget _ctrlFade(Widget child) {
+    return IgnorePointer(
+      ignoring: !_showCtrl,
+      child: AnimatedOpacity(
+        opacity: _showCtrl ? 1 : 0,
+        duration: motionOf(context, Motion.short),
+        curve: Curves.easeOut,
+        child: child,
+      ),
+    );
   }
 
   // ---------------- 手势：双击 / 滑动 / 长按 ----------------
+
+  /// 显示控制条并重新开始自动隐藏计时
+  void _pokeCtrl() {
+    if (!_showCtrl) setState(() => _showCtrl = true);
+    _restartCtrlTimer();
+  }
+
+  /// 只重置计时（已经在 setState 里改过 `_showCtrl` 时用）
+  void _restartCtrlTimer() {
+    _ctrlHideTimer?.cancel();
+    // 电视上不自动隐藏：遥控器不像鼠标能随时点一下唤醒，
+    // 控件藏起来之后焦点可能停在看不见的按钮上，按方向键会「乱跳」。
+    if (tvModeOn) return;
+    _ctrlHideTimer = Timer(const Duration(seconds: 4), _tryAutoHideCtrl);
+  }
+
+  void _tryAutoHideCtrl() {
+    if (!mounted || !_showCtrl) return;
+    // 面板开着、手势提示还没消失时不能收：用户正在操作
+    if (_showEpisodes || _showSources || _hud != null) {
+      _restartCtrlTimer();
+      return;
+    }
+    final c = _ctrl;
+    // 暂停 / 未就绪时不收（见 _ctrlHideTimer 的说明）
+    if (c == null || !c.value.isInitialized || !c.value.isPlaying) {
+      // 还没就绪就再等等，就绪后由播放状态监听接手
+      if (c == null || !c.value.isInitialized) _restartCtrlTimer();
+      return;
+    }
+    setState(() => _showCtrl = false);
+  }
 
   /// 双击播放/暂停
   ///
@@ -714,7 +779,7 @@ class _PlayerPageState extends State<PlayerPage> {
       c.play();
       _showNotice('继续播放');
     }
-    setState(() => _showCtrl = true);
+    _pokeCtrl();
   }
 
   /// 亮度调节：改遮罩透明度
@@ -1106,6 +1171,10 @@ class _PlayerPageState extends State<PlayerPage> {
       });
       _startHistTimer();
       _saveHistory();
+      // 起播即开始「4 秒后收起控制条」：首次进入播放页时控件应该是
+      // 亮一下就让出画面，而不是一直压在下沿。暂停后由
+      // _tryAutoHideCtrl 里的 isPlaying 判断自动停表。
+      _restartCtrlTimer();
       // 真正开始播放后才保持常亮。放在这里而不是 initState：
       // 解析失败或一直转圈时不该阻止系统息屏，否则用户放着不管
       // 手机一直亮着，纯耗电。
@@ -1936,13 +2005,20 @@ class _PlayerPageState extends State<PlayerPage> {
           return;
         }
         // 单击：立刻响应，不等双击窗口
+        final show = !_showCtrl;
         setState(() {
-          _showCtrl = !_showCtrl;
-          if (!_showCtrl) {
+          _showCtrl = show;
+          if (!show) {
             _showEpisodes = false;
             _showSources = false;
           }
         });
+        // 呼出后开始计时，收起则立刻停表（否则下次呼出会被旧表提前收掉）
+        if (show) {
+          _restartCtrlTimer();
+        } else {
+          _ctrlHideTimer?.cancel();
+        }
       },
 
       onHorizontalDragStart: enabled
@@ -2096,38 +2172,40 @@ class _PlayerPageState extends State<PlayerPage> {
             _brightnessOverlay(),
 
             // 顶部：标题 + 选集/换源 + 退出全屏
-            if (_showCtrl)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: _fullscreenTopBar(),
-              ),
+            // 常驻渲染 + 透明度切换（而不是 if 增删），收起时才有淡出过程。
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _ctrlFade(_fullscreenTopBar()),
+            ),
 
             // 投屏状态条：贴在顶栏下方。跟着控制条一起显隐，
             // 否则沉浸看片时一条横幅会一直压在画面上。
-            if (_showCtrl && _castDeviceName != null)
+            if (_castDeviceName != null)
               Positioned(
                 top: 48,
                 left: 0,
                 right: 0,
-                child: SafeArea(
-                  top: false,
-                  bottom: false,
-                  child: CastBar(
-                    deviceName: _castDeviceName!,
-                    onStop: _stopCast,
+                child: _ctrlFade(
+                  SafeArea(
+                    top: false,
+                    bottom: false,
+                    child: CastBar(
+                      deviceName: _castDeviceName!,
+                      onStop: _stopCast,
+                    ),
                   ),
                 ),
               ),
 
             // 底部控制条
-            if (inited && _showCtrl)
+            if (inited)
               Positioned(
                 left: 0,
                 right: 0,
                 bottom: 0,
-                child: Container(
+                child: _ctrlFade(Container(
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
@@ -2200,10 +2278,10 @@ class _PlayerPageState extends State<PlayerPage> {
                     ),
                   ),
                 ),
+                ),
               ),
 
-            // 右侧面板：选集 / 换源
-            if (_showEpisodes) _sidePanel(title: '选集', child: _episodeGrid()),
+            // 右侧面板：选集 / 换源            if (_showEpisodes) _sidePanel(title: '选集', child: _episodeGrid()),
             if (_showSources) _sidePanel(title: '换源', child: _sourceList()),
 
             // 手势指示器（音量/亮度/快进预览）
@@ -3787,7 +3865,7 @@ class _PlayerPageState extends State<PlayerPage> {
               if (_dmOn && _danmaku.isEmpty && _dmLoaded) const DanmakuEmptyHint(),
               // 亮度遮罩：压在画面之上、控制条之下，理由同全屏
               _brightnessOverlay(),
-              if (_showCtrl) _overlay(c),
+              _ctrlFade(_overlay(c)),
               if (_hud != null) _gestureHud(),
               if (_pendingNext != null)
                 Positioned(
@@ -3871,7 +3949,7 @@ class _PlayerPageState extends State<PlayerPage> {
       alignment: Alignment.bottomCenter,
       children: [
         frame,
-        if (_showCtrl) _floatingControls(c),
+        _ctrlFade(_floatingControls(c)),
       ],
     );
   }
@@ -4054,27 +4132,42 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
+  /// 画面中央的播放/暂停按钮
+  ///
+  /// **不能用一个铺开的 Container 当底衬**：原来的写法是
+  /// `Container(color: Colors.black26, child: Row(...))`，而 Row 默认
+  /// `mainAxisSize.max`，会让这层 26% 的黑在整个画面宽度上拉出一条
+  /// 跟按钮等高的横带——暂停时画面上凭空多一个长方形框，非常显眼。
+  ///
+  /// 现在只保留按钮本身，圆底 + 投影解决「白图标压在亮画面上看不清」：
+  /// 投影负责任何背景下的可读性，圆底负责界定按钮边界。
   Widget _overlay(VideoPlayerController c) {
-    return Container(
-      color: Colors.black26,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // 播放/暂停图标随 controller 变化，订阅后无需 setState 整页重建
-          ValueListenableBuilder<VideoPlayerValue>(
-            valueListenable: c,
-            builder: (ctx, v, _) => IconButton(
-              iconSize: 46,
+    // 播放/暂停图标随 controller 变化，订阅后无需 setState 整页重建
+    return ValueListenableBuilder<VideoPlayerValue>(
+      valueListenable: c,
+      builder: (ctx, v, _) => Center(
+        child: GestureDetector(
+          onTap: () {
+            v.isPlaying ? c.pause() : c.play();
+          },
+          child: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.black.withValues(alpha: 0.34),
+              boxShadow: const [
+                BoxShadow(color: Colors.black54, blurRadius: 12),
+              ],
+            ),
+            child: Icon(
+              v.isPlaying
+                  ? Icons.pause_rounded
+                  : Icons.play_arrow_rounded,
+              size: 44,
               color: Colors.white,
-              icon: Icon(v.isPlaying
-                  ? Icons.pause_circle_filled_rounded
-                  : Icons.play_circle_fill_rounded),
-              onPressed: () {
-                v.isPlaying ? c.pause() : c.play();
-              },
             ),
           ),
-        ],
+        ),
       ),
     );
   }

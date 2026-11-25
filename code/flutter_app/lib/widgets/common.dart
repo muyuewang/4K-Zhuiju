@@ -32,12 +32,22 @@ class DramaCard extends StatefulWidget {
   /// 让用户分清这条结果来自哪个源。首页/分类页不传，不显示。
   final String sourceLabel;
 
+  /// 共享元素转场用的 tag（空串 = 不做 Hero）
+  ///
+  /// 为什么由调用方给，而不是在这里用 `drama.id` 拼：
+  /// 同一个源的同一部剧会同时出现在多个网格里（首页「推荐」与
+  /// 「电视剧」两个 Tab 就经常重合，而 TabBarView 会把相邻页留在树上保活）。
+  /// 同一路由树里两个 Hero 用同一个 tag，push 时会直接断言失败。
+  /// 所以 tag 必须带**页面命名空间**，由知道自己是哪一页的调用方提供。
+  final String heroTag;
+
   const DramaCard({
     super.key,
     required this.drama,
     required this.onTap,
     this.autofocus = false,
     this.sourceLabel = '',
+    this.heroTag = '',
   });
 
   @override
@@ -47,157 +57,88 @@ class DramaCard extends StatefulWidget {
 class _DramaCardState extends State<DramaCard> {
   bool _hover = false;
 
+  /// 手指按下时的缩放反馈。
+  ///
+  /// 手机上点一下海报，从按压到页面推入之间通常有 100~300ms 的空白
+  /// （接口慢时更久）。这段时间里如果卡片毫无变化，用户会怀疑没点上，
+  /// 于是再点一次 —— 结果返回时叠了两层详情页。
+  /// 缩到 0.97 是「能感觉到、又不会让整屏海报跟着抖」的临界值。
+  bool _press = false;
+
   @override
   Widget build(BuildContext context) {
     final drama = widget.drama;
+    // 只有触摸平台做按压缩放：桌面已有 hover 上浮 + 描边，再叠一个
+    // 按下缩放会变成两层反馈，显得手忙脚乱。
+    final plat = Theme.of(context).platform;
+    final touch = !isTv(context) &&
+        (plat == TargetPlatform.android || plat == TargetPlatform.iOS);
+
+    final poster = _posterBox(context);
+    // Hero 只在调用方给了 tag 时启用（见 DramaCard.heroTag 的说明）。
+    final posterWithHero = widget.heroTag.isEmpty
+        ? poster
+        : Hero(
+            tag: widget.heroTag,
+            // Hero 飞行时活在 overlay 里，那里没有 Material 祖先，
+            // 里面的 Text（角标、备注）会渲染成带黄下划线的调试样式。
+            child: Material(
+              type: MaterialType.transparency,
+              child: poster,
+            ),
+          );
+
     final body = MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: GestureDetector(
         onTap: widget.onTap,
-        child: AnimatedContainer(
-          // 尊重系统「减少动态效果」：开了这个设置的用户不该看到整屏海报
-          // 跟着手指上下浮动。
+        onTapDown: touch ? (_) => setState(() => _press = true) : null,
+        onTapUp: touch ? (_) => setState(() => _press = false) : null,
+        onTapCancel: touch ? () => setState(() => _press = false) : null,
+        child: AnimatedScale(
+          scale: _press ? 0.97 : 1.0,
           duration: motionOf(context, Motion.micro),
           curve: Curves.easeOut,
-          // 上浮 3px + 轻微提亮，幅度刻意做小：整屏几十张卡同时放大
-          // 会显得很吵，静止时也更费 GPU。
-          transform: Matrix4.translationValues(0, _hover ? -3 : 0, 0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: AnimatedContainer(
-                  duration: motionOf(context, Motion.micro),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(R.card),
-                    border: Border.all(
-                      color: _hover ? kAccent.withValues(alpha: 0.55) : Colors.transparent,
-                      width: 1.5,
-                    ),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(R.card),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        _poster(),
-                        // 左上角年份角标（TV 版参考图里的「2022」那种）
-                        //
-                        // 只在 TV 加：手机上卡片宽度只有 100 出头，
-                        // 再压一个角标会把海报主体挤得很脏；电视上卡片
-                        // 236 宽，角标占比小，且 3 米外年份是筛选剧集
-                        // 最常用的线索之一。
-                        if (isTv(context) && drama.year > 0)
-                          Positioned(
-                            left: 0,
-                            top: 0,
-                            child: Container(
-                              padding: const EdgeInsets.fromLTRB(7, 3, 8, 4),
-                              decoration: const BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: [Colors.black87, Colors.transparent],
-                                ),
-                              ),
-                              child: Text(
-                                '${drama.year}',
-                                style: const TextStyle(
-                                  fontSize: Ts.bodySm,
-                                  height: 1.1,
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ),
-                        // 右上角来源角标（全局搜索结果用）。手机卡片窄，
-                        // 源名可能很长（如「大师兄 · 暴风」），限宽 + 省略。
-                        if (widget.sourceLabel.isNotEmpty)
-                          Positioned(
-                            right: 0,
-                            top: 0,
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 92),
-                              child: Container(
-                                padding: const EdgeInsets.fromLTRB(6, 3, 7, 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.72),
-                                  borderRadius: const BorderRadius.only(
-                                    bottomLeft: Radius.circular(R.card),
-                                  ),
-                                ),
-                                child: Text(
-                                  widget.sourceLabel,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: Ts.caption,
-                                    height: 1.1,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        // 底部渐变 + 备注
-                        if (drama.remark.isNotEmpty)
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            child: Container(
-                              padding: const EdgeInsets.fromLTRB(6, 12, 6, 5),
-                              decoration: const BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [Colors.transparent, Colors.black87],
-                                ),
-                              ),
-                              child: Text(
-                                drama.remark,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: Ts.caption,
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                drama.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: Ts.body,
-                  fontWeight: FontWeight.w500,
-                  // 原来写死白色系：浅色主题下标题压在浅底上直接消失。
-                  // 改成主题正文色；「悬停变亮」在浅色下表现为变实
-                  // （0.92 → 1.0），方向对但不会白到看不见。
-                  color: _hover
-                      ? context.palette.onSurface
-                      : context.palette.onSurface.withValues(alpha: 0.92),
-                ),
-              ),
-              if (drama.displaySub.isNotEmpty)
+          child: AnimatedContainer(
+            // 尊重系统「减少动态效果」：开了这个设置的用户不该看到整屏海报
+            // 跟着手指上下浮动。
+            duration: motionOf(context, Motion.micro),
+            curve: Curves.easeOut,
+            // 上浮 3px + 轻微提亮，幅度刻意做小：整屏几十张卡同时放大
+            // 会显得很吵，静止时也更费 GPU。
+            transform: Matrix4.translationValues(0, _hover ? -3 : 0, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: posterWithHero),
+                const SizedBox(height: 6),
                 Text(
-                  drama.displaySub,
+                  drama.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: Ts.caption, color: context.palette.textDim),
+                  style: TextStyle(
+                    fontSize: Ts.body,
+                    fontWeight: FontWeight.w500,
+                    // 原来写死白色系：浅色主题下标题压在浅底上直接消失。
+                    // 改成主题正文色；「悬停变亮」在浅色下表现为变实
+                    // （0.92 → 1.0），方向对但不会白到看不见。
+                    color: _hover
+                        ? context.palette.onSurface
+                        : context.palette.onSurface.withValues(alpha: 0.92),
+                  ),
                 ),
-            ],
+                if (drama.displaySub.isNotEmpty)
+                  Text(
+                    drama.displaySub,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: Ts.caption, color: context.palette.textDim),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -229,6 +170,120 @@ class _DramaCardState extends State<DramaCard> {
       radius: R.card,
       onActivate: widget.onTap,
       child: labeled,
+    );
+  }
+
+  /// 海报区块：圆角描边 + 角标 + 备注
+  ///
+  /// 抽成独立方法是为了让 [Hero] 能完整包住「描边 + 角标 + 备注」一整套，
+  /// 而不是只飞一张裸图。只飞图片的话，角标和备注会在落地瞬间「啪」地
+  /// 跳出来，转场反而更廉价。
+  Widget _posterBox(BuildContext context) {
+    final drama = widget.drama;
+    return AnimatedContainer(
+      duration: motionOf(context, Motion.micro),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(R.card),
+        border: Border.all(
+          color: _hover ? kAccent.withValues(alpha: 0.55) : Colors.transparent,
+          width: 1.5,
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(R.card),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            _poster(),
+            // 左上角年份角标（TV 版参考图里的「2022」那种）
+            //
+            // 只在 TV 加：手机上卡片宽度只有 100 出头，
+            // 再压一个角标会把海报主体挤得很脏；电视上卡片
+            // 236 宽，角标占比小，且 3 米外年份是筛选剧集
+            // 最常用的线索之一。
+            if (isTv(context) && drama.year > 0)
+              Positioned(
+                left: 0,
+                top: 0,
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(7, 3, 8, 4),
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Colors.black87, Colors.transparent],
+                    ),
+                  ),
+                  child: Text(
+                    '${drama.year}',
+                    style: const TextStyle(
+                      fontSize: Ts.bodySm,
+                      height: 1.1,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            // 右上角来源角标（全局搜索结果用）。手机卡片窄，
+            // 源名可能很长（如「大师兄 · 暴风」），限宽 + 省略。
+            if (widget.sourceLabel.isNotEmpty)
+              Positioned(
+                right: 0,
+                top: 0,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 92),
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(6, 3, 7, 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.72),
+                      borderRadius: const BorderRadius.only(
+                        bottomLeft: Radius.circular(R.card),
+                      ),
+                    ),
+                    child: Text(
+                      widget.sourceLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: Ts.caption,
+                        height: 1.1,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            // 底部渐变 + 备注
+            if (drama.remark.isNotEmpty)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(6, 12, 6, 5),
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.transparent, Colors.black87],
+                    ),
+                  ),
+                  child: Text(
+                    drama.remark,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: Ts.caption,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -264,6 +319,145 @@ class Loading extends StatelessWidget {
           padding: EdgeInsets.all(32),
           child: CircularProgressIndicator(strokeWidth: 2.4),
         ),
+      );
+}
+
+/// 海报网格骨架屏
+///
+/// ## 为什么不用一个转圈
+///
+/// 影视 App 的首屏等待通常 1~3 秒（橘汁一次列表要 1.2s 左右）。这段时间
+/// 里如果屏幕上只有一个直径 32 的圆圈，用户得到的信息是「它在转」，
+/// 但不知道「转完会出现什么、会不会是一堆海报」。等到内容出现时，
+/// 整屏从空白跳到密排海报，视觉冲击很大，主观上会觉得「更久了」。
+///
+/// 骨架屏把「版式」提前画出来：位置、尺寸、列数都跟真实网格一致，
+/// 数据一到就地填充，没有版式跳跃。这也是主流 App（Netflix / 爱奇艺 /
+/// 豆瓣）在列表页的通用做法。
+///
+/// ## 为什么是整块呼吸而不是逐张 shimmer
+///
+/// 逐张 shimmer 需要每张卡一个 [ShaderMask] + 一个动画控制器，
+/// 一屏十几张就是十几个图层在跑渐变。低端机在首屏这个关键时刻
+/// （同时在建图、解 JSON、发起网络）掉帧最明显。整块透明度呼吸
+/// 只需要一个控制器 + 一次 Opacity 合成，视觉上同样有「在等」的暗示。
+class PosterGridSkeleton extends StatefulWidget {
+  /// 占位卡片数量
+  ///
+  /// 18 是按桌面 6 列 × 3 行取的：手机 3 列只能放下 12 张，
+  /// 多出来的部分被 GridView 懒加载，不会真的 build。
+  final int count;
+
+  final EdgeInsets padding;
+
+  const PosterGridSkeleton({
+    super.key,
+    this.count = 18,
+    this.padding = const EdgeInsets.fromLTRB(12, 8, 12, 16),
+  });
+
+  @override
+  State<PosterGridSkeleton> createState() => _PosterGridSkeletonState();
+}
+
+class _PosterGridSkeletonState extends State<PosterGridSkeleton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = AnimationController(
+      vsync: this,
+      // 1.1 秒一个来回：再快会像故障闪烁，再慢会像卡住了。
+      duration: const Duration(milliseconds: 1100),
+    );
+    // 系统开了「减少动态效果」就不呼吸，静态骨架同样能表达"正在加载"。
+    if (!(WidgetsBinding.instance.platformDispatcher.accessibilityFeatures
+        .disableAnimations)) {
+      _c.repeat(reverse: true);
+    } else {
+      _c.value = 0.5;
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final card = context.palette.card;
+    final tv = isTv(context);
+    return ContentClamp(
+      child: AnimatedBuilder(
+        animation: _c,
+        // child 只建一次：骨架格子的所有颜色都是常量，
+        // 每帧重建 18 个 BoxDecoration 纯属浪费。
+        builder: (c, child) => Opacity(
+          opacity: 0.45 + 0.35 * _c.value,
+          child: child,
+        ),
+        child: GridView.builder(
+          // 骨架不可滚：此时还没有可翻的页，允许拖动只会让用户以为能刷新
+          physics: const NeverScrollableScrollPhysics(),
+          padding: widget.padding,
+          gridDelegate: posterGridDelegate(tv: tv),
+          itemCount: widget.count,
+          itemBuilder: (c, i) => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: card,
+                    borderRadius: BorderRadius.circular(R.card),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              // 标题行：宽度按 index 交替 70%/50%，固定宽度会排成
+              // 一列完全等长的灰条，看起来像表格而不是文章。
+              FractionallySizedBox(
+                widthFactor: i.isEven ? 0.72 : 0.52,
+                child: Container(
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: card,
+                    borderRadius: BorderRadius.circular(R.bar),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 空态 / 错误态的大图标：淡色圆底 + 同色图标
+///
+/// 原来是一个 44px 的灰图标裸放在页面上。灰色圆角图标在深色底上
+/// 对比度只有 3.5:1 左右，扫一眼像「一块脏东西」而不是「这里有个状态」。
+/// 加一层 12% 透明度的同色圆底之后，图标有了明确的边界，
+/// 空屏也从一个「洞」变成一个「卡片」——这是视觉重心的差别。
+class _StateIcon extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  const _StateIcon({required this.icon, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 84,
+        height: 84,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color.withValues(alpha: 0.12),
+        ),
+        child: Icon(icon, color: color, size: 36),
       );
 }
 
@@ -310,9 +504,8 @@ class ErrorView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.cloud_off_rounded, color: context.palette.textDim, size: 44),
-            const SizedBox(height: 12),
-            Text(
+            _StateIcon(icon: Icons.cloud_off_rounded, color: SemColor.danger),
+            const SizedBox(height: 14),            Text(
               message,
               textAlign: TextAlign.center,
               style: TextStyle(color: context.palette.textDim, fontSize: Ts.body),
@@ -389,8 +582,8 @@ class EmptyView extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: context.palette.textDim, size: 44),
-              const SizedBox(height: Sp.md),
+              _StateIcon(icon: icon, color: kAccent),
+              const SizedBox(height: Sp.lg),
               Text(
                 text,
                 textAlign: TextAlign.center,
@@ -417,6 +610,44 @@ class EmptyView extends StatelessWidget {
       );
 }
 
+/// 生成「海报 → 详情页」的 Hero tag
+///
+/// 命名空间（scope）不能省：同一部剧经常同时出现在多个网格里
+/// （首页「推荐」和「电视剧」重合是常态，而 TabBarView 会把相邻页
+/// 留在树上保活），同一个路由里两个 Hero 用同一个 tag 会直接断言失败。
+/// scope 由知道自己是哪一页的调用方给，详情页从同一个 scope 算出
+/// 同一个 tag，两边才对得上。
+String posterHeroTag(String scope, String dramaId) =>
+    scope.isEmpty ? '' : '$scope#$dramaId';
+
+/// 首次出现时的淡入 + 8px 上浮
+///
+/// 数据从骨架屏填进来的那一刻，如果整屏 18 张海报「啪」地同时出现，
+/// 观感是闪屏而不是加载完成。让每张卡各自淡入，视觉上像"依次落位"，
+/// 而且成本很低（Opacity + Transform 各一次）。
+///
+/// 只对**第一次**出现的条目生效（由调用方判断），滚出屏幕再滚回来
+/// 不会重放——那种反复淡入会让人以为列表在自动刷新。
+class AppearFade extends StatelessWidget {
+  final Widget child;
+  const AppearFade({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) return child;
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: Motion.short,
+      curve: Curves.easeOut,
+      builder: (c, t, ch) => Opacity(
+        opacity: t,
+        child: Transform.translate(offset: Offset(0, 8 * (1 - t)), child: ch),
+      ),
+      child: child,
+    );
+  }
+}
+
 /// 分页网格
 ///
 /// 列数不再写死：手机 3 列，宽屏自动增加到 6~10 列。
@@ -424,7 +655,13 @@ class EmptyView extends StatelessWidget {
 /// 图糊、行数少、大片留白——一眼就是「手机 App 被强行拉宽」。
 class PagedGrid extends StatefulWidget {
   final Future<List<Drama>> Function(int page) loader;
-  final void Function(Drama) onTap;
+
+  /// 点击回调。第二个参数是本卡的 Hero tag（[posterHeroTag] 生成），
+  /// 调用方原样传给 DetailPage 即可；不做 Hero 时忽略。
+  final void Function(Drama drama, String heroTag) onTap;
+
+  /// Hero 命名空间。空串 = 不启用海报转场。
+  final String heroScope;
   final EdgeInsets padding;
   final double aspect;
 
@@ -466,6 +703,7 @@ class PagedGrid extends StatefulWidget {
     super.key,
     required this.loader,
     required this.onTap,
+    this.heroScope = '',
     this.padding = const EdgeInsets.fromLTRB(12, 8, 12, 16),
     this.aspect = 0.56,
     this.autoFocusFirst = false,
@@ -490,6 +728,9 @@ class PagedGridState extends State<PagedGrid>
   /// 已出现过的剧集 id。接口翻页偶尔会重复吐同一部剧，
   /// 不去的重复卡片：同一张海报在一屏里出现两次，看着像 bug。
   final _seen = <String>{};
+
+  /// 已经播过入场动画的条目。滚出屏幕再滚回来不重放淡入。
+  final _appeared = <String>{};
 
   final _scroll = ScrollController();
   int _page = 1;
@@ -573,6 +814,7 @@ class PagedGridState extends State<PagedGrid>
     setState(() {
       _items.clear();
       _seen.clear();
+      _appeared.clear();
       _page = 1;
       _end = false;
       _loading = false;
@@ -592,7 +834,8 @@ class PagedGridState extends State<PagedGrid>
     // AutomaticKeepAliveClientMixin 要求必须调用，否则保活不生效
     super.build(context);
     if (_items.isEmpty) {
-      if (_loading) return const Loading();
+      // 骨架屏顶替转圈：版式先画出来，数据到了就地填充，不跳版。
+      if (_loading) return PosterGridSkeleton(padding: widget.padding);
       if (_err != null) {
         return ErrorView(
           message: _err!,
@@ -653,14 +896,19 @@ class PagedGridState extends State<PagedGrid>
               );
             }
             final d = _items[i];
-            return DramaCard(
+            final tag = posterHeroTag(widget.heroScope, d.id);
+            final card = DramaCard(
               drama: d,
-              onTap: () => widget.onTap(d),
+              heroTag: tag,
+              onTap: () => widget.onTap(d, tag),
               // 只有外层明确指定时才给第一张卡初始焦点。
               // 见 PagedGrid.autoFocusFirst 的说明：多个网格同时
               // autofocus 会互相抢焦点。
               autofocus: tv && widget.autoFocusFirst && i == 0,
             );
+            // 只在首次出现时播入场动画；滚回来不重放
+            if (!_appeared.add(d.id)) return card;
+            return AppearFade(key: ValueKey('appear-${d.id}'), child: card);
           },
         ),
       ),

@@ -177,7 +177,7 @@ class _HomePageState extends State<HomePage>
     super.dispose();
   }
 
-  void _open(Drama d) {
+  void _open(Drama d, [String heroTag = '']) {
     // 按条目自己的来源打开详情：用户可能刚切了源，但列表里这张卡
     // 还是旧源的结果，用「当前源」去查必然 404。
     Navigator.of(context).push(MaterialPageRoute(
@@ -185,6 +185,10 @@ class _HomePageState extends State<HomePage>
         dramaId: d.id,
         title: d.name,
         sourceId: d.sourceId.isEmpty ? SourceRegistry.instance.now.id : d.sourceId,
+        // 海报共享元素转场：tag 由列表页算好后透传（见 posterHeroTag），
+        // initialCover 让详情页首帧就有图可落，Hero 不会飞向空白框。
+        heroTag: heroTag,
+        initialCover: d.cover.best,
       ),
     ));
   }
@@ -254,6 +258,9 @@ class _HomePageState extends State<HomePage>
       key: key,
       loader: (p) => _loader(i, p),
       onTap: _open,
+      // 每个 Tab 一个独立命名空间：推荐和分类页会收录同一部剧，
+      // 而 TabBarView 会把相邻页保活，同 tag 会让 Hero 断言失败。
+      heroScope: 'home-$i',
       autoFocusFirst: i == _tabIndex,
       padding: padding,
       errorAction: errorAction,
@@ -1018,29 +1025,35 @@ class _SearchPageState extends State<SearchPage> {
                                 itemCount: visible.length,
                                 itemBuilder: (c, i) {
                                   final d = visible[i];
+                                  // 每条结果都带自己的 sourceId，
+                                  // 回详情打回对应源
+                                  final srcId = d.sourceId.isEmpty
+                                      ? (_selectedSourceId.isEmpty
+                                          ? SourceRegistry.instance.now.id
+                                          : _selectedSourceId)
+                                      : d.sourceId;
+                                  // tag 里必须带上 sourceId：搜索「全部」是
+                                  // 多源混合，不同源的 id 可能撞号（都是数字 id），
+                                  // 只用 id 做 tag 会在两个源都命中时冲突。
+                                  final tag =
+                                      posterHeroTag('search', '$srcId|${d.id}');
                                   return DramaCard(
                                     drama: d,
+                                    heroTag: tag,
                                     // 按用户要求，单源页**也保留**来源角标。
                                     // 全部页必须标（混着 19 个源）；
                                     // 单源页虽只有一个源，但角标同时也提示了
                                     // 「这条走哪个源取详情」，保持一致更省心。
-                                    sourceLabel: _sourceLabel(
-                                        d.sourceId.isEmpty
-                                            ? _selectedSourceId
-                                            : d.sourceId),
+                                    sourceLabel: _sourceLabel(srcId),
                                     onTap: () =>
                                         Navigator.of(context).push(
                                             MaterialPageRoute(
                                       builder: (_) => DetailPage(
                                         dramaId: d.id,
                                         title: d.name,
-                                        // 每条结果都带自己的 sourceId，
-                                        // 回详情打回对应源
-                                        sourceId: d.sourceId.isEmpty
-                                            ? (_selectedSourceId.isEmpty
-                                                ? SourceRegistry.instance.now.id
-                                                : _selectedSourceId)
-                                            : d.sourceId,
+                                        sourceId: srcId,
+                                        heroTag: tag,
+                                        initialCover: d.cover.best,
                                       ),
                                     )),
                                     // 网格第一张拿焦点；左栏 autofocus 会先抢到，

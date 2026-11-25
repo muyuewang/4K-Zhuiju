@@ -214,10 +214,12 @@ class _LogRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     // 只给错误/警告上色。全部着色等于没着色 —— 一眼扫不到异常。
+    // 颜色取自 [SemColor]：这套色现在也被错误页、删除确认框复用，
+    // 不能再在页面里另挑一个「差不多的红」。
     final color = switch (entry.level) {
-      'E' => const Color(0xFFFF6B6B),
-      'W' => const Color(0xFFFFB020),
-      'I' => const Color(0xFF64B5F6),
+      'E' => SemColor.danger,
+      'W' => SemColor.warning,
+      'I' => SemColor.info,
       _ => p.textDim,
     };
 

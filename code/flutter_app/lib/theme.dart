@@ -25,6 +25,25 @@ const Color kAccent = Color(0xFFFF6B3D);
 /// 图标直接糊成一片。底部导航选中态、角标数字都用它。
 const Color kOnAccent = Color(0xFF0E0F13);
 
+/// 语义色：错误 / 警告 / 提示
+///
+/// 这三个值原本只存在于 `log_page.dart` 里，是当时顺手挑的三个色。
+/// 问题是「错误红」这类颜色一旦散落，第二天加个删除确认框就会重新挑一个
+/// 略有差别的红，攒到第五个红就没人能说清哪个才是「真错误」了。
+///
+/// 三个值都刻意选了中等明度：既要压在深色底（#0E0F13）上够亮，
+/// 又要压在浅色卡片（#FFFFFF）上不刺眼，所以不用纯 #FF0000 / #00FF00。
+abstract final class SemColor {
+  /// 错误、失败、危险操作
+  static const Color danger = Color(0xFFFF6B6B);
+
+  /// 警告、降级、非致命异常
+  static const Color warning = Color(0xFFFFB020);
+
+  /// 提示、信息、链接
+  static const Color info = Color(0xFF64B5F6);
+}
+
 /// 视频区固定色（永远深色，**不随主题变**）
 ///
 /// 播放页、进度条、弹幕层只准用这三个常量，不要用 [AppPalette]。
@@ -138,6 +157,48 @@ extension AppPaletteX on BuildContext {
   AppPalette get palette => AppPalette.of(this);
 }
 
+/// 桌面端页面转场：淡入 + 2% 位移
+///
+/// Flutter 在 Windows/Linux 上默认用 [ZoomPageTransitionsBuilder]，
+/// 那是为手机（有明确「进入子页面」的层级感）设计的大幅缩放。
+/// 在一个可以随手拉宽的桌面窗口里，整页从 0.85 缩到 1 会显得像弹窗，
+/// 而且 300ms 对鼠标点击来说偏拖沓 —— 桌面用户点完就想看到内容。
+///
+/// 这里换成 2% 的上浮 + 淡入：既能表达「新页面进来了」，
+/// 又不会让整屏文字跟着缩放（Windows 上缩放文字会短暂重排，肉眼可见抖动）。
+class DesktopFadeTransitionsBuilder extends PageTransitionsBuilder {
+  const DesktopFadeTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    // 系统开了「减少动态效果」就只做淡入，不做位移。
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+      return FadeTransition(opacity: animation, child: child);
+    }
+    final curved = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    return FadeTransition(
+      opacity: curved,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.02),
+          end: Offset.zero,
+        ).animate(curved),
+        child: child,
+      ),
+    );
+  }
+}
+
 /// 构建指定明暗的完整主题
 ThemeData buildTheme(Brightness brightness) {
   final p = brightness == Brightness.dark ? AppPalette.dark : AppPalette.light;
@@ -194,6 +255,17 @@ ThemeData buildTheme(Brightness brightness) {
     ),
     dialogTheme: DialogThemeData(backgroundColor: p.card),
     listTileTheme: ListTileThemeData(iconColor: p.textDim),
+    // 平台差异化转场：手机保留 Material 默认的层级感，桌面换成轻量淡入。
+    // 桌面用户对「整页缩放」特别敏感（窗口本来就在动），换成位移更自然。
+    // 没列出的平台（Android/iOS）走 PageTransitionsTheme 的内置默认值，
+    // 不去覆盖 —— 手机上那套缩放/侧滑手势是用户预期的，改了反而别扭。
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: <TargetPlatform, PageTransitionsBuilder>{
+        TargetPlatform.windows: DesktopFadeTransitionsBuilder(),
+        TargetPlatform.linux: DesktopFadeTransitionsBuilder(),
+        TargetPlatform.macOS: DesktopFadeTransitionsBuilder(),
+      },
+    ),
     // 放最后：copyWith 里 extensions 会整体替换，
     // 前面若有别的扩展也要一起列进来。
     extensions: <ThemeExtension<dynamic>>[p],
